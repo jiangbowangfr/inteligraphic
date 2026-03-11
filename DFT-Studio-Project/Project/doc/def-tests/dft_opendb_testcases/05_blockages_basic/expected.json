@@ -1,0 +1,76 @@
+{
+  "units": {
+    "lef_dbu_per_micron": 1000,
+    "def_units_distance_microns": 1000
+  },
+  "die_bbox": {
+    "xMin": 0,
+    "yMin": 0,
+    "xMax": 1000,
+    "yMax": 1000
+  },
+  "masters": [
+    {
+      "name": "CORE",
+      "w": 80,
+      "h": 80
+    },
+    {
+      "name": "MEM",
+      "w": 200,
+      "h": 120
+    }
+  ],
+  "instances": [
+    {
+      "inst": "u_core0",
+      "master": "CORE",
+      "origin": {
+        "x": 100,
+        "y": 100
+      },
+      "orient": "N",
+      "placement": "PLACED",
+      "region": null
+    },
+    {
+      "inst": "u_mem0",
+      "master": "MEM",
+      "origin": {
+        "x": 700,
+        "y": 600
+      },
+      "orient": "N",
+      "placement": "PLACED",
+      "region": null
+    }
+  ],
+  "regions": [],
+  "blockages": [
+    {
+      "rect": [
+        300,
+        300,
+        500,
+        500
+      ]
+    },
+    {
+      "rect": [
+        600,
+        100,
+        850,
+        250
+      ]
+    },
+    {
+      "rect": [
+        100,
+        700,
+        400,
+        900
+      ]
+    }
+  ],
+  "pins": []
+}

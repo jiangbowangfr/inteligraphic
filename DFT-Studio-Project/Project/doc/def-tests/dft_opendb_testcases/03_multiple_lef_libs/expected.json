@@ -1,0 +1,83 @@
+{
+  "units": {
+    "lef_dbu_per_micron": 1000,
+    "def_units_distance_microns": 1000
+  },
+  "die_bbox": {
+    "xMin": 0,
+    "yMin": 0,
+    "xMax": 1200,
+    "yMax": 800
+  },
+  "masters": [
+    {
+      "name": "A1",
+      "w": 50,
+      "h": 40
+    },
+    {
+      "name": "A2",
+      "w": 70,
+      "h": 20
+    },
+    {
+      "name": "B1",
+      "w": 90,
+      "h": 90
+    },
+    {
+      "name": "B2",
+      "w": 110,
+      "h": 30
+    }
+  ],
+  "instances": [
+    {
+      "inst": "ua1",
+      "master": "A1",
+      "origin": {
+        "x": 100,
+        "y": 100
+      },
+      "orient": "N",
+      "placement": "PLACED",
+      "region": null
+    },
+    {
+      "inst": "ua2",
+      "master": "A2",
+      "origin": {
+        "x": 200,
+        "y": 300
+      },
+      "orient": "N",
+      "placement": "PLACED",
+      "region": null
+    },
+    {
+      "inst": "ub1",
+      "master": "B1",
+      "origin": {
+        "x": 500,
+        "y": 100
+      },
+      "orient": "N",
+      "placement": "PLACED",
+      "region": null
+    },
+    {
+      "inst": "ub2",
+      "master": "B2",
+      "origin": {
+        "x": 700,
+        "y": 250
+      },
+      "orient": "N",
+      "placement": "PLACED",
+      "region": null
+    }
+  ],
+  "regions": [],
+  "blockages": [],
+  "pins": []
+}

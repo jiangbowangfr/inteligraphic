@@ -1,0 +1,15 @@
+{
+  "dbu_per_micron": 1000,
+  "die": {"xMin": 0, "yMin": 0, "xMax": 1000, "yMax": 1000},
+  "masters": [
+    {"name": "CORE", "bbox": {"xMin": 0, "yMin": 0, "xMax": 80000, "yMax": 80000}},
+    {"name": "MEM", "bbox": {"xMin": 0, "yMin": 0, "xMax": 200000, "yMax": 120000}}
+  ],
+  "instances": [
+    {"name": "u_core0", "master": "CORE", "origin": {"x": 100, "y": 100}, "orient": "N", "placement": "PLACED", "region": null, "bbox": {"xMin": 100, "yMin": 100, "xMax": 80100, "yMax": 80100}},
+    {"name": "u_mem0", "master": "MEM", "origin": {"x": 700, "y": 600}, "orient": "N", "placement": "PLACED", "region": null, "bbox": {"xMin": 700, "yMin": 600, "xMax": 200700, "yMax": 120600}}
+  ],
+  "regions": [
+
+  ]
+}

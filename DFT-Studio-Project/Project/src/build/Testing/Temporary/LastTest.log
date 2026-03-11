@@ -1,0 +1,121 @@
+Start testing: Mar 11 07:59 CST
+----------------------------------------------------------
+1/2 Testing: test_import_and_traverse
+1/2 Test: test_import_and_traverse
+Command: "/home/mingzhejiang/Projects/github/OpenROAD/DFT-Studio-Project/Project/src/build/tests/test_import_and_traverse"
+Directory: /home/mingzhejiang/Projects/github/OpenROAD/DFT-Studio-Project/Project/src/build/tests
+"test_import_and_traverse" start time: Mar 11 07:59 CST
+Output:
+----------------------------------------------------------
+Running main() from ./googletest/src/gtest_main.cc
+[==========] Running 14 tests from 2 test suites.
+[----------] Global test environment set-up.
+[----------] 13 tests from ImportTraverseTest
+[INFO ODB-0227] LEF file: /home/mingzhejiang/Projects/github/OpenROAD/DFT-Studio-Project/Project/src/tests/data/min.lef, created 2 library cells
+[INFO ODB-0127] Reading DEF file: /home/mingzhejiang/Projects/github/OpenROAD/DFT-Studio-Project/Project/src/tests/data/min.def
+[INFO ODB-0128] Design: top
+[INFO ODB-0131]     Created 2 components and 0 component-terminals.
+[INFO ODB-0134] Finished DEF file: /home/mingzhejiang/Projects/github/OpenROAD/DFT-Studio-Project/Project/src/tests/data/min.def
+[ RUN      ] ImportTraverseTest.HandleIsValid
+[       OK ] ImportTraverseTest.HandleIsValid (0 ms)
+[ RUN      ] ImportTraverseTest.DbuPerMicron
+[       OK ] ImportTraverseTest.DbuPerMicron (0 ms)
+[ RUN      ] ImportTraverseTest.DieArea
+[       OK ] ImportTraverseTest.DieArea (0 ms)
+[ RUN      ] ImportTraverseTest.MasterCount
+[       OK ] ImportTraverseTest.MasterCount (0 ms)
+[ RUN      ] ImportTraverseTest.MasterOrderAndSize
+[       OK ] ImportTraverseTest.MasterOrderAndSize (0 ms)
+[ RUN      ] ImportTraverseTest.MasterEarlyExit
+[       OK ] ImportTraverseTest.MasterEarlyExit (0 ms)
+[ RUN      ] ImportTraverseTest.InstanceCount
+[       OK ] ImportTraverseTest.InstanceCount (0 ms)
+[ RUN      ] ImportTraverseTest.InstanceNamesAndMasters
+[       OK ] ImportTraverseTest.InstanceNamesAndMasters (0 ms)
+[ RUN      ] ImportTraverseTest.InstanceOrigins
+[       OK ] ImportTraverseTest.InstanceOrigins (0 ms)
+[ RUN      ] ImportTraverseTest.InstanceBoundingBoxes
+[       OK ] ImportTraverseTest.InstanceBoundingBoxes (0 ms)
+[ RUN      ] ImportTraverseTest.InstanceOrientations
+[       OK ] ImportTraverseTest.InstanceOrientations (0 ms)
+[ RUN      ] ImportTraverseTest.InstanceEarlyExit
+[       OK ] ImportTraverseTest.InstanceEarlyExit (0 ms)
+[ RUN      ] ImportTraverseTest.TraverserFromConstHandle
+[       OK ] ImportTraverseTest.TraverserFromConstHandle (0 ms)
+[----------] 13 tests from ImportTraverseTest (0 ms total)
+
+[----------] 1 test from OrientationsTest
+[INFO ODB-0227] LEF file: /home/mingzhejiang/Projects/github/OpenROAD/DFT-Studio-Project/Project/src/tests/../../doc/def-tests/dft_opendb_testcases/02_orientations_8cases/tech.lef, created 2 layers
+[INFO ODB-0227] LEF file: /home/mingzhejiang/Projects/github/OpenROAD/DFT-Studio-Project/Project/src/tests/../../doc/def-tests/dft_opendb_testcases/02_orientations_8cases/lib.lef, created 2 library cells
+[INFO ODB-0127] Reading DEF file: /home/mingzhejiang/Projects/github/OpenROAD/DFT-Studio-Project/Project/src/tests/../../doc/def-tests/dft_opendb_testcases/02_orientations_8cases/design.def
+[INFO ODB-0128] Design: TOP
+[INFO ODB-0131]     Created 8 components and 0 component-terminals.
+[INFO ODB-0134] Finished DEF file: /home/mingzhejiang/Projects/github/OpenROAD/DFT-Studio-Project/Project/src/tests/../../doc/def-tests/dft_opendb_testcases/02_orientations_8cases/design.def
+[ RUN      ] OrientationsTest.AllEightOrientations
+[       OK ] OrientationsTest.AllEightOrientations (0 ms)
+[----------] 1 test from OrientationsTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 14 tests from 2 test suites ran. (17 ms total)
+[  PASSED  ] 14 tests.
+<end of output>
+Test time =   0.03 sec
+----------------------------------------------------------
+Test Passed.
+"test_import_and_traverse" end time: Mar 11 07:59 CST
+"test_import_and_traverse" time elapsed: 00:00:00
+----------------------------------------------------------
+
+2/2 Testing: test_negative_inputs
+2/2 Test: test_negative_inputs
+Command: "/home/mingzhejiang/Projects/github/OpenROAD/DFT-Studio-Project/Project/src/build/tests/test_negative_inputs"
+Directory: /home/mingzhejiang/Projects/github/OpenROAD/DFT-Studio-Project/Project/src/build/tests
+"test_negative_inputs" start time: Mar 11 07:59 CST
+Output:
+----------------------------------------------------------
+Running main() from ./googletest/src/gtest_main.cc
+[==========] Running 6 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 6 tests from NegativeInputs
+[ RUN      ] NegativeInputs.MissingLefFile
+[WARNING ODB-0240] error: Cannot open LEF file /nonexistent/path/missing.lef
+[INFO ODB-0227] LEF file: /nonexistent/path/missing.lef
+[ERROR ODB-0289] LEF data from /nonexistent/path/missing.lef is discarded due to errors
+[       OK ] NegativeInputs.MissingLefFile (9 ms)
+[ RUN      ] NegativeInputs.MissingDefFile
+[INFO ODB-0227] LEF file: /home/mingzhejiang/Projects/github/OpenROAD/DFT-Studio-Project/Project/src/tests/data/min.lef, created 2 library cells
+[       OK ] NegativeInputs.MissingDefFile (2 ms)
+[ RUN      ] NegativeInputs.EmptyLefFileList
+[       OK ] NegativeInputs.EmptyLefFileList (0 ms)
+[ RUN      ] NegativeInputs.MalformedLef
+[WARNING ODB-0219] Error: ERROR (LEFPARS-1): Lef parser has encountered an error in file /home/mingzhejiang/Projects/github/OpenROAD/DFT-Studio-Project/Project/src/tests/data/malformed.lef at line 1, on token THIS.
+Problem can be syntax error on the lef file or an invalid parameter name.
+Double check the syntax on the lef file with the LEFDEF Reference Manual.
+
+[INFO ODB-0227] LEF file: /home/mingzhejiang/Projects/github/OpenROAD/DFT-Studio-Project/Project/src/tests/data/malformed.lef
+[ERROR ODB-0289] LEF data from /home/mingzhejiang/Projects/github/OpenROAD/DFT-Studio-Project/Project/src/tests/data/malformed.lef is discarded due to errors
+[       OK ] NegativeInputs.MalformedLef (1 ms)
+[ RUN      ] NegativeInputs.EmptyDef
+[INFO ODB-0227] LEF file: /home/mingzhejiang/Projects/github/OpenROAD/DFT-Studio-Project/Project/src/tests/data/min.lef, created 2 library cells
+[INFO ODB-0127] Reading DEF file: /home/mingzhejiang/Projects/github/OpenROAD/DFT-Studio-Project/Project/src/tests/data/empty.def
+[WARNING ODB-0003] ERROR (DEFPARS-6002): Incomplete def file. Error in file /home/mingzhejiang/Projects/github/OpenROAD/DFT-Studio-Project/Project/src/tests/data/empty.def at line 1, on token <unprintable>.
+Update the def file before parsing the file again.
+
+[ERROR ODB-0421] DEF parser returns an error!
+[       OK ] NegativeInputs.EmptyDef (1 ms)
+[ RUN      ] NegativeInputs.DefaultConstructedHandleIsInvalid
+[       OK ] NegativeInputs.DefaultConstructedHandleIsInvalid (0 ms)
+[----------] 6 tests from NegativeInputs (15 ms total)
+
+[----------] Global test environment tear-down
+[==========] 6 tests from 1 test suite ran. (15 ms total)
+[  PASSED  ] 6 tests.
+<end of output>
+Test time =   0.02 sec
+----------------------------------------------------------
+Test Passed.
+"test_negative_inputs" end time: Mar 11 07:59 CST
+"test_negative_inputs" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Mar 11 07:59 CST

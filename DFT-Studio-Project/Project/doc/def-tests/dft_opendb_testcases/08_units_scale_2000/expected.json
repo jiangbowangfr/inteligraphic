@@ -1,0 +1,51 @@
+{
+  "units": {
+    "lef_dbu_per_micron": 2000,
+    "def_units_distance_microns": 2000
+  },
+  "die_bbox": {
+    "xMin": 0,
+    "yMin": 0,
+    "xMax": 2000,
+    "yMax": 2000
+  },
+  "masters": [
+    {
+      "name": "U8A",
+      "w": 200,
+      "h": 100
+    },
+    {
+      "name": "U8B",
+      "w": 60,
+      "h": 60
+    }
+  ],
+  "instances": [
+    {
+      "inst": "u8a0",
+      "master": "U8A",
+      "origin": {
+        "x": 200,
+        "y": 300
+      },
+      "orient": "N",
+      "placement": "PLACED",
+      "region": null
+    },
+    {
+      "inst": "u8b0",
+      "master": "U8B",
+      "origin": {
+        "x": 800,
+        "y": 900
+      },
+      "orient": "N",
+      "placement": "PLACED",
+      "region": null
+    }
+  ],
+  "regions": [],
+  "blockages": [],
+  "pins": []
+}

@@ -1,0 +1,222 @@
+{
+  "units": {
+    "lef_dbu_per_micron": 1000,
+    "def_units_distance_microns": 1000
+  },
+  "die_bbox": {
+    "xMin": 0,
+    "yMin": 0,
+    "xMax": 600,
+    "yMax": 600
+  },
+  "masters": [
+    {
+      "name": "T10",
+      "w": 30,
+      "h": 30
+    }
+  ],
+  "instances": [
+    {
+      "inst": "u01",
+      "master": "T10",
+      "origin": {
+        "x": 100,
+        "y": 100
+      },
+      "orient": "E",
+      "placement": "PLACED",
+      "region": null
+    },
+    {
+      "inst": "u02",
+      "master": "T10",
+      "origin": {
+        "x": 200,
+        "y": 100
+      },
+      "orient": "S",
+      "placement": "PLACED",
+      "region": null
+    },
+    {
+      "inst": "u03",
+      "master": "T10",
+      "origin": {
+        "x": 300,
+        "y": 100
+      },
+      "orient": "W",
+      "placement": "PLACED",
+      "region": null
+    },
+    {
+      "inst": "u04",
+      "master": "T10",
+      "origin": {
+        "x": 400,
+        "y": 100
+      },
+      "orient": "N",
+      "placement": "PLACED",
+      "region": null
+    },
+    {
+      "inst": "u05",
+      "master": "T10",
+      "origin": {
+        "x": 100,
+        "y": 200
+      },
+      "orient": "E",
+      "placement": "PLACED",
+      "region": null
+    },
+    {
+      "inst": "u06",
+      "master": "T10",
+      "origin": {
+        "x": 200,
+        "y": 200
+      },
+      "orient": "S",
+      "placement": "PLACED",
+      "region": null
+    },
+    {
+      "inst": "u07",
+      "master": "T10",
+      "origin": {
+        "x": 300,
+        "y": 200
+      },
+      "orient": "W",
+      "placement": "PLACED",
+      "region": null
+    },
+    {
+      "inst": "u08",
+      "master": "T10",
+      "origin": {
+        "x": 400,
+        "y": 200
+      },
+      "orient": "N",
+      "placement": "PLACED",
+      "region": null
+    },
+    {
+      "inst": "u09",
+      "master": "T10",
+      "origin": {
+        "x": 100,
+        "y": 300
+      },
+      "orient": "E",
+      "placement": "PLACED",
+      "region": null
+    },
+    {
+      "inst": "u10",
+      "master": "T10",
+      "origin": {
+        "x": 200,
+        "y": 300
+      },
+      "orient": "S",
+      "placement": "PLACED",
+      "region": null
+    },
+    {
+      "inst": "u11",
+      "master": "T10",
+      "origin": {
+        "x": 300,
+        "y": 300
+      },
+      "orient": "W",
+      "placement": "PLACED",
+      "region": null
+    },
+    {
+      "inst": "u12",
+      "master": "T10",
+      "origin": {
+        "x": 400,
+        "y": 300
+      },
+      "orient": "N",
+      "placement": "PLACED",
+      "region": null
+    },
+    {
+      "inst": "u13",
+      "master": "T10",
+      "origin": {
+        "x": 100,
+        "y": 400
+      },
+      "orient": "E",
+      "placement": "PLACED",
+      "region": null
+    },
+    {
+      "inst": "u14",
+      "master": "T10",
+      "origin": {
+        "x": 200,
+        "y": 400
+      },
+      "orient": "S",
+      "placement": "PLACED",
+      "region": null
+    },
+    {
+      "inst": "u15",
+      "master": "T10",
+      "origin": {
+        "x": 300,
+        "y": 400
+      },
+      "orient": "W",
+      "placement": "PLACED",
+      "region": null
+    },
+    {
+      "inst": "u16",
+      "master": "T10",
+      "origin": {
+        "x": 400,
+        "y": 400
+      },
+      "orient": "N",
+      "placement": "PLACED",
+      "region": null
+    }
+  ],
+  "regions": [
+    {
+      "name": "GRID",
+      "rects": [
+        [
+          50,
+          50,
+          500,
+          500
+        ]
+      ]
+    }
+  ],
+  "blockages": [],
+  "pins": [
+    {
+      "name": "PIN0",
+      "net": "N_PIN0",
+      "dir": "INPUT",
+      "use": "SIGNAL",
+      "x": 0,
+      "y": 250,
+      "layer": "metal1"
+    }
+  ]
+}

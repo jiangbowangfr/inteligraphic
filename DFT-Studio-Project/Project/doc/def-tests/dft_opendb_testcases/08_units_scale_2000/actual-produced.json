@@ -1,0 +1,15 @@
+{
+  "dbu_per_micron": 2000,
+  "die": {"xMin": 0, "yMin": 0, "xMax": 2000, "yMax": 2000},
+  "masters": [
+    {"name": "U8A", "bbox": {"xMin": 0, "yMin": 0, "xMax": 400000, "yMax": 200000}},
+    {"name": "U8B", "bbox": {"xMin": 0, "yMin": 0, "xMax": 120000, "yMax": 120000}}
+  ],
+  "instances": [
+    {"name": "u8a0", "master": "U8A", "origin": {"x": 200, "y": 300}, "orient": "N", "placement": "PLACED", "region": null, "bbox": {"xMin": 200, "yMin": 300, "xMax": 400200, "yMax": 200300}},
+    {"name": "u8b0", "master": "U8B", "origin": {"x": 800, "y": 900}, "orient": "N", "placement": "PLACED", "region": null, "bbox": {"xMin": 800, "yMin": 900, "xMax": 120800, "yMax": 120900}}
+  ],
+  "regions": [
+
+  ]
+}

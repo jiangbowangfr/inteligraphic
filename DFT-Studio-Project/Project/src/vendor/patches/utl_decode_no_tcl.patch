@@ -1,0 +1,46 @@
+--- /home/mingzhejiang/Projects/github/OpenROAD/src/utl/src/decode.cpp	2026-03-05 07:38:50.907490986 +0800
++++ /home/mingzhejiang/Projects/github/OpenROAD/DFT-Studio-Project/Project/src/vendor/utl/src/decode.cpp	2026-03-10 18:56:40.439134277 +0800
+@@ -32,7 +32,9 @@
+ #include <cstdlib>
+ #include <string>
+ 
++#ifndef DFTODB_NO_TCL
+ #include "tcl.h"
++#endif
+ 
+ namespace utl {
+ 
+@@ -115,6 +117,7 @@
+   return base64_decode(reassemble(encoded_strings));
+ }
+ 
++#ifndef DFTODB_NO_TCL
+ void evalTclInit(Tcl_Interp* interp, const char* inits[])
+ {
+   std::string unencoded = base64_decode(inits);
+@@ -128,5 +131,6 @@
+   }
+   Tcl_DecrRefCount(obj);
+ }
++#endif  // DFTODB_NO_TCL
+ 
+ }  // namespace utl
+--- /home/mingzhejiang/Projects/github/OpenROAD/src/utl/include/utl/decode.h	2026-03-05 07:38:50.907490986 +0800
++++ /home/mingzhejiang/Projects/github/OpenROAD/DFT-Studio-Project/Project/src/vendor/utl/include/utl/decode.h	2026-03-10 18:56:51.181556825 +0800
+@@ -5,13 +5,14 @@
+ 
+ #include <string>
+ 
+-struct Tcl_Interp;
+-
+ namespace utl {
+ 
+ std::string base64_decode(const std::string& encoded_string);
+ std::string base64_decode(const char* encoded_strings[]);
+ 
++#ifndef DFTODB_NO_TCL
++struct Tcl_Interp;
+ void evalTclInit(Tcl_Interp* interp, const char* inits[]);
++#endif
+ 
+ }  // namespace utl

@@ -1,0 +1,2 @@
+/usr/bin/ar qc liblefzlib.a CMakeFiles/lefzlib.dir/odb/src/lef/lefzlib/lefzlib.cpp.o
+/usr/bin/ranlib liblefzlib.a

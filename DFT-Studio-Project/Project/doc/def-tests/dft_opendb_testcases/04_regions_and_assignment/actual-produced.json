@@ -1,0 +1,18 @@
+{
+  "dbu_per_micron": 1000,
+  "die": {"xMin": 0, "yMin": 0, "xMax": 1000, "yMax": 1000},
+  "masters": [
+    {"name": "BLK", "bbox": {"xMin": 0, "yMin": 0, "xMax": 120000, "yMax": 120000}},
+    {"name": "TILE", "bbox": {"xMin": 0, "yMin": 0, "xMax": 60000, "yMax": 40000}}
+  ],
+  "instances": [
+    {"name": "u_left0", "master": "TILE", "origin": {"x": 100, "y": 100}, "orient": "N", "placement": "PLACED", "region": "R_LEFT", "bbox": {"xMin": 100, "yMin": 100, "xMax": 60100, "yMax": 40100}},
+    {"name": "u_left1", "master": "BLK", "origin": {"x": 200, "y": 600}, "orient": "N", "placement": "PLACED", "region": "R_LEFT", "bbox": {"xMin": 200, "yMin": 600, "xMax": 120200, "yMax": 120600}},
+    {"name": "u_right0", "master": "TILE", "origin": {"x": 700, "y": 100}, "orient": "N", "placement": "PLACED", "region": "R_RIGHT", "bbox": {"xMin": 700, "yMin": 100, "xMax": 60700, "yMax": 40100}},
+    {"name": "u_right1", "master": "BLK", "origin": {"x": 600, "y": 600}, "orient": "N", "placement": "PLACED", "region": "R_RIGHT", "bbox": {"xMin": 600, "yMin": 600, "xMax": 120600, "yMax": 120600}}
+  ],
+  "regions": [
+    {"name": "R_LEFT", "rects": [{"xMin": 0, "yMin": 0, "xMax": 500, "yMax": 1000}]},
+    {"name": "R_RIGHT", "rects": [{"xMin": 500, "yMin": 0, "xMax": 1000, "yMax": 1000}]}
+  ]
+}

@@ -1,0 +1,2 @@
+/usr/bin/ar qc libdefout.a CMakeFiles/defout.dir/odb/src/defout/defout.cpp.o CMakeFiles/defout.dir/odb/src/defout/defout_impl.cpp.o
+/usr/bin/ranlib libdefout.a

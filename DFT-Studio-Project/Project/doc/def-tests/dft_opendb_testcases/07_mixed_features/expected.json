@@ -1,0 +1,137 @@
+{
+  "units": {
+    "lef_dbu_per_micron": 1000,
+    "def_units_distance_microns": 1000
+  },
+  "die_bbox": {
+    "xMin": 0,
+    "yMin": 0,
+    "xMax": 1200,
+    "yMax": 1200
+  },
+  "masters": [
+    {
+      "name": "DSP",
+      "w": 160,
+      "h": 100
+    },
+    {
+      "name": "SRAM",
+      "w": 250,
+      "h": 180
+    },
+    {
+      "name": "CTRL",
+      "w": 80,
+      "h": 50
+    }
+  ],
+  "instances": [
+    {
+      "inst": "u_dsp",
+      "master": "DSP",
+      "origin": {
+        "x": 100,
+        "y": 700
+      },
+      "orient": "N",
+      "placement": "PLACED",
+      "region": "R_TOP"
+    },
+    {
+      "inst": "u_sram",
+      "master": "SRAM",
+      "origin": {
+        "x": 700,
+        "y": 650
+      },
+      "orient": "N",
+      "placement": "FIXED",
+      "region": "R_TOP"
+    },
+    {
+      "inst": "u_ctrl0",
+      "master": "CTRL",
+      "origin": {
+        "x": 200,
+        "y": 200
+      },
+      "orient": "FN",
+      "placement": "PLACED",
+      "region": "R_BOT"
+    },
+    {
+      "inst": "u_ctrl1",
+      "master": "CTRL",
+      "origin": {
+        "x": 400,
+        "y": 250
+      },
+      "orient": "N",
+      "placement": "PLACED",
+      "region": "R_BOT"
+    }
+  ],
+  "regions": [
+    {
+      "name": "R_TOP",
+      "rects": [
+        [
+          0,
+          600,
+          1200,
+          1200
+        ]
+      ]
+    },
+    {
+      "name": "R_BOT",
+      "rects": [
+        [
+          0,
+          0,
+          1200,
+          600
+        ]
+      ]
+    }
+  ],
+  "blockages": [
+    {
+      "rect": [
+        500,
+        500,
+        750,
+        650
+      ]
+    },
+    {
+      "rect": [
+        200,
+        200,
+        350,
+        350
+      ]
+    }
+  ],
+  "pins": [
+    {
+      "name": "PIN_RST",
+      "net": "N_PIN_RST",
+      "dir": "INPUT",
+      "use": "RESET",
+      "x": 0,
+      "y": 50,
+      "layer": "metal1"
+    },
+    {
+      "name": "PIN_DBG",
+      "net": "N_PIN_DBG",
+      "dir": "INOUT",
+      "use": "SIGNAL",
+      "x": 1200,
+      "y": 1100,
+      "layer": "metal2"
+    }
+  ]
+}

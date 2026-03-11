@@ -1,0 +1,17 @@
+{
+  "dbu_per_micron": 1000,
+  "die": {"xMin": 0, "yMin": 0, "xMax": 800, "yMax": 600},
+  "masters": [
+    {"name": "FIXBLK", "bbox": {"xMin": 0, "yMin": 0, "xMax": 150000, "yMax": 150000}},
+    {"name": "PLCBLK", "bbox": {"xMin": 0, "yMin": 0, "xMax": 100000, "yMax": 40000}}
+  ],
+  "instances": [
+    {"name": "u_fix", "master": "FIXBLK", "origin": {"x": 50, "y": 50}, "orient": "N", "placement": "FIXED", "region": null, "bbox": {"xMin": 50, "yMin": 50, "xMax": 150050, "yMax": 150050}},
+    {"name": "u_plc0", "master": "PLCBLK", "origin": {"x": 300, "y": 100}, "orient": "N", "placement": "PLACED", "region": null, "bbox": {"xMin": 300, "yMin": 100, "xMax": 100300, "yMax": 40100}},
+    {"name": "u_plc1", "master": "PLCBLK", "origin": {"x": 300, "y": 200}, "orient": "S", "placement": "PLACED", "region": null, "bbox": {"xMin": 300, "yMin": 200, "xMax": 100300, "yMax": 40200}},
+    {"name": "u_plc2", "master": "PLCBLK", "origin": {"x": 300, "y": 300}, "orient": "FN", "placement": "PLACED", "region": null, "bbox": {"xMin": 300, "yMin": 300, "xMax": 100300, "yMax": 40300}}
+  ],
+  "regions": [
+
+  ]
+}

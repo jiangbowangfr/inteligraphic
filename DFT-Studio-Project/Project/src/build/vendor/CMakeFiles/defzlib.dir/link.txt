@@ -1,0 +1,2 @@
+/usr/bin/ar qc libdefzlib.a CMakeFiles/defzlib.dir/odb/src/def/defzlib/defzlib.cpp.o
+/usr/bin/ranlib libdefzlib.a

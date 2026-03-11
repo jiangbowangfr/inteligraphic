@@ -1,0 +1,21 @@
+{
+  "dbu_per_micron": 1000,
+  "die": {"xMin": 0, "yMin": 0, "xMax": 1600, "yMax": 900},
+  "masters": [
+    {"name": "MBIG", "bbox": {"xMin": 0, "yMin": 0, "xMax": 120000, "yMax": 60000}},
+    {"name": "MSMALL", "bbox": {"xMin": 0, "yMin": 0, "xMax": 30000, "yMax": 90000}}
+  ],
+  "instances": [
+    {"name": "u0", "master": "MBIG", "origin": {"x": 100, "y": 100}, "orient": "N", "placement": "PLACED", "region": null, "bbox": {"xMin": 100, "yMin": 100, "xMax": 120100, "yMax": 60100}},
+    {"name": "u1", "master": "MBIG", "origin": {"x": 400, "y": 100}, "orient": "S", "placement": "PLACED", "region": null, "bbox": {"xMin": 400, "yMin": 100, "xMax": 120400, "yMax": 60100}},
+    {"name": "u2", "master": "MSMALL", "origin": {"x": 100, "y": 400}, "orient": "E", "placement": "PLACED", "region": null, "bbox": {"xMin": 100, "yMin": 400, "xMax": 90100, "yMax": 30400}},
+    {"name": "u3", "master": "MSMALL", "origin": {"x": 400, "y": 400}, "orient": "W", "placement": "PLACED", "region": null, "bbox": {"xMin": 400, "yMin": 400, "xMax": 90400, "yMax": 30400}},
+    {"name": "u4", "master": "MBIG", "origin": {"x": 700, "y": 100}, "orient": "FN", "placement": "PLACED", "region": null, "bbox": {"xMin": 700, "yMin": 100, "xMax": 120700, "yMax": 60100}},
+    {"name": "u5", "master": "MBIG", "origin": {"x": 1000, "y": 100}, "orient": "FS", "placement": "PLACED", "region": null, "bbox": {"xMin": 1000, "yMin": 100, "xMax": 121000, "yMax": 60100}},
+    {"name": "u6", "master": "MSMALL", "origin": {"x": 700, "y": 400}, "orient": "FE", "placement": "PLACED", "region": null, "bbox": {"xMin": 700, "yMin": 400, "xMax": 90700, "yMax": 30400}},
+    {"name": "u7", "master": "MSMALL", "origin": {"x": 1000, "y": 400}, "orient": "FW", "placement": "PLACED", "region": null, "bbox": {"xMin": 1000, "yMin": 400, "xMax": 91000, "yMax": 30400}}
+  ],
+  "regions": [
+
+  ]
+}

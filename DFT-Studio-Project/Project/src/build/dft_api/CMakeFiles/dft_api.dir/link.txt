@@ -1,0 +1,2 @@
+/usr/bin/ar qc libdft_api.a CMakeFiles/dft_api.dir/src/DesignHandle.cpp.o CMakeFiles/dft_api.dir/src/Importer.cpp.o CMakeFiles/dft_api.dir/src/Json.cpp.o CMakeFiles/dft_api.dir/src/Traverser.cpp.o
+/usr/bin/ranlib libdft_api.a

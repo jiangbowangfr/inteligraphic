@@ -1,0 +1,96 @@
+{
+  "units": {
+    "lef_dbu_per_micron": 1000,
+    "def_units_distance_microns": 1000
+  },
+  "die_bbox": {
+    "xMin": 0,
+    "yMin": 0,
+    "xMax": 1000,
+    "yMax": 1000
+  },
+  "masters": [
+    {
+      "name": "BLK",
+      "w": 120,
+      "h": 120
+    },
+    {
+      "name": "TILE",
+      "w": 60,
+      "h": 40
+    }
+  ],
+  "instances": [
+    {
+      "inst": "u_left0",
+      "master": "TILE",
+      "origin": {
+        "x": 100,
+        "y": 100
+      },
+      "orient": "N",
+      "placement": "PLACED",
+      "region": "R_LEFT"
+    },
+    {
+      "inst": "u_left1",
+      "master": "BLK",
+      "origin": {
+        "x": 200,
+        "y": 600
+      },
+      "orient": "N",
+      "placement": "PLACED",
+      "region": "R_LEFT"
+    },
+    {
+      "inst": "u_right0",
+      "master": "TILE",
+      "origin": {
+        "x": 700,
+        "y": 100
+      },
+      "orient": "N",
+      "placement": "PLACED",
+      "region": "R_RIGHT"
+    },
+    {
+      "inst": "u_right1",
+      "master": "BLK",
+      "origin": {
+        "x": 600,
+        "y": 600
+      },
+      "orient": "N",
+      "placement": "PLACED",
+      "region": "R_RIGHT"
+    }
+  ],
+  "regions": [
+    {
+      "name": "R_LEFT",
+      "rects": [
+        [
+          0,
+          0,
+          500,
+          1000
+        ]
+      ]
+    },
+    {
+      "name": "R_RIGHT",
+      "rects": [
+        [
+          500,
+          0,
+          1000,
+          1000
+        ]
+      ]
+    }
+  ],
+  "blockages": [],
+  "pins": []
+}

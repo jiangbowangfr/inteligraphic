@@ -1,0 +1,79 @@
+{
+  "units": {
+    "lef_dbu_per_micron": 1000,
+    "def_units_distance_microns": 1000
+  },
+  "die_bbox": {
+    "xMin": 0,
+    "yMin": 0,
+    "xMax": 1000,
+    "yMax": 1000
+  },
+  "masters": [
+    {
+      "name": "BLK1",
+      "w": 120,
+      "h": 60
+    },
+    {
+      "name": "BLK2",
+      "w": 90,
+      "h": 90
+    }
+  ],
+  "instances": [
+    {
+      "inst": "u0",
+      "master": "BLK1",
+      "origin": {
+        "x": 200,
+        "y": 200
+      },
+      "orient": "N",
+      "placement": "PLACED",
+      "region": null
+    },
+    {
+      "inst": "u1",
+      "master": "BLK2",
+      "origin": {
+        "x": 600,
+        "y": 400
+      },
+      "orient": "N",
+      "placement": "PLACED",
+      "region": null
+    }
+  ],
+  "regions": [],
+  "blockages": [],
+  "pins": [
+    {
+      "name": "PIN_IN0",
+      "net": "N_PIN_IN0",
+      "dir": "INPUT",
+      "use": "SIGNAL",
+      "x": 0,
+      "y": 200,
+      "layer": "metal1"
+    },
+    {
+      "name": "PIN_OUT0",
+      "net": "N_PIN_OUT0",
+      "dir": "OUTPUT",
+      "use": "SIGNAL",
+      "x": 1000,
+      "y": 600,
+      "layer": "metal2"
+    },
+    {
+      "name": "PIN_CLK",
+      "net": "N_PIN_CLK",
+      "dir": "INPUT",
+      "use": "CLOCK",
+      "x": 0,
+      "y": 800,
+      "layer": "metal1"
+    }
+  ]
+}
