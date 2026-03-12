@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Flowchart Maker &amp; Online Diagram Software</title>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <meta name="Description" content="DFT SPEC is free online diagram software for making flowcharts, process diagrams, org charts, UML, ER and network diagrams">
+    <meta name="Keywords" content="DFT SPEC, diagram, online, flow chart, flowchart maker, uml, erd">
+    <meta itemprop="name" content="DFT SPEC - free flowchart maker and diagrams online">
+	<meta itemprop="description" content="DFT SPEC is a free online diagramming application and flowchart maker . You can use it to create UML, entity relationship,
+		org charts, BPMN and BPM, database schema and networks. Also possible are telecommunication network, workflow, flowcharts, maps overlays and GIS, electronic
+		circuit and social network diagrams.">
+	<meta itemprop="image" content="https://lh4.googleusercontent.com/-cLKEldMbT_E/Tx8qXDuw6eI/AAAAAAAAAAs/Ke0pnlk8Gpg/w500-h344-k/BPMN%2Bdiagram%2Brc2f.png">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+	<meta name="msapplication-config" content="images/browserconfig.xml">
+    <meta name="mobile-web-app-capable" content="yes">
+	<meta name="theme-color" content="#d89000">
+    <link rel="canonical" href="https://app.diagrams.net">
+	<link rel="manifest" href="images/manifest.json">
+	<link rel="icon" href="favicon.ico" sizes="any">
+	<link rel="shortcut icon" href="favicon.ico">
+    <link rel="apple-touch-icon" href="images/apple-touch-icon.png">
+    <link rel="stylesheet" type="text/css" href="styles/grapheditor.css">
+	<link rel="stylesheet" media="(forced-colors: active)" href="styles/high-contrast.css" id="high-contrast-stylesheet">
+	<script src="js/bootstrap.js"></script>
+	<style type="text/css">
+		.geBlock {
+			z-index:-3;
+			margin:100px;
+			margin-top:40px;
+			margin-bottom:30px;
+			padding:20px;
+			text-align:center;
+			min-width:50%;
+		}
+		.geBlock h1, .geBlock h2 {
+			margin-top:0px;
+			padding-top:0px;
+		}
+	</style>
+    <style>
+    html, body { height: 100%; margin: 0; }
+
+    /* 让容器占满视口并把子元素居中 */
+    #geInfo{
+        min-height: 100vh;
+        display: grid;
+        place-items: center;  /* 水平 + 垂直居中 */
+    }
+
+    /* 覆盖原来的大 margin，文本居中即可 */
+    #geInfo .geBlock{
+        margin: 0 !important;
+        text-align: center;
+        padding: 20px;
+    }
+    #geInfo .geBlock h1 { font-size: clamp(30px, 8vw, 100px); margin: 0; }
+    #geInfo .geBlock p { font-size: clamp(10px, 4vw, 14px); margin: 20px 0; line-height: 1.5; }
+
+    </style>
+
+</head>
+<body class="geEditor geClassic">
+<div id="geInfo">
+	<div class="geBlock">
+		<h1>DFT SPEC</h1>
+		<p>
+			DFT SPEC is free online diagram software. You can use it as a flowchart maker, network diagram software, to create UML online,<br /> as an ER diagram tool, to design database schema, to build BPMN online, as a circuit diagram maker, and more.
+		</p>
+		<h2 id="geStatus">Loading... <img src="images/spin.gif"/></h2>
+	</div>
+</div>
+
+ <!-- layout -->
+<!-- <script src="js/dftartist/dftLayout/dftlayout_shell.js"></script> -->
+ <!-- Page Session -->
+<script src="js/dftartist/PageSession/page_session_manager.js"></script>
+<!-- Project Explorer -->
+<script src="js/dftartist/ProjectExplorer/project_explorer_core.js"></script>
+<script src="js/dftartist/ProjectExplorer/project_explorer_integration.js"></script>
+<!-- Bottom Dock 运行时 -->
+<script src="js/dftartist/BottomDock/dock_runtime_bridge.js"></script>
+<!-- file ops -->
+<script src="js/dftartist/dftProjectFile_process/newproject.js"></script>
+<script src="js/dftartist/dftProjectFile_process/loadPage.js"></script>
+<script src="js/dftartist/dftProjectFile_process/savepage.js"></script>
+<script src="js/dftartist/dftProjectFile_process/loadproject.js"></script>
+<script src="js/dftartist/dftProjectFile_process/page_file_ops.js"></script>
+<script src="js/dftartist/PolygonTool/PolygonTool.js"></script> 
+<!-- flow navigator -->
+<script src="js/dftartist/FlowNavigator/env_editor_dialog.js"></script>
+<script src="js/dftartist/FlowNavigator/flow_nav_modular/flow_nav_shared.js"></script>
+<script src="js/dftartist/FlowNavigator/flow_nav_modular/flow_nav_analysis.js"></script>
+<script src="js/dftartist/FlowNavigator/flow_nav_modular/flow_nav_markers.js"></script>
+<script src="js/dftartist/FlowNavigator/flow_nav_modular/flow_nav_designs.js"></script>
+<script src="js/dftartist/FlowNavigator/flow_nav_modular/flow_nav_dftspec.js"></script>
+<script src="js/dftartist/FlowNavigator/flow_nav_modular/flow_navigator_core.modular.js"></script>
+<script src="js/dftartist/FlowNavigator/flow_navigator_bootstrap.js"></script>
+<!-- main -->
+<script src="js/main.js"></script>
+<script src="plugins/dftspec/newenv.js"></script>
+<!-- convert  -->
+<script src="js/dftartist/convertxml2dftspec/convertXml2Mermaid.js"></script> 
+<script src="js/dftartist/convertxml2dftspec/convertXml2Yaml.js"></script> 
+<script src="js/dftartist/convertxml2dftspec/convertYaml2Dftspec.js"></script> 
+<!-- flow proces -->
+<script src="js/dftartist/dftMenu/dftartistFlowProcess.js"></script>
+<script src="js/dftartist/dftNewProjectDesignMenu/dftNewProjectMenu.js"></script>
+<script src="js/dftartist/dftNewProjectDesignMenu/dftNewDesignMenu.js"></script>
+<!-- create ip -->
+<script src="js/dftartist/dftartist_ip/dftartist_create_ip_common.js"></script>
+<script src="js/dftartist/dftartist_ip/dftartist_ip_symbol_core.js"></script>
+<script src="js/dftartist/dftartist_ip/dftartist_create_ip.js"></script>
+<script src="js/dftartist/dftartist_ip/dftartist_ip_transform.js"></script>
+<!-- logic gate -->
+<script src="js/dftartist/dftartist_ip/logic_gate/dftartist_logic_gate_shapes.js"></script>
+<script src="js/dftartist/dftartist_ip/logic_gate/dftartist_logic_gate_model.js"></script>
+<script src="js/dftartist/dftartist_ip/logic_gate/dftartist_logic_gate_config.js"></script>
+<script src="js/dftartist/dftartist_ip/logic_gate/dftartist_logic_gate_catalog.js"></script>
+<script src="js/dftartist/dftartist_ip/logic_gate/dftartist_create_logic_gate.js"></script>
+<!-- Context Panel -->
+<script src="js/dftartist/ContextPanel/properties_panel.js"></script>
+<script src="js/dftartist/ContextPanel/ip_library_panel.js"></script>
+<script src="js/dftartist/ContextPanel/view_filter_panel.js"></script>
+<script src="js/dftartist/ContextPanel/context_panel_core.js"></script>
+<script src="js/dftartist/ContextPanel/ui_surface_theme_patch.js"></script>
+<script src="js/dftartist/ContextPanel/context_panel_bootstrap.js"></script>
+
+<!-- ipconfig -->
+<script src="js/dftartist/dftartist_ipConfig/ipConfig/all.entry.js"></script>
+<!-- <script src="js/dftartist/dftartist_ipConfig/ipConfig/occ.entry.js"></script>
+<script src="js/dftartist/dftartist_ipConfig/ipConfig/ssn_bus_frequency_divider.entry.js"></script>
+<script src="js/dftartist/dftartist_ipConfig/ipConfig/ssn_bus_frequency_multiplier.entry.js"></script>
+<script src="js/dftartist/dftartist_ipConfig/ipConfig/ssn_fifo.entry.js"></script>
+<script src="js/dftartist/dftartist_ipConfig/ipConfig/ssn_multiplexer.entry.js"></script>
+<script src="js/dftartist/dftartist_ipConfig/ipConfig/ssn_output_pipeline.entry.js"></script>
+<script src="js/dftartist/dftartist_ipConfig/ipConfig/ssn_pipeline.entry.js"></script>
+<script src="js/dftartist/dftartist_ipConfig/ipConfig/ssn_receiver1x_pipeline.entry.js"></script> 
+<script src="js/dftartist/dftartist_ipConfig/ipConfig/ssn_scanhost.entry.js"></script> 
+<script src="js/dftartist/dftartist_ipConfig/ipConfig/logic_gates.entry.js"></script> 
+<script src="js/dftartist/dftartist_ipConfig/ipConfig/interface.entry.js"></script> 
+<script src="js/dftartist/dftartist_ipConfig/ipConfig/data_source.entry.js"></script> 
+<script src="js/dftartist/dftartist_ipConfig/ipConfig/third_party_ip.entry.js"></script>  -->
+<script src="js/dftartist/AIdraw/test.js"></script>
+<!-- floorplan -->
+<script src="js/dftartist/dft_floorplan/dft_floorplan_ip.js"></script>
+<script src="js/dftartist/dft_floorplan/dft_floorplan_line.js"></script>
+<script src="js/dftartist/dft_floorplan/dftartist_create_interface.js"></script>
+<script src="js/dftartist/dft_floorplan/dftartist_create_datasource.js"></script>
+<!-- main  -->
+<script src="js/dftartist/dft_floorplan/dft_install_main.js"></script>
+<script src="js/dftartist/dft_floorplan/dft_datasource_floorplan_debug_patch.js"></script>
+
+</body>
+</html>

@@ -1,0 +1,16 @@
+# tcl pkg-config source file
+
+prefix=/Users/jiangbowang/MOI/2025/dftartist/code/drawio/drawio-desktop//vendor/tcl
+exec_prefix=/Users/jiangbowang/MOI/2025/dftartist/code/drawio/drawio-desktop//vendor/tcl
+libdir=/Users/jiangbowang/MOI/2025/dftartist/code/drawio/drawio-desktop//vendor/tcl/lib
+includedir=${prefix}/include
+libfile=libtcl9.0.dylib
+
+Name: Tool Command Language
+Description: Tcl is a powerful, easy-to-learn dynamic programming language, suitable for a wide range of uses.
+URL: https://www.tcl-lang.org/
+Version: 9.0.3
+Requires.private:  zlib >= 1.2.3
+Libs: -L${libdir} -ltcl9.0 -ltclstub
+Libs.private:  -lz  -lpthread -framework CoreFoundation 
+Cflags: -I${includedir} 
