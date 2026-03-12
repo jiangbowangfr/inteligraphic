@@ -1,10 +1,8 @@
 // src/shared/dfts/ui/PreviewPanel.tsx
 import React, { useMemo, useState } from 'react';
-import { Button, Card, Space, Typography, message } from 'antd';
+import { Button, Card, message } from 'antd';
 import { CopyOutlined } from '@ant-design/icons';
 import type { DftsTypeDef } from '../types';
-
-const { Paragraph, Text } = Typography;
 
 type LocalFieldDef = {
   attr: string;
@@ -93,6 +91,65 @@ function buildSpec(params: {
   const { def, nodeKey, nodeLiveValues, getCellRaw, shadowAll } = params;
 
   const allNodeKeys = Object.keys(def.nodes || {});
+  if (!nodeKey) {
+    const root: BlockNode = { name: '__root__', children: new Map(), lines: [] };
+    let totalChanged = 0;
+
+    for (const nk of allNodeKeys) {
+      const n = def.nodes[nk];
+      if (!n) continue;
+      const fields = (n.fields ?? []) as LocalFieldDef[];
+      if (!fields.length) continue;
+
+      const live = ((shadowAll && shadowAll[nk]) || {}) as Record<string, any>;
+      const changedLines: string[] = [];
+
+      for (const f of fields) {
+        const attr = f.attr;
+        const norm = (v: any) => (f.normalize ? f.normalize(v) : v);
+
+        const hasShadow = Object.prototype.hasOwnProperty.call(live, attr);
+        const shadowRaw = hasShadow ? live[attr] : undefined;
+
+        let cellRaw = getCellRaw ? getCellRaw(attr) : undefined;
+        if (cellRaw === null) cellRaw = undefined;
+
+        const defv = norm(f.defaultValue);
+        const cell = norm(cellRaw);
+        const baseline = cellRaw === undefined ? defv : cell;
+        const shadowEffective = hasShadow && !isEmptyInput(shadowRaw) && !Object.is(norm(shadowRaw), baseline);
+
+        if (shadowEffective) {
+          const shadow = norm(shadowRaw);
+          if (Object.is(shadow, defv)) continue;
+          changedLines.push(`${attr} : ${toSpecValue(shadow)} ;`);
+        } else {
+          if (cellRaw === undefined) continue;
+          if (Object.is(cell, defv)) continue;
+          changedLines.push(`${attr} : ${toSpecValue(cell)} ;`);
+        }
+      }
+
+      if (changedLines.length > 0) {
+        totalChanged += changedLines.length;
+        addLinesToTree(root, nk, changedLines);
+      }
+    }
+
+    if (totalChanged === 0) {
+      return {
+        text: '当前 IP 没有非默认配置项。',
+        changedCount: 0,
+      };
+    }
+
+    const body = renderTree(root, 1);
+    return {
+      text: `read_config_data -in_wrapper $dftspec -from_string {\n${body}\n}`,
+      changedCount: totalChanged,
+    };
+  }
+
   const prefix = nodeKey ? `${nodeKey}/` : '';
   const hasChildren = nodeKey ? allNodeKeys.some((k) => k.startsWith(prefix)) : false;
 
@@ -162,17 +219,14 @@ function buildSpec(params: {
 
 export default function PreviewPanel(props: {
   def: DftsTypeDef;
-  nodeKey: string;
+  nodeKey?: string;
   nodeLiveValues: Record<string, any>;
-  get: (attr: string, fallback?: any) => any;
   getCellRaw: (attr: string) => any;
   shadowAll?: Record<string, Record<string, any>>;
   mode?: 'side' | 'full';
 }) {
-  const { def, nodeKey, nodeLiveValues, getCellRaw, shadowAll, mode = 'side' } = props;
+  const { def, nodeKey = '', nodeLiveValues, getCellRaw, shadowAll, mode = 'side' } = props;
   const [copied, setCopied] = useState(false);
-
-  const node = def.nodes[nodeKey];
 
   const spec = useMemo(
     () =>
@@ -196,35 +250,6 @@ export default function PreviewPanel(props: {
       message.warning('复制失败，请手动复制');
     }
   };
-
-  if (!node) {
-    return (
-      <Card style={{ height: '100%' }} bodyStyle={{ height: '100%' }}>
-        <Text type="secondary">该节点未定义 schema</Text>
-      </Card>
-    );
-  }
-
-  const descriptionCard = (
-    <Card
-      size="small"
-      title={<span style={{ fontWeight: 600 }}>参数说明</span>}
-      style={{ borderRadius: 12, borderColor: '#E2E8F0' }}
-      bodyStyle={{ padding: 16 }}
-    >
-      <Space direction="vertical" size={10} style={{ width: '100%' }}>
-        <div>
-          <Text strong style={{ color: '#0F172A' }}>
-            {node.title}
-          </Text>
-        </div>
-        <Paragraph style={{ marginBottom: 0, color: '#475569', lineHeight: 1.7 }}>
-          {node.description ?? '当前节点未提供描述。建议在 definition 中补充 description，以便显示更完整的帮助信息。'}
-        </Paragraph>
-        <Text type="secondary">当前节点包含 {node.fields?.length ?? 0} 个可配置字段。</Text>
-      </Space>
-    </Card>
-  );
 
   const specCard = (
     <Card
@@ -270,18 +295,8 @@ export default function PreviewPanel(props: {
   );
 
   if (mode === 'full') {
-    return (
-      <div style={{ height: '100%', display: 'grid', gridTemplateRows: 'auto minmax(0, 1fr)', gap: 16 }}>
-        {descriptionCard}
-        {specCard}
-      </div>
-    );
+    return <div style={{ height: '100%', minHeight: 0 }}>{specCard}</div>;
   }
 
-  return (
-    <div style={{ height: '100%', display: 'grid', gridTemplateRows: 'auto minmax(0, 1fr)', gap: 16 }}>
-      {descriptionCard}
-      {specCard}
-    </div>
-  );
+  return <div style={{ height: '100%', minHeight: 0 }}>{specCard}</div>;
 }

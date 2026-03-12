@@ -9,7 +9,6 @@ import {
   Select,
   Space,
   Switch,
-  Tag,
   Tooltip,
   Typography,
 } from 'antd';
@@ -47,20 +46,6 @@ function renderLabel(f: FieldDef) {
         <Tooltip title={f.tooltip}>
           <InfoCircleOutlined style={{ color: '#94A3B8', fontSize: 12 }} />
         </Tooltip>
-      ) : null}
-      {f.defaultValue !== undefined ? (
-        <Tag
-          color="default"
-          style={{
-            marginInlineStart: 2,
-            borderRadius: 999,
-            color: '#64748B',
-            borderColor: '#E2E8F0',
-            background: '#F8FAFC',
-          }}
-        >
-          默认
-        </Tag>
       ) : null}
     </Space>
   );

@@ -274,7 +274,7 @@ export default function DftsTypeShell(props: {
     if (!visibleTabs.includes(activeTab)) setActiveTab(firstTab);
   }, [activeTab, firstTab, visibleTabs]);
   const [selected, setSelected] = useState<string>(
-    def.defaultNode ?? nodeKeys[0] ?? "",
+    def.defaultNode ?? rawTreeData[0]?.key ?? nodeKeys[0] ?? "",
   );
   const [search, setSearch] = useState("");
   const [shadow, setShadow] = useState<Record<string, Record<string, any>>>({});
@@ -375,6 +375,20 @@ export default function DftsTypeShell(props: {
     () => filterTree(rawTreeData, search),
     [rawTreeData, search],
   );
+  const treeScrollRef = useRef<HTMLDivElement | null>(null);
+  const formScrollRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!selected && rawTreeData[0]?.key) setSelected(String(rawTreeData[0].key));
+  }, [selected, rawTreeData]);
+  useEffect(() => {
+    if (activeTab === "dft") {
+      treeScrollRef.current?.scrollTo({ top: 0 });
+      formScrollRef.current?.scrollTo({ top: 0 });
+    }
+  }, [activeTab, selected]);
+  useEffect(() => {
+    treeScrollRef.current?.scrollTo({ top: 0 });
+  }, [search]);
   const selectedNode = nodes[selected];
   const getCellRaw = (attr: string) => {
     const MISSING = Symbol("MISSING");
@@ -678,10 +692,7 @@ export default function DftsTypeShell(props: {
             prefix={<SearchOutlined style={{ color: "#94A3B8" }} />}
           />
         </div>
-        <div style={{ marginBottom: 10, padding: "0 4px" }}>
-          <Text type="secondary">DFT IP 共用同一套 DFT 参数树。</Text>
-        </div>
-        <div style={{ minHeight: 0, overflow: "auto", paddingRight: 4 }}>
+        <div ref={treeScrollRef} style={{ minHeight: 0, overflow: "auto", paddingRight: 4 }}>
           <Tree
             className="dfts-tree"
             blockNode
@@ -728,31 +739,8 @@ export default function DftsTypeShell(props: {
               {humanPath(selected)}
             </Tag>
           </Space>
-          {selectedNode?.description ? (
-            <Text
-              style={{
-                display: "block",
-                marginTop: 8,
-                color: "#64748B",
-                lineHeight: 1.65,
-              }}
-            >
-              {selectedNode.description}
-            </Text>
-          ) : null}
         </div>
-        <div
-          style={{
-            padding: "12px 20px",
-            background: "#F8FAFC",
-            borderBottom: "1px solid #EEF2F7",
-            color: "#475569",
-            fontSize: 12,
-          }}
-        >
-          {selectedNode?.fields?.length ?? 0} 个字段 · 默认值不会写入 cell
-        </div>
-        <div style={{ minHeight: 0, overflow: "auto", padding: 20 }}>
+        <div ref={formScrollRef} style={{ minHeight: 0, overflow: "auto", padding: 20 }}>
           {selectedNode ? (
             <SchemaForm
               key={`${selected}-${refreshToken}`}
@@ -769,8 +757,8 @@ export default function DftsTypeShell(props: {
       </Card>
       <PreviewPanel
         def={def}
-        nodeKey={selected}
-        nodeLiveValues={shadow[selected] ?? getInitialValuesForNode(selected)}
+        nodeKey=""
+        nodeLiveValues={{}}
         getCellRaw={getCellRaw}
         shadowAll={shadow}
       />
@@ -828,8 +816,7 @@ export default function DftsTypeShell(props: {
             ) : null}
           </Space>
           <Text type="secondary">
-            页签由 category + extraTabs 决定：DFT IP 用 DFT 参数页；logic gate
-            用「逻辑配置」；interface / data source 可直接隐藏 DFT 参数页。
+            配置页签会按当前 IP 类型自动显示。
           </Text>
         </Space>
       </div>
@@ -876,10 +863,8 @@ export default function DftsTypeShell(props: {
               <PreviewPanel
                 mode="full"
                 def={def}
-                nodeKey={selected}
-                nodeLiveValues={
-                  shadow[selected] ?? getInitialValuesForNode(selected)
-                }
+                nodeKey=""
+                nodeLiveValues={{}}
                 getCellRaw={getCellRaw}
                 shadowAll={shadow}
               />
