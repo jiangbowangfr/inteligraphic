@@ -597,25 +597,131 @@
         for (var j = 0; j < drop.length; j++) m.remove(drop[j]);
     }
 
+    function getAllSymbolBodies(graph) {
+        var out = [];
+        if (!graph || !graph.getModel) return out;
+        var model = graph.getModel();
+        var seen = {};
+
+        function walk(cell) {
+            if (!cell) return;
+            if (isSymbolBody(cell)) {
+                var id = cell.id || mxObjectIdentity.get(cell);
+                if (!seen[id]) {
+                    seen[id] = true;
+                    out.push(cell);
+                }
+            }
+            var count = model.getChildCount(cell);
+            for (var i = 0; i < count; i++) walk(model.getChildAt(cell, i));
+        }
+
+        walk(model.getRoot());
+        return out;
+    }
+
     function allocateInstanceName(graph, base) {
         base = trim(base || 'ip').replace(/\n/g, ' ').replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'ip';
         var maxIdx = 0;
-        var bodies = (NS.getAllChipBodies && graph) ? NS.getAllChipBodies(graph) : [];
+        var bodies = getAllSymbolBodies(graph);
         var re = new RegExp('^' + escRe(base) + '_inst_(\\d+)$', 'i');
         for (var i = 0; i < bodies.length; i++) {
             var b = bodies[i];
             var name = '';
-            if (isSymbolBody(b)) {
-                var sm = getModel(b);
-                name = sm && sm.instanceName || '';
-            } else if (NS.findInstanceLabelCell) {
-                var inst = NS.findInstanceLabelCell(graph, b);
-                name = inst && inst.value || '';
-            }
+            var sm = getModel(b);
+            name = sm && sm.instanceName || '';
             var m = re.exec(trim(name));
             if (m) maxIdx = Math.max(maxIdx, parseInt(m[1], 10) || 0);
         }
         return base + '_inst_' + (maxIdx + 1);
+    }
+
+    function hasDuplicateInstanceName(graph, body, name) {
+        name = trim(name);
+        if (!name) return false;
+        var bodies = getAllSymbolBodies(graph);
+        for (var i = 0; i < bodies.length; i++) {
+            var other = bodies[i];
+            if (!other || other === body) continue;
+            var sm = getModel(other);
+            var otherName = sm && trim(sm.instanceName || '');
+            if (otherName === name) return true;
+        }
+        return false;
+    }
+
+    function inferInstanceBaseName(body, model) {
+        var preferred = trim(model && model.instanceName || '');
+        var m = /^(.*)_inst_(\d+)$/i.exec(preferred);
+        if (m && trim(m[1])) return trim(m[1]);
+        return trim(model && model.title || readStyleValue(body && body.style || '', 'dftsIP_type') || 'ip');
+    }
+
+    function ensureUniqueBodyInstanceName(graph, body) {
+        if (!graph || !body || !isSymbolBody(body)) return false;
+        var model = getModel(body);
+        if (!model) return false;
+        var current = trim(model.instanceName || '');
+        if (!current) return false;
+        if (!hasDuplicateInstanceName(graph, body, current)) return false;
+
+        var next = allocateInstanceName(graph, inferInstanceBaseName(body, model));
+        if (!next || next === current) return false;
+
+        var updated = clone(model) || {};
+        updated.instanceName = next;
+        setModel(body, updated);
+        relayout(graph, body);
+        return true;
+    }
+
+    function uniqueSymbolBodiesFromCells(graph, cells) {
+        var out = [];
+        var seen = {};
+        var model = graph && graph.getModel ? graph.getModel() : null;
+
+        function pushBody(cell) {
+            if (!cell) return;
+            var body = isSymbolBody(cell) ? cell : null;
+            if (!body && model && model.getParent) {
+                var parent = model.getParent(cell);
+                if (isSymbolBody(parent)) body = parent;
+            }
+            if (!body) return;
+            var id = body.id || mxObjectIdentity.get(body);
+            if (seen[id]) return;
+            seen[id] = true;
+            out.push(body);
+        }
+
+        for (var i = 0; i < (cells || []).length; i++) pushBody(cells[i]);
+        return out;
+    }
+
+    function ensureUniqueInstanceNamesForCells(graph, cells) {
+        var bodies = uniqueSymbolBodiesFromCells(graph, cells);
+        for (var i = 0; i < bodies.length; i++) {
+            ensureUniqueBodyInstanceName(graph, bodies[i]);
+        }
+        return bodies;
+    }
+
+    function scheduleEnsureUniqueInstanceNamesForCells(graph, cells, reason) {
+        var bodies = uniqueSymbolBodiesFromCells(graph, cells);
+        if (!bodies.length || typeof global.setTimeout !== 'function') return;
+        var ids = [];
+        for (var i = 0; i < bodies.length; i++) ids.push(bodies[i].id || mxObjectIdentity.get(bodies[i]));
+        global.setTimeout(function () {
+            try {
+                var model = graph && graph.getModel ? graph.getModel() : null;
+                var liveBodies = [];
+                for (var j = 0; j < ids.length; j++) {
+                    var body = model && model.getCell ? model.getCell(ids[j]) : null;
+                    if (isSymbolBody(body)) liveBodies.push(body);
+                }
+                ensureUniqueInstanceNamesForCells(graph, liveBodies);
+            } catch (e) { }
+        }, 0);
     }
 
 
@@ -1175,6 +1281,38 @@
                 if (isSymbolBody(cells[i])) relayout(graph, cells[i]);
             }
         });
+
+        graph.addListener(mxEvent.CELLS_ADDED, function (sender, evt) {
+            var cells = evt.getProperty('cells') || [];
+            ensureUniqueInstanceNamesForCells(graph, cells);
+            scheduleEnsureUniqueInstanceNamesForCells(graph, cells, 'cellsAdded');
+        });
+
+        if (!graph.__dftsSymbolImportCellsPatched && typeof graph.importCells === 'function') {
+            graph.__dftsSymbolImportCellsPatched = true;
+            var baseImportCells = graph.importCells;
+            graph.importCells = function () {
+                var ret = baseImportCells.apply(this, arguments);
+                try {
+                    ensureUniqueInstanceNamesForCells(graph, ret || []);
+                    scheduleEnsureUniqueInstanceNamesForCells(graph, ret || [], 'importCells');
+                } catch (e) { }
+                return ret;
+            };
+        }
+
+        if (!graph.__dftsSymbolDuplicateCellsPatched && typeof graph.duplicateCells === 'function') {
+            graph.__dftsSymbolDuplicateCellsPatched = true;
+            var baseDuplicateCells = graph.duplicateCells;
+            graph.duplicateCells = function () {
+                var ret = baseDuplicateCells.apply(this, arguments);
+                try {
+                    ensureUniqueInstanceNamesForCells(graph, ret || []);
+                    scheduleEnsureUniqueInstanceNamesForCells(graph, ret || [], 'duplicateCells');
+                } catch (e) { }
+                return ret;
+            };
+        }
 
         if (graph.connectionHandler && !graph.__dftsSymbolPortEdgePatchInstalled) {
             graph.__dftsSymbolPortEdgePatchInstalled = true;
