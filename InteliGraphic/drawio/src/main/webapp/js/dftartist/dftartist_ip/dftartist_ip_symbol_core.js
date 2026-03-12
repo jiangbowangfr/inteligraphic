@@ -178,10 +178,10 @@
         return body.__dftsSymbolModel;
     }
 
-    function groupVisiblePins(model) {
+    function groupPins(model, includeHidden) {
         var grouped = { west: [], east: [], north: [], south: [] };
         (model.pins || []).forEach(function (pin) {
-            if (pin.visible === false) return;
+            if (!includeHidden && pin.visible === false) return;
             grouped[normalizeSide(pin.side)].push(pin);
         });
         ['west', 'east', 'north', 'south'].forEach(function (side) {
@@ -196,22 +196,23 @@
 
     function computeNaturalMetrics(model) {
         model = normalizeModel(model);
-        var grouped = groupVisiblePins(model);
+        var grouped = groupPins(model, true);
+        var visibleGrouped = groupPins(model, false);
         var l = model.layout;
         var rows = Math.max(grouped.west.length, grouped.east.length, 1);
 
         var maxWestLabel = 0, maxEastLabel = 0, maxNorthLabel = 0, maxSouthLabel = 0;
         if (!model.hidePinLabels) {
-            grouped.west.forEach(function (p) { maxWestLabel = Math.max(maxWestLabel, estimateTextWidth(pinText(p), l.fontSize)); });
-            grouped.east.forEach(function (p) { maxEastLabel = Math.max(maxEastLabel, estimateTextWidth(pinText(p), l.fontSize)); });
+            visibleGrouped.west.forEach(function (p) { maxWestLabel = Math.max(maxWestLabel, estimateTextWidth(pinText(p), l.fontSize)); });
+            visibleGrouped.east.forEach(function (p) { maxEastLabel = Math.max(maxEastLabel, estimateTextWidth(pinText(p), l.fontSize)); });
         }
-        grouped.north.forEach(function (p) { maxNorthLabel = Math.max(maxNorthLabel, estimateTextWidth(pinText(p), l.fontSize)); });
-        grouped.south.forEach(function (p) { maxSouthLabel = Math.max(maxSouthLabel, estimateTextWidth(pinText(p), l.fontSize)); });
+        visibleGrouped.north.forEach(function (p) { maxNorthLabel = Math.max(maxNorthLabel, estimateTextWidth(pinText(p), l.fontSize)); });
+        visibleGrouped.south.forEach(function (p) { maxSouthLabel = Math.max(maxSouthLabel, estimateTextWidth(pinText(p), l.fontSize)); });
 
         var titleW = estimateTextWidth(model.title, l.titleFontSize);
         var titleH = Math.ceil(l.titleFontSize * 1.2);
-        var leftTextW = (!model.hidePinLabels && grouped.west.length) ? maxWestLabel : 0;
-        var rightTextW = (!model.hidePinLabels && grouped.east.length) ? maxEastLabel : 0;
+        var leftTextW = (!model.hidePinLabels && visibleGrouped.west.length) ? maxWestLabel : 0;
+        var rightTextW = (!model.hidePinLabels && visibleGrouped.east.length) ? maxEastLabel : 0;
         var leftColW = leftTextW > 0 ? (l.labelGap + leftTextW + 4) : 0;
         var rightColW = rightTextW > 0 ? (l.labelGap + rightTextW + 4) : 0;
         var centerMinW = Math.max(56, Math.min(titleW + l.titlePadding * 2, Math.max(56, Math.ceil(titleW * 0.62))));
@@ -230,6 +231,7 @@
 
         return {
             grouped: grouped,
+            visibleGrouped: visibleGrouped,
             naturalW: Math.ceil(naturalW),
             naturalH: Math.ceil(naturalH),
             maxWestLabel: maxWestLabel,
@@ -264,11 +266,11 @@
 
         var maxWestLabel = 0, maxEastLabel = 0;
         if (!model.hidePinLabels) {
-            metrics.grouped.west.forEach(function (p) { maxWestLabel = Math.max(maxWestLabel, estimateTextWidth(pinText(p), fontSize)); });
-            metrics.grouped.east.forEach(function (p) { maxEastLabel = Math.max(maxEastLabel, estimateTextWidth(pinText(p), fontSize)); });
+            metrics.visibleGrouped.west.forEach(function (p) { maxWestLabel = Math.max(maxWestLabel, estimateTextWidth(pinText(p), fontSize)); });
+            metrics.visibleGrouped.east.forEach(function (p) { maxEastLabel = Math.max(maxEastLabel, estimateTextWidth(pinText(p), fontSize)); });
         }
-        var leftTextW = (!model.hidePinLabels && metrics.grouped.west.length) ? maxWestLabel : 0;
-        var rightTextW = (!model.hidePinLabels && metrics.grouped.east.length) ? maxEastLabel : 0;
+        var leftTextW = (!model.hidePinLabels && metrics.visibleGrouped.west.length) ? maxWestLabel : 0;
+        var rightTextW = (!model.hidePinLabels && metrics.visibleGrouped.east.length) ? maxEastLabel : 0;
         var leftColW = leftTextW > 0 ? (labelGap + leftTextW + 2) : 0;
         var rightColW = rightTextW > 0 ? (labelGap + rightTextW + 2) : 0;
 
@@ -367,15 +369,28 @@
         return { minW: layout.minW, minH: layout.minH };
     }
 
+    function hasVisiblePins(model) {
+        var pins = (model && model.pins) || [];
+        for (var i = 0; i < pins.length; i++) {
+            if (pins[i] && pins[i].visible !== false) return true;
+        }
+        return false;
+    }
+
+    function useNativeBodyConnectionPoints(model) {
+        return !hasVisiblePins(model);
+    }
+
     function bodyStyle(model, extra) {
         var encodedModel = encodeModel(model);
+        var nativeBodyConnect = useNativeBodyConnectionPoints(model);
         var parts = [
             'dftsIP_chipBody=1',
             'dftsIP_symbol=1',
             'shape=' + (model.bodyShape || 'rectangle'),
             'html=1',
             'whiteSpace=wrap',
-            'connectable=0',
+            'connectable=' + (nativeBodyConnect ? '1' : '0'),
             'noLabel=1',
             'rounded=' + (model.rounded || 0),
             'strokeWidth=' + (model.strokeWidth != null ? model.strokeWidth : 1),
@@ -383,6 +398,9 @@
             'dftsIP_orient=' + (model.transform && model.transform.rotation || 0),
             'dftsIP_symbolModel=' + encodedModel
         ];
+        if (nativeBodyConnect) {
+            parts.push('outlineConnect=1');
+        }
         if (model.bodyExtraStyle) parts.push(model.bodyExtraStyle);
         if (extra) parts.push(extra);
         return parts.join(';') + ';';
@@ -807,6 +825,7 @@
                 'dftsIP_symbolScale=' + layout.scale,
                 'rotation=' + (model.transform && model.transform.rotation || 0)
             ].join(';')));
+            body.connectable = useNativeBodyConnectionPoints(model);
             if (toStr(body.value) !== '') m.setValue(body, '');
 
             var valid = {};
@@ -854,7 +873,7 @@
                 valid['stub:' + pin.key] = true;
                 valid['port:' + pin.key] = true;
                 valid['label:' + pin.key] = true;
-                if (!shown) return;
+                if (!pos) return;
 
                 var sg = new mxGeometry(); sg.relative = false;
                 var pg = new mxGeometry(); pg.relative = false;
@@ -1001,6 +1020,12 @@
                 mergedInput.pins = model.pins;
             }
             model = normalizeModel(mergedInput);
+        }
+
+        if (runtimeOpt.defaultHidePins !== false && model.category !== 'logic_gate' && model.bodyShape !== 'dftsLogicGate' && Array.isArray(model.pins)) {
+            model.pins.forEach(function (pin) {
+                pin.visible = false;
+            });
         }
 
         return model;
