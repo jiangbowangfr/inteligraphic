@@ -93,7 +93,19 @@ function defaultTabsForCategory(category: DftsCategory): string[] {
       return ["dft", "ip-basic"];
   }
 }
+function readStoredSymbolModel(graph: any, cell: any): DftsSymbolModel | null {
+  try {
+    const ns = (window as any).DftsIP;
+    const parsed = tryParseModel(ns?.Symbol?.getModel?.(cell));
+    if (parsed) return parsed;
+  } catch {}
+  const attr = getCellAttr(graph, cell, "dftsIP_symbolModel", null);
+  const styleValue = parseStyle(getRawStyle(graph, cell), "dftsIP_symbolModel");
+  return tryParseModel(attr) || tryParseModel(styleValue);
+}
 function inferBodyLabel(graph: any, cell: any, fallback: string) {
+  const modelTitle = readStoredSymbolModel(graph, cell)?.title;
+  if (modelTitle) return String(modelTitle);
   const fromAttr =
     getCellAttr(graph, cell, "dftsIP_bodyLabel", null) ||
     getCellAttr(graph, cell, "bodyLabel", null);
@@ -117,11 +129,39 @@ function inferBodyLabel(graph: any, cell: any, fallback: string) {
   return fallback;
 }
 function inferInstanceName(graph: any, cell: any) {
+  const modelInstanceName = readStoredSymbolModel(graph, cell)?.instanceName;
+  if (modelInstanceName) return String(modelInstanceName);
   return (
     getCellAttr(graph, cell, "dftsIP_instanceName", null) ||
     getCellAttr(graph, cell, "instanceName", null) ||
     getCellAttr(graph, cell, "instance", null) ||
     ""
+  );
+}
+function inferShowInstance(graph: any, cell: any) {
+  const modelShowInstance = readStoredSymbolModel(graph, cell)?.showInstance;
+  if (typeof modelShowInstance === "boolean") return modelShowInstance;
+  return asBool(
+    getCellAttr(
+      graph,
+      cell,
+      "dftsIP_showInstance",
+      getCellAttr(graph, cell, "showInstance", "1"),
+    ),
+    true,
+  );
+}
+function inferLockBodyLabel(graph: any, cell: any) {
+  const modelLockBodyLabel = readStoredSymbolModel(graph, cell)?.lockBodyLabel;
+  if (typeof modelLockBodyLabel === "boolean") return modelLockBodyLabel;
+  return asBool(
+    getCellAttr(
+      graph,
+      cell,
+      "dftsIP_lockBodyLabel",
+      getCellAttr(graph, cell, "lockBodyLabel", "0"),
+    ),
+    false,
   );
 }
 function asBool(v: any, d: boolean) {
@@ -169,14 +209,7 @@ function readSymbolModel(
   titleFallback: string,
   instanceFallback: string,
 ): DftsSymbolModel {
-  try {
-    const ns = (window as any).DftsIP;
-    const parsed = tryParseModel(ns?.Symbol?.getModel?.(cell));
-    if (parsed) return parsed;
-  } catch {}
-  const attr = getCellAttr(graph, cell, "dftsIP_symbolModel", null);
-  const styleValue = parseStyle(getRawStyle(graph, cell), "dftsIP_symbolModel");
-  const parsed = tryParseModel(attr) || tryParseModel(styleValue);
+  const parsed = readStoredSymbolModel(graph, cell);
   if (parsed) return parsed;
   return { title: titleFallback, instanceName: instanceFallback, pins: [] };
 }
@@ -208,11 +241,15 @@ function applySymbolModel(
   pins: DftsPinDraft[],
   title: string,
   instanceName: string,
+  showInstance: boolean,
+  lockBodyLabel: boolean,
 ) {
   const nextModel: DftsSymbolModel = {
     ...baseModel,
     title,
     instanceName,
+    showInstance,
+    lockBodyLabel,
     pins: pins.map((p) => ({
       ...p,
       displayName: p.displayName || p.name,
@@ -303,24 +340,8 @@ export default function DftsTypeShell(props: {
         def.title.replace(/^DFT\s*[·•-]\s*/i, ""),
       ),
       instanceName: String(inferInstanceName(graph, cell) || ""),
-      showInstance: asBool(
-        getCellAttr(
-          graph,
-          cell,
-          "dftsIP_showInstance",
-          getCellAttr(graph, cell, "showInstance", "1"),
-        ),
-        true,
-      ),
-      lockBodyLabel: asBool(
-        getCellAttr(
-          graph,
-          cell,
-          "dftsIP_lockBodyLabel",
-          getCellAttr(graph, cell, "lockBodyLabel", "0"),
-        ),
-        false,
-      ),
+      showInstance: inferShowInstance(graph, cell),
+      lockBodyLabel: inferLockBodyLabel(graph, cell),
       width: toNumber(
         getCellAttr(
           graph,
@@ -561,6 +582,8 @@ export default function DftsTypeShell(props: {
       ...initialModelRef.current,
       title: basicDraft.bodyLabel,
       instanceName: basicDraft.instanceName,
+      showInstance: basicDraft.showInstance,
+      lockBodyLabel: basicDraft.lockBodyLabel,
       pins: clone(layoutPins),
     };
     setLayoutBaselinePins(clone(layoutPins));
@@ -689,6 +712,8 @@ export default function DftsTypeShell(props: {
           layoutPins,
           basicDraft.bodyLabel,
           basicDraft.instanceName,
+          basicDraft.showInstance,
+          basicDraft.lockBodyLabel,
         );
         setCellAttr(graph, cell, 'dftsIP_type', rawCellTypeRef.current || def.type);
     } finally {

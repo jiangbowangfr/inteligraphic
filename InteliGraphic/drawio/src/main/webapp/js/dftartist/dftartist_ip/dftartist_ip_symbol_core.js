@@ -130,6 +130,8 @@
             version: '3',
             title: trim(model.title || model.label || model.moduleName || 'IP'),
             instanceName: trim(model.instanceName || ''),
+            showInstance: model.showInstance !== false,
+            lockBodyLabel: !!model.lockBodyLabel,
             dftsType: trim(model.dftsType || ''),
             category: trim(model.category || ''),
             rounded: Number(model.rounded || 0),
@@ -349,7 +351,7 @@
             titleBoxW: titleBoxW,
             titleBoxH: titleBoxH,
             instanceFontSize: instanceFontSize,
-            instanceH: model.instanceName ? Math.ceil(instanceFontSize * 1.2) : 0,
+            instanceH: model.showInstance !== false && model.instanceName ? Math.ceil(instanceFontSize * 1.2) : 0,
             verticalTitle: verticalTitle,
             pinPos: pinPos,
             leftTextW: leftTextW,
@@ -395,6 +397,7 @@
             'rounded=' + (model.rounded || 0),
             'strokeWidth=' + (model.strokeWidth != null ? model.strokeWidth : 1),
             'dftsIP_type=' + (model.dftsType || ''),
+            'dftsIP_lockBodyLabel=' + (model.lockBodyLabel ? '1' : '0'),
             'dftsIP_orient=' + (model.transform && model.transform.rotation || 0),
             'dftsIP_symbolModel=' + encodedModel
         ];
@@ -952,7 +955,7 @@
 
             var instanceCell = ensureChild(graph, body, 'instance', '', textStyle(layout.instanceFontSize, 'center', false, 0, 'visible'), model.instanceName || '');
             instanceCell.connectable = false;
-            instanceCell.visible = !!model.instanceName;
+            instanceCell.visible = model.showInstance !== false && !!model.instanceName;
             valid['instance:'] = true;
             var instanceGeo = new mxGeometry(0, layout.bodyH + layout.instanceGap, layout.bodyW, Math.max(10, layout.instanceH || Math.ceil(layout.instanceFontSize * 1.2)));
             instanceGeo.relative = false;

@@ -1,6 +1,6 @@
 // src/shared/dfts/ui/IpBasicsTab.tsx
 import React from 'react';
-import { Card, Col, Form, Input, InputNumber, Row, Space, Switch, Tag, Typography } from 'antd';
+import { Card, Col, Form, Input, Row, Space, Switch, Tag, Typography } from 'antd';
 import type { SpecialFieldDef } from '../types';
 
 const { Text } = Typography;
@@ -135,18 +135,6 @@ export default function IpBasicsTab(props: {
               <Col span={12}>
                 <Form.Item label="锁定模块标题" extra="开启后可作为外部逻辑的“禁止编辑标题”依据。">
                   <Switch checked={value.lockBodyLabel} onChange={(v) => setField('lockBodyLabel', v)} />
-                </Form.Item>
-              </Col>
-            </Row>
-            <Row gutter={16}>
-              <Col span={12}>
-                <Form.Item label="默认宽度" extra="可选；仅写入配置属性，不强制立即改图。">
-                  <InputNumber value={value.width} min={0} style={{ width: '100%' }} placeholder="例如 160" onChange={(v) => setField('width', typeof v === 'number' ? v : undefined)} />
-                </Form.Item>
-              </Col>
-              <Col span={12}>
-                <Form.Item label="默认高度" extra="可选；仅写入配置属性，不强制立即改图。">
-                  <InputNumber value={value.height} min={0} style={{ width: '100%' }} placeholder="例如 72" onChange={(v) => setField('height', typeof v === 'number' ? v : undefined)} />
                 </Form.Item>
               </Col>
             </Row>
