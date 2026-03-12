@@ -817,13 +817,16 @@
 
     collapseBtn.onmousedown = function (evt) {
       if (evt && evt.preventDefault) evt.preventDefault();
-      if (!ui._phase1 || !ui._phase1.state) return;
-      var st = ui._phase1.state;
-      if (st.dockHeight > 0) {
-        st._lastDockHeight = st.dockHeight;
-        st.dockHeight = 0;
-      } else {
-        st.dockHeight = st._lastDockHeight || 220;
+      if (global.DFTPanelRuntime && typeof global.DFTPanelRuntime.toggle === 'function') {
+        global.DFTPanelRuntime.toggle(ui, 'dock');
+      } else if (ui._phase1 && ui._phase1.state) {
+        var st = ui._phase1.state;
+        if (st.dockHeight > 0) {
+          st._lastDockHeight = st.dockHeight;
+          st.dockHeight = 0;
+        } else {
+          st.dockHeight = st._lastDockHeight || 220;
+        }
       }
       if (typeof ui.refresh === 'function') ui.refresh(true);
     };
