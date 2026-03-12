@@ -45,6 +45,16 @@ function filterTree(nodes: TreeNode[], query: string): TreeNode[] {
     });
   return visit(nodes);
 }
+function filterTreeByDirty(nodes: TreeNode[], dirtyKeys: Set<string>): TreeNode[] {
+  const visit = (items: TreeNode[]): TreeNode[] =>
+    items.flatMap((item) => {
+      const children = item.children ? visit(item.children) : [];
+      return dirtyKeys.has(String(item.key)) || children.length
+        ? [{ ...item, children }]
+        : [];
+    });
+  return visit(nodes);
+}
 function humanPath(key: string) {
   return key ? key.split("/").join(" / ") : "";
 }
@@ -126,6 +136,9 @@ function asBool(v: any, d: boolean) {
 function toNumber(v: any) {
   const n = Number(v);
   return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+function isEmptyInput(v: any) {
+  return v === undefined || v === null || v === "";
 }
 function encodeModel(model: any) {
   try {
@@ -277,6 +290,7 @@ export default function DftsTypeShell(props: {
     def.defaultNode ?? rawTreeData[0]?.key ?? nodeKeys[0] ?? "",
   );
   const [search, setSearch] = useState("");
+  const [dirtyOnly, setDirtyOnly] = useState(false);
   const [shadow, setShadow] = useState<Record<string, Record<string, any>>>({});
   const [refreshToken, setRefreshToken] = useState(0);
   const initialRef = useRef<Record<string, Record<string, any>>>({});
@@ -371,10 +385,87 @@ export default function DftsTypeShell(props: {
   const [extraDrafts, setExtraDrafts] = useState<Record<string, any>>(
     clone(initialExtraDrafts),
   );
-  const treeData = useMemo(
-    () => filterTree(rawTreeData, search),
-    [rawTreeData, search],
+  const getCellRaw = (attr: string) => {
+    const MISSING = Symbol("MISSING");
+    const v = getCellAttr(graph, cell, attr, MISSING);
+    return v === MISSING ? undefined : v;
+  };
+  const getUnsavedFieldMapForNode = (nodeKey: string, values?: Record<string, any>) => {
+    const node = nodes[nodeKey];
+    const out: Record<string, boolean> = {};
+    if (!node) return out;
+    const currentValues = values ?? shadow[nodeKey] ?? {};
+    for (const f of node.fields) {
+      const raw = currentValues?.[f.attr];
+      const normalized = f.normalize ? f.normalize(raw) : raw;
+      const base = initialRef.current[nodeKey]?.[f.attr];
+      const baseNormalized = f.normalize ? f.normalize(base) : base;
+      if (!Object.is(normalized, baseNormalized)) out[f.attr] = true;
+    }
+    return out;
+  };
+  const unsavedFieldMapByNode = useMemo(() => {
+    const out: Record<string, Record<string, boolean>> = {};
+    for (const [nodeKey, values] of Object.entries(shadow)) {
+      const dirtyMap = getUnsavedFieldMapForNode(nodeKey, values);
+      if (Object.keys(dirtyMap).length) out[nodeKey] = dirtyMap;
+    }
+    return out;
+  }, [shadow, nodes]);
+  const configuredFieldMapByNode = useMemo(() => {
+    const out: Record<string, Record<string, boolean>> = {};
+    for (const nodeKey of nodeKeys) {
+      const node = nodes[nodeKey];
+      if (!node) continue;
+      const fieldMap: Record<string, boolean> = {};
+      for (const f of node.fields) {
+        const hasShadow = Object.prototype.hasOwnProperty.call(shadow[nodeKey] || {}, f.attr);
+        const shadowRaw = hasShadow ? shadow[nodeKey][f.attr] : undefined;
+        let cellRaw = getCellRaw(f.attr);
+        if (cellRaw === null) cellRaw = undefined;
+        const defaultNormalized = f.normalize ? f.normalize(f.defaultValue) : f.defaultValue;
+        const cellNormalized = f.normalize ? f.normalize(cellRaw) : cellRaw;
+        const baseline = cellRaw === undefined ? defaultNormalized : cellNormalized;
+        const effectiveRaw =
+          hasShadow && !isEmptyInput(shadowRaw) && !Object.is((f.normalize ? f.normalize(shadowRaw) : shadowRaw), baseline)
+            ? shadowRaw
+            : cellRaw;
+        const normalized =
+          effectiveRaw === undefined
+            ? defaultNormalized
+            : (f.normalize ? f.normalize(effectiveRaw) : effectiveRaw);
+        if (!Object.is(normalized, defaultNormalized)) fieldMap[f.attr] = true;
+      }
+      if (Object.keys(fieldMap).length) out[nodeKey] = fieldMap;
+    }
+    return out;
+  }, [nodeKeys, nodes, shadow, graph, cell]);
+  const directConfiguredCountByNode = useMemo(() => {
+    const out: Record<string, number> = {};
+    Object.entries(configuredFieldMapByNode).forEach(([nodeKey, dirtyMap]) => {
+      out[nodeKey] = Object.keys(dirtyMap).length;
+    });
+    return out;
+  }, [configuredFieldMapByNode]);
+  const subtreeConfiguredCountByNode = useMemo(() => {
+    const out: Record<string, number> = {};
+    Object.entries(directConfiguredCountByNode).forEach(([nodeKey, count]) => {
+      const parts = String(nodeKey).split("/");
+      for (let i = 1; i <= parts.length; i += 1) {
+        const key = parts.slice(0, i).join("/");
+        out[key] = (out[key] || 0) + count;
+      }
+    });
+    return out;
+  }, [directConfiguredCountByNode]);
+  const dirtyNodeKeys = useMemo(
+    () => new Set(Object.keys(subtreeConfiguredCountByNode)),
+    [subtreeConfiguredCountByNode],
   );
+  const treeData = useMemo(() => {
+    const source = dirtyOnly ? filterTreeByDirty(rawTreeData, dirtyNodeKeys) : rawTreeData;
+    return filterTree(source, search);
+  }, [rawTreeData, search, dirtyOnly, dirtyNodeKeys]);
   const treeScrollRef = useRef<HTMLDivElement | null>(null);
   const formScrollRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -390,11 +481,6 @@ export default function DftsTypeShell(props: {
     treeScrollRef.current?.scrollTo({ top: 0 });
   }, [search]);
   const selectedNode = nodes[selected];
-  const getCellRaw = (attr: string) => {
-    const MISSING = Symbol("MISSING");
-    const v = getCellAttr(graph, cell, attr, MISSING);
-    return v === MISSING ? undefined : v;
-  };
   const getInitialValuesForNode = (nodeKey: string) => {
     if (shadow[nodeKey]) return shadow[nodeKey];
     const node = nodes[nodeKey];
@@ -407,21 +493,14 @@ export default function DftsTypeShell(props: {
   const handleFormChange = (values: Record<string, any>) =>
     setShadow((prev) => ({ ...prev, [selected]: values }));
   const hasDftTab = visibleTabs.includes("dft") && nodeKeys.length > 0;
-  const touchedFieldCount = useMemo(() => {
-    let count = 0;
-    for (const [nodeKey, values] of Object.entries(shadow)) {
-      const node = nodes[nodeKey];
-      if (!node) continue;
-      for (const f of node.fields) {
-        const raw = values?.[f.attr];
-        const normalized = f.normalize ? f.normalize(raw) : raw;
-        const base = initialRef.current[nodeKey]?.[f.attr];
-        const baseNormalized = f.normalize ? f.normalize(base) : base;
-        if (!Object.is(normalized, baseNormalized)) count += 1;
-      }
-    }
-    return count;
-  }, [shadow, nodes]);
+  const dftUnsavedCount = useMemo(
+    () => Object.values(unsavedFieldMapByNode).reduce((acc, fields) => acc + Object.keys(fields).length, 0),
+    [unsavedFieldMapByNode],
+  );
+  const configuredFieldCount = useMemo(
+    () => Object.values(directConfiguredCountByNode).reduce((acc, count) => acc + count, 0),
+    [directConfiguredCountByNode],
+  );
   const basicTouchedCount = useMemo(() => {
     const base = initialBasicsRef.current;
     return (
@@ -471,7 +550,7 @@ export default function DftsTypeShell(props: {
     [extraTabs, extraDrafts],
   );
   const totalTouched =
-    touchedFieldCount +
+    dftUnsavedCount +
     basicTouchedCount +
     specialTouchedCount +
     layoutTouchedCount +
@@ -622,9 +701,9 @@ export default function DftsTypeShell(props: {
     if (closeAfter) onClose();
   };
   const renderTreeTitle = (node: TreeNode) => {
-    const dirty = Object.keys(shadow).some(
-      (k) => k === node.key || k.startsWith(`${node.key}/`),
-    );
+    const directDirty = directConfiguredCountByNode[String(node.key)] || 0;
+    const subtreeDirty = subtreeConfiguredCountByNode[String(node.key)] || 0;
+    const dirty = subtreeDirty > 0;
     return (
       <div
         style={{
@@ -644,7 +723,13 @@ export default function DftsTypeShell(props: {
         >
           {node.title}
         </span>
-        {dirty ? <Badge color="#2563EB" /> : null}
+        {dirty ? (
+          directDirty > 0 ? (
+            <Badge count={directDirty} size="small" style={{ backgroundColor: "#2563EB" }} />
+          ) : (
+            <Badge count={subtreeDirty} size="small" style={{ backgroundColor: "#94A3B8" }} />
+          )
+        ) : null}
       </div>
     );
   };
@@ -684,13 +769,23 @@ export default function DftsTypeShell(props: {
         }}
       >
         <div style={{ marginBottom: 10 }}>
-          <Input
-            allowClear
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="搜索参数节点"
-            prefix={<SearchOutlined style={{ color: "#94A3B8" }} />}
-          />
+          <Space direction="vertical" size={8} style={{ width: "100%" }}>
+            <Input
+              allowClear
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="搜索参数节点"
+              prefix={<SearchOutlined style={{ color: "#94A3B8" }} />}
+            />
+            <label style={{ display: "flex", alignItems: "center", gap: 8, color: "#475569", fontSize: 12 }}>
+              <input
+                type="checkbox"
+                checked={dirtyOnly}
+                onChange={(e) => setDirtyOnly(e.target.checked)}
+              />
+              只看已修改
+            </label>
+          </Space>
         </div>
         <div ref={treeScrollRef} style={{ minHeight: 0, overflow: "auto", paddingRight: 4 }}>
           <Tree
@@ -749,6 +844,7 @@ export default function DftsTypeShell(props: {
               initialValues={getInitialValuesForNode(selected)}
               resetToken={refreshToken}
               onChange={handleFormChange}
+              dirtyAttrs={configuredFieldMapByNode[selected] || {}}
             />
           ) : (
             <Empty description="请选择一个参数节点" />
@@ -890,7 +986,7 @@ export default function DftsTypeShell(props: {
             >
               <Space wrap>
                 <Tag color="processing" style={{ borderRadius: 999 }}>
-                  DFT 修改：{touchedFieldCount}
+                  DFT 待保存：{dftUnsavedCount}
                 </Tag>
                 <Tag color="processing" style={{ borderRadius: 999 }}>
                   基础属性：{basicTouchedCount}
@@ -959,7 +1055,7 @@ export default function DftsTypeShell(props: {
       >
         <Space size={12} wrap>
           {hasDftTab ? (
-            <Text type="secondary">DFT 修改：{touchedFieldCount}</Text>
+            <Text type="secondary">DFT 待保存：{dftUnsavedCount}</Text>
           ) : null}
           <Text type="secondary">基础属性：{basicTouchedCount}</Text>
           {specialFields.length > 0 ? (

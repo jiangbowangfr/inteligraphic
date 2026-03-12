@@ -9,6 +9,7 @@ import {
   Select,
   Space,
   Switch,
+  Tag,
   Tooltip,
   Typography,
 } from 'antd';
@@ -57,8 +58,9 @@ export default function SchemaForm(props: {
   initialValues: Record<string, any>;
   resetToken?: number;
   onChange: (values: Record<string, any>) => void;
+  dirtyAttrs?: Record<string, boolean>;
 }) {
-  const { nodeKey, node, initialValues, resetToken, onChange } = props;
+  const { nodeKey, node, initialValues, resetToken, onChange, dirtyAttrs = {} } = props;
   const [form] = Form.useForm();
 
   useEffect(() => {
@@ -164,7 +166,19 @@ export default function SchemaForm(props: {
                 <Col key={f.attr} span={fieldSpan(f)}>
                   <Form.Item
                     name={f.attr}
-                    label={renderLabel(f)}
+                    label={
+                      <Space size={6} align="center">
+                        {renderLabel(f)}
+                        {dirtyAttrs[f.attr] ? (
+                          <Tag
+                            color="processing"
+                            style={{ borderRadius: 999, marginInlineStart: 2 }}
+                          >
+                            已修改
+                          </Tag>
+                        ) : null}
+                      </Space>
+                    }
                     valuePropName={(f.kind ?? 'string') === 'switch' ? 'checked' : 'value'}
                     rules={f.required ? [{ required: true, message: '必填项' }] : undefined}
                     extra={
