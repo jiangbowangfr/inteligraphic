@@ -1,6 +1,6 @@
 // src/shared/dfts/ui/IpBasicsTab.tsx
-import React, { useMemo } from 'react';
-import { Card, Col, Descriptions, Form, Input, InputNumber, Row, Space, Switch, Tag, Typography } from 'antd';
+import React from 'react';
+import { Card, Col, Form, Input, InputNumber, Row, Space, Switch, Tag, Typography } from 'antd';
 import type { SpecialFieldDef } from '../types';
 
 const { Text } = Typography;
@@ -17,40 +17,21 @@ export type IpBasicsDraft = {
 export default function IpBasicsTab(props: {
   typeLabel: string;
   categoryLabel: string;
-  summary: {
-    pins: number;
-    inputs: number;
-    outputs: number;
-    hidden: number;
-  };
-  initialValues: IpBasicsDraft;
   value: IpBasicsDraft;
   onChange: (next: IpBasicsDraft) => void;
   specialFields?: SpecialFieldDef[];
-  specialInitialValues?: Record<string, any>;
   specialValues?: Record<string, any>;
   onSpecialChange?: (next: Record<string, any>) => void;
 }) {
   const {
     typeLabel,
     categoryLabel,
-    summary,
-    initialValues,
     value,
     onChange,
     specialFields = [],
-    specialInitialValues = {},
     specialValues = {},
     onSpecialChange,
   } = props;
-
-  const changed = useMemo(() => {
-    const basicChanged = Object.keys(value).filter((k) => !Object.is((value as any)[k], (initialValues as any)[k]));
-    const specialChanged = specialFields
-      .map((f) => f.attr)
-      .filter((attr) => !Object.is(specialValues[attr], specialInitialValues[attr]));
-    return [...basicChanged, ...specialChanged];
-  }, [value, initialValues, specialFields, specialValues, specialInitialValues]);
 
   const setField = <K extends keyof IpBasicsDraft>(key: K, next: IpBasicsDraft[K]) => {
     onChange({ ...value, [key]: next });
@@ -68,11 +49,11 @@ export default function IpBasicsTab(props: {
         height: '100%',
         minHeight: 0,
         display: 'grid',
-        gridTemplateColumns: '300px minmax(560px, 1fr) 360px',
+        gridTemplateColumns: '300px minmax(720px, 1fr)',
         gap: 16,
       }}
     >
-      <div style={{ minHeight: 0, display: 'grid', gridTemplateRows: 'auto auto minmax(0, 1fr)', gap: 16 }}>
+      <div style={{ minHeight: 0, display: 'grid', gridTemplateRows: 'auto minmax(0, 1fr)', gap: 16 }}>
         <Card size="small" style={{ borderRadius: 12, borderColor: '#E2E8F0' }} styles={{ body: { padding: 16 } }}>
           <Space direction="vertical" size={10} style={{ width: '100%' }}>
             <Space size={8} wrap>
@@ -81,15 +62,6 @@ export default function IpBasicsTab(props: {
             </Space>
             <Text type="secondary">当前 IP 的基础属性</Text>
           </Space>
-        </Card>
-
-        <Card size="small" title="连接摘要" style={{ borderRadius: 12, borderColor: '#E2E8F0' }}>
-          <Descriptions column={1} size="small" labelStyle={{ width: 110, color: '#64748B' }}>
-            <Descriptions.Item label="总引脚数">{summary.pins}</Descriptions.Item>
-            <Descriptions.Item label="输入引脚">{summary.inputs}</Descriptions.Item>
-            <Descriptions.Item label="输出引脚">{summary.outputs}</Descriptions.Item>
-            <Descriptions.Item label="隐藏引脚">{summary.hidden}</Descriptions.Item>
-          </Descriptions>
         </Card>
 
         <Card
@@ -181,22 +153,6 @@ export default function IpBasicsTab(props: {
           </Card>
         </Form>
       </Card>
-
-      <div style={{ minHeight: 0, display: 'grid', gridTemplateRows: 'auto minmax(0, 1fr)', gap: 16 }}>
-        <Card size="small" title="字段说明" style={{ borderRadius: 12, borderColor: '#E2E8F0' }}>
-          <Space direction="vertical" size={10} style={{ width: '100%' }}>
-            <Text strong>IP 基础参数页</Text>
-            {hasSpecialBlock ? <Text type="secondary">当前类型包含专属参数，已在中间“特殊参数”区域显示。</Text> : null}
-          </Space>
-        </Card>
-
-        <Card size="small" title="变更摘要" style={{ borderRadius: 12, borderColor: '#E2E8F0', minHeight: 0 }} styles={{ body: { display: 'grid', gridTemplateRows: 'auto auto minmax(0, 1fr)', gap: 12, minHeight: 0 } }}>
-          <Text type="secondary">本页已修改字段：{changed.length}</Text>
-          <div style={{ minHeight: 0, borderRadius: 12, background: '#0F172A', color: '#D6E4FF', padding: 14, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace', fontSize: 12, lineHeight: 1.7, overflow: 'auto' }}>
-            {JSON.stringify({ ...value, ...specialValues }, null, 2)}
-          </div>
-        </Card>
-      </div>
     </div>
   );
 }

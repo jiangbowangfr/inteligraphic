@@ -215,7 +215,7 @@ export default function LogicGateConfigTab(props: DftsExtraTabRenderProps<LogicG
         <Card size="small" style={{ borderRadius: 12, borderColor: '#EEF2F7' }}>
           <Space direction="vertical" size={6} style={{ width: '100%' }}>
             <Text type="secondary">这里修改的是“默认引脚集合”。</Text>
-            <Text type="secondary">更细的 side / 顺序 / 显隐，请到「IP 界面布局」页继续调整。</Text>
+            <Text type="secondary">保存后会同步更新当前 logic gate 的引脚定义。</Text>
           </Space>
         </Card>
       </Card>

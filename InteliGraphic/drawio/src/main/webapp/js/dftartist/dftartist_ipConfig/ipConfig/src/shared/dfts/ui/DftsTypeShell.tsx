@@ -27,7 +27,6 @@ import { getCellAttr, getDftsTypeFromCell, setCellAttr } from "../cell";
 import SchemaForm from "./SchemaForm";
 import PreviewPanel from "./PreviewPanel";
 import IpBasicsTab from "./IpBasicsTab";
-import IpLayoutTab from "./IpLayoutTab";
 
 const { Text, Title } = Typography;
 type TreeNode = { key: string; title: string; children?: TreeNode[] };
@@ -85,13 +84,13 @@ function inferCategory(def: DftsTypeDef): DftsCategory {
 function defaultTabsForCategory(category: DftsCategory): string[] {
   switch (category) {
     case "logic_gate":
-      return ["ip-basic", "ip-layout", "preview"];
+      return ["ip-basic"];
     case "interface":
     case "data_source":
     case "third_party_ip":
-      return ["ip-basic", "ip-layout", "preview"];
+      return ["ip-basic"];
     default:
-      return ["dft", "ip-basic", "ip-layout", "preview"];
+      return ["dft", "ip-basic"];
   }
 }
 function inferBodyLabel(graph: any, cell: any, fallback: string) {
@@ -280,7 +279,9 @@ export default function DftsTypeShell(props: {
     const base = defaultTabsForCategory(category);
     return extraTabs.length ? [...extraTabs.map((t) => t.id), ...base] : base;
   }, [category, extraTabs]);
-  const visibleTabs = def.tabs && def.tabs.length ? def.tabs : defaultTabs;
+  const visibleTabs = (def.tabs && def.tabs.length ? def.tabs : defaultTabs).filter(
+    (tabId) => tabId !== "ip-layout" && tabId !== "preview",
+  );
   const firstTab = visibleTabs[0] || "ip-basic";
   const [activeTab, setActiveTab] = useState<string>(firstTab);
   useEffect(() => {
@@ -550,11 +551,7 @@ export default function DftsTypeShell(props: {
     [extraTabs, extraDrafts],
   );
   const totalTouched =
-    dftUnsavedCount +
-    basicTouchedCount +
-    specialTouchedCount +
-    layoutTouchedCount +
-    extraTouchedCount;
+    dftUnsavedCount + basicTouchedCount + specialTouchedCount + extraTouchedCount;
   const resetAfterApply = () => {
     setShadow({});
     initialRef.current = {};
@@ -733,18 +730,6 @@ export default function DftsTypeShell(props: {
       </div>
     );
   };
-  const pinSummary = useMemo(
-    () => ({
-      pins: layoutPins.length,
-      inputs: layoutPins.filter((p) => (p.dir || "").toLowerCase() === "input")
-        .length,
-      outputs: layoutPins.filter(
-        (p) => (p.dir || "").toLowerCase() === "output",
-      ).length,
-      hidden: layoutPins.filter((p) => !p.visible).length,
-    }),
-    [layoutPins],
-  );
   const dftParamPane = hasDftTab ? (
     <div
       style={{
@@ -865,9 +850,6 @@ export default function DftsTypeShell(props: {
   const tabItems = visibleTabs.map((tabId) => {
     if (tabId === "dft") return { key: "dft", label: "DFT 参数" };
     if (tabId === "ip-basic") return { key: "ip-basic", label: "IP 基础参数" };
-    if (tabId === "ip-layout")
-      return { key: "ip-layout", label: "IP 界面布局" };
-    if (tabId === "preview") return { key: "preview", label: "预览" };
     const extra = extraTabs.find((t) => t.id === tabId);
     return { key: tabId, label: extra?.label || tabId };
   });
@@ -927,89 +909,12 @@ export default function DftsTypeShell(props: {
           <IpBasicsTab
             typeLabel={def.title.replace(/^DFT\s*[·•-]\s*/i, "")}
             categoryLabel={String(category)}
-            summary={pinSummary}
-            initialValues={initialBasicsRef.current}
             value={basicDraft}
             onChange={setBasicDraft}
             specialFields={specialFields}
-            specialInitialValues={initialSpecialsRef.current}
             specialValues={specialDraft}
             onSpecialChange={setSpecialDraft}
           />
-        )}
-        {activeTab === "ip-layout" && (
-          <IpLayoutTab
-            title={basicDraft.bodyLabel}
-            instanceName={basicDraft.instanceName}
-            initialPins={layoutBaselinePins}
-            pins={layoutPins}
-            onChange={setLayoutPins}
-          />
-        )}
-        {activeTab === "preview" && (
-          <div
-            style={{
-              height: "100%",
-              display: "grid",
-              gridTemplateColumns: "minmax(360px, 420px) minmax(520px, 1fr)",
-              gap: 16,
-            }}
-          >
-            {hasDftTab ? (
-              <PreviewPanel
-                mode="full"
-                def={def}
-                nodeKey=""
-                nodeLiveValues={{}}
-                getCellRaw={getCellRaw}
-                shadowAll={shadow}
-              />
-            ) : (
-              <Card
-                size="small"
-                title="分类说明"
-                style={{ borderRadius: 12, borderColor: "#E2E8F0" }}
-              >
-                <Space direction="vertical" size={10} style={{ width: "100%" }}>
-                  <Text type="secondary">
-                    {category === "logic_gate"
-                      ? "Logic gate 不使用 DFT 参数树；预览页主要用于检查图元与布局摘要。"
-                      : "该分类不使用 DFT 参数树。"}
-                  </Text>
-                </Space>
-              </Card>
-            )}
-            <Card
-              size="small"
-              title="图元预览摘要"
-              style={{ borderRadius: 12, borderColor: "#E2E8F0", minHeight: 0 }}
-            >
-              <Space wrap>
-                <Tag color="processing" style={{ borderRadius: 999 }}>
-                  DFT 待保存：{dftUnsavedCount}
-                </Tag>
-                <Tag color="processing" style={{ borderRadius: 999 }}>
-                  基础属性：{basicTouchedCount}
-                </Tag>
-                {specialTouchedCount > 0 ? (
-                  <Tag color="processing" style={{ borderRadius: 999 }}>
-                    特殊参数：{specialTouchedCount}
-                  </Tag>
-                ) : null}
-                <Tag color="processing" style={{ borderRadius: 999 }}>
-                  布局修改：{layoutTouchedCount}
-                </Tag>
-                {extraTouchedCount > 0 ? (
-                  <Tag color="processing" style={{ borderRadius: 999 }}>
-                    扩展页：{extraTouchedCount}
-                  </Tag>
-                ) : null}
-              </Space>
-              <div style={{ marginTop: 14, color: "#64748B", lineHeight: 1.7 }}>
-                这里用于保存前总检查。
-              </div>
-            </Card>
-          </div>
         )}
         {activeExtra &&
           activeTab === activeExtra.id &&
@@ -1061,7 +966,6 @@ export default function DftsTypeShell(props: {
           {specialFields.length > 0 ? (
             <Text type="secondary">特殊参数：{specialTouchedCount}</Text>
           ) : null}
-          <Text type="secondary">布局修改：{layoutTouchedCount}</Text>
           {extraTouchedCount > 0 ? (
             <Text type="secondary">扩展页：{extraTouchedCount}</Text>
           ) : null}
