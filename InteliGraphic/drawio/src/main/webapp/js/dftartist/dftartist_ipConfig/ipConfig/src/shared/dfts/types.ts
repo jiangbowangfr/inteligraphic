@@ -26,7 +26,7 @@ export type FieldDef = {
   display?: (v: any) => string;
 };
 
-export type SpecialFieldKind = 'string' | 'number';
+export type SpecialFieldKind = 'string' | 'number' | 'select' | 'path';
 
 export type SpecialFieldDef = {
   attr: string;
@@ -35,6 +35,7 @@ export type SpecialFieldDef = {
   defaultValue?: any;
   placeholder?: string;
   help?: string;
+  options?: SelectOption[];
   min?: number;
   max?: number;
 };

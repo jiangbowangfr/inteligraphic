@@ -1,6 +1,6 @@
 // src/shared/dfts/ui/IpBasicsTab.tsx
-import React from 'react';
-import { Card, Col, Form, Input, Row, Space, Switch, Tag, Typography } from 'antd';
+import React, { useRef } from 'react';
+import { Button, Card, Col, Form, Input, InputNumber, Row, Select, Space, Switch, Tag, Typography } from 'antd';
 import type { SpecialFieldDef } from '../types';
 
 const { Text } = Typography;
@@ -39,6 +39,29 @@ export default function IpBasicsTab(props: {
 
   const setSpecialField = (attr: string, next: any) => {
     onSpecialChange?.({ ...specialValues, [attr]: next });
+  };
+  const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const pickPath = async (attr: string) => {
+    try {
+      const electronApi = (window as any).electron;
+      if (electronApi?.requestPromise) {
+        const currentPath = String(specialValues[attr] || '').trim();
+        const filePaths = await electronApi.requestPromise({
+          action: 'showOpenDialog',
+          defaultPath: currentPath || undefined,
+          filters: [
+            { name: 'All Files', extensions: ['*'] },
+          ],
+          properties: ['openFile'],
+        });
+        if (Array.isArray(filePaths) && filePaths[0]) {
+          setSpecialField(attr, filePaths[0]);
+          return;
+        }
+      }
+    } catch {}
+
+    fileInputRefs.current[attr]?.click();
   };
 
   const hasSpecialBlock = specialFields.length > 0;
@@ -111,6 +134,48 @@ export default function IpBasicsTab(props: {
                           placeholder={field.placeholder || '默认为空'}
                           onChange={(v) => setSpecialField(field.attr, typeof v === 'number' ? v : undefined)}
                         />
+                      ) : field.kind === 'select' ? (
+                        <Select
+                          value={specialValues[field.attr] ?? undefined}
+                          style={{ width: '100%' }}
+                          placeholder={field.placeholder || '请选择'}
+                          options={field.options || []}
+                          allowClear
+                          onChange={(v) => setSpecialField(field.attr, v)}
+                        />
+                      ) : field.kind === 'path' ? (
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <Input
+                            value={specialValues[field.attr] ?? ''}
+                            placeholder={field.placeholder || '请选择文件路径'}
+                            onChange={(e) => setSpecialField(field.attr, e.target.value)}
+                          />
+                          <input
+                            ref={(node) => {
+                              fileInputRefs.current[field.attr] = node;
+                            }}
+                            type="file"
+                            style={{ display: 'none' }}
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (!file) return;
+                              const input = e.target as HTMLInputElement;
+                              const pickedPath =
+                                (file as any).path ||
+                                file.webkitRelativePath ||
+                                file.name;
+                              setSpecialField(field.attr, pickedPath);
+                              input.value = '';
+                            }}
+                          />
+                          <Button
+                            onClick={() => {
+                              void pickPath(field.attr);
+                            }}
+                          >
+                            选择
+                          </Button>
+                        </div>
                       ) : (
                         <Input
                           value={specialValues[field.attr] ?? ''}
