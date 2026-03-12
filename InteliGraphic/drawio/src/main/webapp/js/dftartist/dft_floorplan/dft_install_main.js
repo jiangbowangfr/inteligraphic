@@ -90,7 +90,7 @@
 
         btn.textContent = st.contextVisible === false ? ">" : "<";
         btn.title = st.contextVisible === false ? "Show Context Panel" : "Hide Context Panel";
-        var rightOffset = st.contextVisible === false ? 0 : ((phase1.contextShell.offsetWidth || st.contextWidth || 320) + 6);
+        var rightOffset = st.contextVisible === false ? 0 : ((phase1.contextShell.offsetWidth || st.contextWidth || 260) + 6);
         btn.style.left = "auto";
         btn.style.right = rightOffset + "px";
         btn.style.display = "";

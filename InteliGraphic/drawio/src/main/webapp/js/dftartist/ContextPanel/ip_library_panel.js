@@ -470,7 +470,6 @@
         var state = {
             query: '',
             sections: {},
-            selectedKey: '',
             hoverKey: '',
             thirdParty: {
                 items: [],
@@ -941,11 +940,8 @@
             statusText = el('div', 'dftctx-hint');
             root.appendChild(statusText);
 
-            previewBox = el('div', 'dftctx-ip-previewbox');
-            previewBox.innerHTML = '<div class="dftctx-ip-preview-empty">Hover an IP to see preview and description.</div>';
-            root.appendChild(previewBox);
-
             listHost = el('div', 'dftctx-panel-body dftctx-ip-list');
+            listHost.style.paddingTop = '6px';
             root.appendChild(listHost);
         }
 
@@ -969,6 +965,7 @@
         function showHover(def) {
             ensureBuilt();
             state.hoverKey = def.key;
+            if (!previewBox) return;
             previewBox.innerHTML = '' +
                 '<div class="dftctx-ip-preview-title">' + safeText((def.defaultLabel || def.key)).replace(/\n/g, ' ') + '</div>' +
                 '<div class="dftctx-ip-preview-graphic">' + previewSvg(def) + '</div>' +
@@ -1005,6 +1002,8 @@
                 if (!groups[catKey] || !groups[catKey].length) return;
                 var section = el('div', 'dftctx-section');
                 var header = el('button', 'dftctx-section-header');
+                header.style.padding = '7px 10px';
+                header.style.borderRadius = '8px';
                 header.type = 'button';
                 header.onmousedown = function (evt) { stop(evt); toggleSection(catKey); };
                 var collapsed = !!state.sections[catKey];
@@ -1014,6 +1013,7 @@
                 section.appendChild(header);
                 if (!collapsed) {
                     var box = el('div', 'dftctx-section-body');
+                    box.style.paddingTop = '4px';
                     groups[catKey].forEach(function (def) { box.appendChild(renderItem(def, pageReady)); });
                     section.appendChild(box);
                 }
@@ -1025,35 +1025,56 @@
             var row = el('button', 'dftctx-ip-item simple');
             row.type = 'button';
             row.draggable = !!pageReady;
-            if (state.selectedKey === def.key) row.className += ' selected';
+            row.style.marginLeft = '12px';
+            row.style.width = 'calc(100% - 12px)';
+            row.style.marginBottom = '1px';
+            row.style.padding = '4px 8px';
+            row.style.borderRadius = '6px';
+            row.style.gap = '8px';
+            row.style.border = 'none';
+            row.style.boxShadow = 'none';
+            row.style.background = 'transparent';
             if (!pageReady) row.className += ' disabled';
             row.title = safeText((def.defaultLabel || def.key)).replace(/\n/g, ' ');
 
             var title = el('div', 'dftctx-ip-name', safeText((def.defaultLabel || def.key)).replace(/\n/g, ' '));
+            title.style.flex = '1 1 auto';
+            title.style.minWidth = '0';
+            title.style.fontSize = '11px';
+            title.style.lineHeight = '1.05';
             row.appendChild(title);
 
             if (def.__thirdPartyManaged) {
                 var tag = el('div', 'dftctx-ip-tag', def.__thirdPartyScope === 'software' ? 'Software' : 'Project');
+                tag.style.flex = '0 0 auto';
                 tag.style.fontSize = '10px';
+                tag.style.lineHeight = '1';
                 tag.style.color = '#475569';
-                tag.style.marginTop = '2px';
+                tag.style.marginTop = '0';
                 row.appendChild(tag);
             }
 
-            row.onmouseenter = function () { showHover(def); };
+            row.onmouseenter = function () {
+                showHover(def);
+                row.style.background = '#eceff3';
+            };
+            row.onmouseleave = function () {
+                if (state.hoverKey === def.key) state.hoverKey = '';
+                row.style.background = 'transparent';
+            };
             row.ondragstart = function (evt) {
                 if (!pageReady || !evt.dataTransfer) return;
                 evt.dataTransfer.effectAllowed = 'copy';
                 evt.dataTransfer.setData('application/x-dfts-ip-key', def.key);
                 evt.dataTransfer.setData('text/plain', def.key);
-                state.selectedKey = def.key;
-                renderList();
+                state.hoverKey = '';
+                row.style.background = 'transparent';
             };
             row.onmousedown = function (evt) {
                 stop(evt);
-                state.selectedKey = def.key;
+                state.hoverKey = '';
+                row.style.background = 'transparent';
                 if (!hasOpenPage(ui)) {
-                    renderList();
                     dockInfo(ui, 'warning', 'Open or create a page before adding IP: ' + safeText((def.defaultLabel || def.key)).replace(/\n/g, ' '), { source: 'ip-library' });
                     return;
                 }
@@ -1063,7 +1084,6 @@
                     dockInfo(ui, 'error', 'Failed to add IP: ' + e.message, { source: 'ip-library' });
                     if (global.console && console.error) console.error('[Context.IP] insert failed', e);
                 }
-                renderList();
             };
             return row;
         }
