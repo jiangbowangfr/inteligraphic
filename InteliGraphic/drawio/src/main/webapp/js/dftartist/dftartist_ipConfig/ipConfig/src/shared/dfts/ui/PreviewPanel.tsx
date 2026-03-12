@@ -106,6 +106,7 @@ function buildSpec(params: {
 
       for (const f of fields) {
         const attr = f.attr;
+        const outputKey = String(f.label || f.attr || '').trim() || attr;
         const norm = (v: any) => (f.normalize ? f.normalize(v) : v);
 
         const hasShadow = Object.prototype.hasOwnProperty.call(live, attr);
@@ -122,11 +123,11 @@ function buildSpec(params: {
         if (shadowEffective) {
           const shadow = norm(shadowRaw);
           if (Object.is(shadow, defv)) continue;
-          changedLines.push(`${attr} : ${toSpecValue(shadow)} ;`);
+          changedLines.push(`${outputKey} : ${toSpecValue(shadow)} ;`);
         } else {
           if (cellRaw === undefined) continue;
           if (Object.is(cell, defv)) continue;
-          changedLines.push(`${attr} : ${toSpecValue(cell)} ;`);
+          changedLines.push(`${outputKey} : ${toSpecValue(cell)} ;`);
         }
       }
 
@@ -172,6 +173,7 @@ function buildSpec(params: {
 
     for (const f of fields) {
       const attr = f.attr;
+      const outputKey = String(f.label || f.attr || '').trim() || attr;
       const norm = (v: any) => (f.normalize ? f.normalize(v) : v);
 
       const hasShadow = Object.prototype.hasOwnProperty.call(live, attr);
@@ -189,11 +191,11 @@ function buildSpec(params: {
       if (shadowEffective) {
         const shadow = norm(shadowRaw);
         if (Object.is(shadow, defv)) continue;
-        changedLines.push(`${attr} : ${toSpecValue(shadow)} ;`);
+        changedLines.push(`${outputKey} : ${toSpecValue(shadow)} ;`);
       } else {
         if (cellRaw === undefined) continue;
         if (Object.is(cell, defv)) continue;
-        changedLines.push(`${attr} : ${toSpecValue(cell)} ;`);
+        changedLines.push(`${outputKey} : ${toSpecValue(cell)} ;`);
       }
     }
 
