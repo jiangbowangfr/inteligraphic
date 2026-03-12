@@ -41,6 +41,7 @@ export const def: DftsTypeDef = {
           kv('parent_instance', get('parent_instance', '')),
           kv('leaf_instance_name', get('leaf_instance_name', '')),
 
+          block('DefaultChildConfiguration', ''),
           block('Interface', [
             kv('bus_clock', get('if_bus_clock', 'bus_clock')),
             kv('bus_clock_out', get('if_bus_clock_out', 'bus_clock_out')),

@@ -2,7 +2,7 @@ import type { DftsTypeDef } from '../../shared/dfts/types';
 import { DFF_LATCH, kv, block, wrapSSNDatapath } from '../ssn/_common';
 
 export const def: DftsTypeDef = {
-  type: 'ssn_receiver1x_pipeline',
+  type: 'ssn_receiver1xpipeline',
   title: 'DFT · SSN · Receiver1xPipeline',
   defaultNode: 'Receiver1xPipeline',
   nodes: {

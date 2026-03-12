@@ -2,7 +2,7 @@ import type { DftsTypeDef } from '../../shared/dfts/types';
 import { kv, block, wrapSSNDatapath } from '../ssn/_common';
 
 export const def: DftsTypeDef = {
-  type: 'ssn_output_pipeline',
+  type: 'ssn_outputpipeline',
   title: 'DFT · SSN · OutputPipeline',
   defaultNode: 'OutputPipeline',
   nodes: {

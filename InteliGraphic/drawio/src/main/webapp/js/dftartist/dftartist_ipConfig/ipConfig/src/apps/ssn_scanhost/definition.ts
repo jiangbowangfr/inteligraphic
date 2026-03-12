@@ -152,6 +152,38 @@ export const def: DftsTypeDef = {
           ].join('\n')),
         ].join('\n'));
 
+        const connChainGroup = block(`ChainGroup(${get('conn_cg_id', '1')})`, [
+          kv('to_scan_in', get('conn_cg_to_scan_in', '')),
+          kv('to_scan_in_bypass_in', get('conn_cg_to_scan_in_bypass_in', '')),
+          kv('from_scan_out', get('conn_cg_from_scan_out', '')),
+          kv('from_scan_out_bypass_out', get('conn_cg_from_scan_out_bypass_out', '')),
+        ].join('\n'));
+
+        const connections = block('Connections', [
+          kv('bus_clock_in', get('conn_bus_clock_in', '')),
+          kv('test_clock', get('conn_test_clock', '')),
+          kv('test_clock_bypass_in', get('conn_test_clock_bypass_in', 'DftSignal(test_clock)')),
+          kv('edt_clock', get('conn_edt_clock', '')),
+          kv('edt_clock_bypass_in', get('conn_edt_clock_bypass_in', 'DftSignal(edt_clock)')),
+          kv('edt_update', get('conn_edt_update', '')),
+          kv('edt_update_bypass_in', get('conn_edt_update_bypass_in', 'DftSignal(edt_update)')),
+          kv('scan_en', get('conn_scan_en', '')),
+          kv('scan_en_bypass_in', get('conn_scan_en_bypass_in', 'DftSignal(scan_en)')),
+          kv('shift_capture_clock', get('conn_shift_capture_clock', '')),
+          kv('shift_capture_clock_bypass_in', get('conn_shift_capture_clock_bypass_in', 'DftSignal(shift_capture_clock)')),
+          kv('shift_clock', get('conn_shift_clock', '')),
+          kv('shift_clock_bypass_in', get('conn_shift_clock_bypass_in', 'DftSignal(shift_clock)')),
+          kv('capture_clock', get('conn_capture_clock', '')),
+          kv('capture_clock_bypass_in', get('conn_capture_clock_bypass_in', 'DftSignal(capture_clock)')),
+          kv('ssh_is_active', get('conn_ssh_is_active', '')),
+          kv('to_scan_in', get('conn_to_scan_in', '')),
+          kv('to_scan_in_bypass_in', get('conn_to_scan_in_bypass_in', '')),
+          kv('from_scan_out', get('conn_from_scan_out', '')),
+          kv('from_scan_out_bypass_out', get('conn_from_scan_out_bypass_out', '')),
+          kv('delete_pre_existing_functional_source', get('conn_delete_pre_existing_functional_source', 'off')),
+          connChainGroup,
+        ].join('\n'));
+
         const inner = [
           kv('ijtag_host_interface', get('ijtag_host_interface', 'Sib(ssn)')),
           kv('ijtag_connection_order', get('ijtag_connection_order', '')),
@@ -190,8 +222,7 @@ export const def: DftsTypeDef = {
           onChip,
           chainGroup,
           iface,
-
-          block('Connections', ''),  // 你后续把 spec 补完整我再补字段
+          connections,
           block('ExtraOutputPath', ''),
         ].join('\n');
 
@@ -324,8 +355,45 @@ export const def: DftsTypeDef = {
 
     'ScanHost/Connections': {
       title: 'Connections',
-      description: '你贴的 spec 在这里截断了；先占位，后续补全字段即可。',
-      fields: [],
+      fields: [
+        { attr: 'conn_bus_clock_in', label: 'bus_clock_in', defaultValue: '' },
+        { attr: 'conn_test_clock', label: 'test_clock', defaultValue: '' },
+        { attr: 'conn_test_clock_bypass_in', label: 'test_clock_bypass_in', defaultValue: 'DftSignal(test_clock)', help: 'default: DftSignal(test_clock)' },
+        { attr: 'conn_edt_clock', label: 'edt_clock', placeholder: 'port_pin_name, ...', defaultValue: '' },
+        { attr: 'conn_edt_clock_bypass_in', label: 'edt_clock_bypass_in', defaultValue: 'DftSignal(edt_clock)', help: 'default: DftSignal(edt_clock)' },
+        { attr: 'conn_edt_update', label: 'edt_update', placeholder: 'port_pin_name, ...', defaultValue: '' },
+        { attr: 'conn_edt_update_bypass_in', label: 'edt_update_bypass_in', defaultValue: 'DftSignal(edt_update)', help: 'default: DftSignal(edt_update)' },
+        { attr: 'conn_scan_en', label: 'scan_en', placeholder: 'port_pin_name, ...', defaultValue: '' },
+        { attr: 'conn_scan_en_bypass_in', label: 'scan_en_bypass_in', defaultValue: 'DftSignal(scan_en)', help: 'default: DftSignal(scan_en)' },
+        { attr: 'conn_shift_capture_clock', label: 'shift_capture_clock', placeholder: 'port_pin_name, ...', defaultValue: '' },
+        { attr: 'conn_shift_capture_clock_bypass_in', label: 'shift_capture_clock_bypass_in', defaultValue: 'DftSignal(shift_capture_clock)', help: 'default: DftSignal(shift_capture_clock)' },
+        { attr: 'conn_shift_clock', label: 'shift_clock', placeholder: 'port_pin_name, ...', defaultValue: '' },
+        { attr: 'conn_shift_clock_bypass_in', label: 'shift_clock_bypass_in', defaultValue: 'DftSignal(shift_clock)', help: 'default: DftSignal(shift_clock)' },
+        { attr: 'conn_capture_clock', label: 'capture_clock', placeholder: 'port_pin_name, ...', defaultValue: '' },
+        { attr: 'conn_capture_clock_bypass_in', label: 'capture_clock_bypass_in', defaultValue: 'DftSignal(capture_clock)', help: 'default: DftSignal(capture_clock)' },
+        { attr: 'conn_ssh_is_active', label: 'ssh_is_active', placeholder: 'port_pin_name, ...', defaultValue: '' },
+        { attr: 'conn_to_scan_in', label: 'to_scan_in', placeholder: 'port_pin_name, ...', defaultValue: '' },
+        { attr: 'conn_to_scan_in_bypass_in', label: 'to_scan_in_bypass_in', placeholder: 'port_pin_name, ...', defaultValue: 'edt_channels_in[%d]', help: 'default: edt_channels_in[%d]' },
+        { attr: 'conn_from_scan_out', label: 'from_scan_out', placeholder: 'port_pin_name, ...', defaultValue: '' },
+        { attr: 'conn_from_scan_out_bypass_out', label: 'from_scan_out_bypass_out', placeholder: 'port_pin_name, ...', defaultValue: 'edt_channels_out[%d]', help: 'default: edt_channels_out[%d]' },
+        {
+          attr: 'conn_delete_pre_existing_functional_source',
+          label: 'delete_pre_existing_functional_source',
+          kind: 'select',
+          options: ON_OFF,
+          defaultValue: 'off',
+        },
+      ],
+    },
+    'ScanHost/Connections/ChainGroup': {
+      title: 'Connections/ChainGroup(id)',
+      fields: [
+        { attr: 'conn_cg_id', label: 'id', defaultValue: '1' },
+        { attr: 'conn_cg_to_scan_in', label: 'to_scan_in', placeholder: 'port_pin_name, ...', defaultValue: '' },
+        { attr: 'conn_cg_to_scan_in_bypass_in', label: 'to_scan_in_bypass_in', placeholder: 'port_pin_name, ...', defaultValue: 'edt_channels_in_%s[%d]', help: 'default: edt_channels_in_%s[%d]' },
+        { attr: 'conn_cg_from_scan_out', label: 'from_scan_out', placeholder: 'port_pin_name, ...', defaultValue: '' },
+        { attr: 'conn_cg_from_scan_out_bypass_out', label: 'from_scan_out_bypass_out', placeholder: 'port_pin_name, ...', defaultValue: 'edt_channels_out_%s[%d]', help: 'default: edt_channels_out_%s[%d]' },
+      ],
     },
   },
 };

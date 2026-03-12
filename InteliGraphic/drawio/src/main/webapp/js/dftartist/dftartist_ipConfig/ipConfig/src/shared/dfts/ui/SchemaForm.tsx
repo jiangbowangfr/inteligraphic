@@ -52,6 +52,36 @@ function renderLabel(f: FieldDef) {
   );
 }
 
+function hasMeaningfulDefaultValue(value: any) {
+  return value !== undefined && value !== null && value !== '';
+}
+
+function formatDefaultValue(value: any) {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function renderFieldExtra(f: FieldDef) {
+  const help = f.help?.trim() || '';
+  const showDefault = hasMeaningfulDefaultValue(f.defaultValue) && !/default\s*:/i.test(help);
+  const defaultText = showDefault ? `default: ${formatDefaultValue(f.defaultValue)}` : '';
+
+  if (!help && !defaultText) return undefined;
+
+  return (
+    <span style={{ color: '#64748B', fontSize: 12, lineHeight: 1.45 }}>
+      {help ? <span>{help}</span> : null}
+      {help && defaultText ? <br /> : null}
+      {defaultText ? <span>{defaultText}</span> : null}
+    </span>
+  );
+}
+
 export default function SchemaForm(props: {
   nodeKey: string;
   node: NodeDef;
@@ -181,11 +211,7 @@ export default function SchemaForm(props: {
                     }
                     valuePropName={(f.kind ?? 'string') === 'switch' ? 'checked' : 'value'}
                     rules={f.required ? [{ required: true, message: '必填项' }] : undefined}
-                    extra={
-                      f.help ? (
-                        <span style={{ color: '#64748B', fontSize: 12, lineHeight: 1.45 }}>{f.help}</span>
-                      ) : undefined
-                    }
+                    extra={renderFieldExtra(f)}
                   >
                     {renderField(f)}
                   </Form.Item>
