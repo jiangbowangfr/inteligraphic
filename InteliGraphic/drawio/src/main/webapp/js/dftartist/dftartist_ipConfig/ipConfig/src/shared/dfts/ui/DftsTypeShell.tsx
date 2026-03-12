@@ -23,7 +23,12 @@ import type {
   SpecialFieldDef,
 } from "../types";
 import { buildTreeFromPaths } from "../tree";
-import { getCellAttr, getDftsTypeFromCell, setCellAttr } from "../cell";
+import {
+  getCellAttr,
+  getDftsTypeFromCell,
+  setCellAttr,
+  setStyleValue,
+} from "../cell";
 import SchemaForm from "./SchemaForm";
 import PreviewPanel from "./PreviewPanel";
 import IpBasicsTab from "./IpBasicsTab";
@@ -129,6 +134,11 @@ function inferBodyLabel(graph: any, cell: any, fallback: string) {
   return fallback;
 }
 function inferInstanceName(graph: any, cell: any) {
+  const floorplanInstanceName = parseStyle(
+    getRawStyle(graph, cell),
+    "dftsFloorplan_instanceName",
+  );
+  if (floorplanInstanceName) return String(floorplanInstanceName);
   const modelInstanceName = readStoredSymbolModel(graph, cell)?.instanceName;
   if (modelInstanceName) return String(modelInstanceName);
   return (
@@ -227,7 +237,17 @@ function normalizePins(model: DftsSymbolModel): DftsPinDraft[] {
     visible: pin.visible == null ? true : !!pin.visible,
   }));
 }
-function writeBodyLabel(graph: any, cell: any, label: string) {
+function writeBodyLabel(graph: any, cell: any, label: string, persistAttr = true) {
+  if (!persistAttr) {
+    try {
+      const model = graph.getModel ? graph.getModel() : graph.model;
+      model?.setValue?.(cell, label);
+    } catch {}
+    try {
+      graph.cellLabelChanged?.(cell, label, false);
+    } catch {}
+    return;
+  }
   setCellAttr(graph, cell, "dftsIP_bodyLabel", label || null);
   setCellAttr(graph, cell, "bodyLabel", label || null);
   try {
@@ -288,7 +308,11 @@ function readInitialSpecialValues(
 ) {
   const out: Record<string, any> = {};
   fields.forEach((field) => {
-    const raw = getCellAttr(graph, cell, field.attr, field.defaultValue);
+    const raw =
+      field.attr.startsWith("dftsFloorplan_")
+        ? parseStyle(getRawStyle(graph, cell), field.attr) ??
+          getCellAttr(graph, cell, field.attr, field.defaultValue)
+        : getCellAttr(graph, cell, field.attr, field.defaultValue);
     out[field.attr] =
       field.kind === "number"
         ? toNumber(raw)
@@ -333,33 +357,74 @@ export default function DftsTypeShell(props: {
   const [refreshToken, setRefreshToken] = useState(0);
   const initialRef = useRef<Record<string, Record<string, any>>>({});
   const initialBasics = useMemo<IpBasicsDraft>(
-    () => ({
-      bodyLabel: inferBodyLabel(
-        graph,
-        cell,
-        def.title.replace(/^DFT\s*[·•-]\s*/i, ""),
-      ),
-      instanceName: String(inferInstanceName(graph, cell) || ""),
-      showInstance: inferShowInstance(graph, cell),
-      lockBodyLabel: inferLockBodyLabel(graph, cell),
-      width: toNumber(
-        getCellAttr(
+    () => {
+      if (category === "floorplan") {
+        const floorplanTitle =
+          String(
+            parseStyle(getRawStyle(graph, cell), "dftsFloorplan_moduleName") || "",
+          ).trim() ||
+          inferBodyLabel(
+            graph,
+            cell,
+            def.title.replace(/^DFT\s*[·•-]\s*/i, ""),
+          );
+        const floorplanInstanceName =
+          String(
+            parseStyle(getRawStyle(graph, cell), "dftsFloorplan_instanceName") || "",
+          ).trim() || String(inferInstanceName(graph, cell) || "");
+        return {
+          bodyLabel: floorplanTitle,
+          instanceName: floorplanInstanceName,
+          showInstance: inferShowInstance(graph, cell),
+          lockBodyLabel: inferLockBodyLabel(graph, cell),
+          width: toNumber(
+            parseStyle(getRawStyle(graph, cell), "dftsIP_defaultWidth") ??
+              getCellAttr(
+                graph,
+                cell,
+                "dftsIP_defaultWidth",
+                getCellAttr(graph, cell, "width", undefined),
+              ),
+          ),
+          height: toNumber(
+            parseStyle(getRawStyle(graph, cell), "dftsIP_defaultHeight") ??
+              getCellAttr(
+                graph,
+                cell,
+                "dftsIP_defaultHeight",
+                getCellAttr(graph, cell, "height", undefined),
+              ),
+          ),
+        };
+      }
+      return {
+        bodyLabel: inferBodyLabel(
           graph,
           cell,
-          "dftsIP_defaultWidth",
-          getCellAttr(graph, cell, "width", undefined),
+          def.title.replace(/^DFT\s*[·•-]\s*/i, ""),
         ),
-      ),
-      height: toNumber(
-        getCellAttr(
-          graph,
-          cell,
-          "dftsIP_defaultHeight",
-          getCellAttr(graph, cell, "height", undefined),
+        instanceName: String(inferInstanceName(graph, cell) || ""),
+        showInstance: inferShowInstance(graph, cell),
+        lockBodyLabel: inferLockBodyLabel(graph, cell),
+        width: toNumber(
+          getCellAttr(
+            graph,
+            cell,
+            "dftsIP_defaultWidth",
+            getCellAttr(graph, cell, "width", undefined),
+          ),
         ),
-      ),
-    }),
-    [graph, cell, def.title],
+        height: toNumber(
+          getCellAttr(
+            graph,
+            cell,
+            "dftsIP_defaultHeight",
+            getCellAttr(graph, cell, "height", undefined),
+          ),
+        ),
+      };
+    },
+    [category, graph, cell, def.title],
   );
   const initialBasicsRef = useRef<IpBasicsDraft>(clone(initialBasics));
   const [basicDraft, setBasicDraft] = useState<IpBasicsDraft>(initialBasics);
@@ -616,69 +681,131 @@ export default function DftsTypeShell(props: {
           }
         }
       }
-      if (!Object.is(initialBasicsRef.current.bodyLabel, basicDraft.bodyLabel))
-        writeBodyLabel(graph, cell, basicDraft.bodyLabel);
-      if (
-        !Object.is(
-          initialBasicsRef.current.instanceName,
-          basicDraft.instanceName,
+      if (category === "floorplan") {
+        if (!Object.is(initialBasicsRef.current.bodyLabel, basicDraft.bodyLabel))
+          writeBodyLabel(graph, cell, basicDraft.bodyLabel, false);
+        if (
+          !Object.is(
+            initialBasicsRef.current.instanceName,
+            basicDraft.instanceName,
+          )
+        ) {
+          setStyleValue(
+            graph,
+            cell,
+            "dftsFloorplan_instanceName",
+            basicDraft.instanceName || "",
+          );
+        }
+        if (
+          !Object.is(
+            initialBasicsRef.current.showInstance,
+            basicDraft.showInstance,
+          )
+        ) {
+          setStyleValue(
+            graph,
+            cell,
+            "dftsIP_showInstance",
+            basicDraft.showInstance ? "1" : "0",
+          );
+        }
+        if (
+          !Object.is(
+            initialBasicsRef.current.lockBodyLabel,
+            basicDraft.lockBodyLabel,
+          )
+        ) {
+          setStyleValue(
+            graph,
+            cell,
+            "dftsIP_lockBodyLabel",
+            basicDraft.lockBodyLabel ? "1" : "0",
+          );
+        }
+        if (!Object.is(initialBasicsRef.current.width, basicDraft.width))
+          setStyleValue(
+            graph,
+            cell,
+            "dftsIP_defaultWidth",
+            basicDraft.width == null ? "" : String(basicDraft.width),
+          );
+        if (!Object.is(initialBasicsRef.current.height, basicDraft.height))
+          setStyleValue(
+            graph,
+            cell,
+            "dftsIP_defaultHeight",
+            basicDraft.height == null ? "" : String(basicDraft.height),
+          );
+      } else {
+        if (!Object.is(initialBasicsRef.current.bodyLabel, basicDraft.bodyLabel))
+          writeBodyLabel(graph, cell, basicDraft.bodyLabel);
+        if (
+          !Object.is(
+            initialBasicsRef.current.instanceName,
+            basicDraft.instanceName,
+          )
+        ) {
+          setCellAttr(
+            graph,
+            cell,
+            "dftsIP_instanceName",
+            basicDraft.instanceName || null,
+          );
+          setCellAttr(
+            graph,
+            cell,
+            "instanceName",
+            basicDraft.instanceName || null,
+          );
+        }
+        if (
+          !Object.is(
+            initialBasicsRef.current.showInstance,
+            basicDraft.showInstance,
+          )
         )
-      ) {
-        setCellAttr(
-          graph,
-          cell,
-          "dftsIP_instanceName",
-          basicDraft.instanceName || null,
-        );
-        setCellAttr(
-          graph,
-          cell,
-          "instanceName",
-          basicDraft.instanceName || null,
-        );
+          setCellAttr(
+            graph,
+            cell,
+            "dftsIP_showInstance",
+            basicDraft.showInstance ? "1" : "0",
+          );
+        if (
+          !Object.is(
+            initialBasicsRef.current.lockBodyLabel,
+            basicDraft.lockBodyLabel,
+          )
+        )
+          setCellAttr(
+            graph,
+            cell,
+            "dftsIP_lockBodyLabel",
+            basicDraft.lockBodyLabel ? "1" : "0",
+          );
+        if (!Object.is(initialBasicsRef.current.width, basicDraft.width))
+          setCellAttr(
+            graph,
+            cell,
+            "dftsIP_defaultWidth",
+            basicDraft.width ?? null,
+          );
+        if (!Object.is(initialBasicsRef.current.height, basicDraft.height))
+          setCellAttr(
+            graph,
+            cell,
+            "dftsIP_defaultHeight",
+            basicDraft.height ?? null,
+          );
       }
-      if (
-        !Object.is(
-          initialBasicsRef.current.showInstance,
-          basicDraft.showInstance,
-        )
-      )
-        setCellAttr(
-          graph,
-          cell,
-          "dftsIP_showInstance",
-          basicDraft.showInstance ? "1" : "0",
-        );
-      if (
-        !Object.is(
-          initialBasicsRef.current.lockBodyLabel,
-          basicDraft.lockBodyLabel,
-        )
-      )
-        setCellAttr(
-          graph,
-          cell,
-          "dftsIP_lockBodyLabel",
-          basicDraft.lockBodyLabel ? "1" : "0",
-        );
-      if (!Object.is(initialBasicsRef.current.width, basicDraft.width))
-        setCellAttr(
-          graph,
-          cell,
-          "dftsIP_defaultWidth",
-          basicDraft.width ?? null,
-        );
-      if (!Object.is(initialBasicsRef.current.height, basicDraft.height))
-        setCellAttr(
-          graph,
-          cell,
-          "dftsIP_defaultHeight",
-          basicDraft.height ?? null,
-        );
       specialFields.forEach((field) => {
         const next = specialDraft[field.attr];
         const prev = initialSpecialsRef.current[field.attr];
         if (Object.is(prev, next)) return;
+        if (category === "floorplan" && field.attr.startsWith("dftsFloorplan_")) {
+          setStyleValue(graph, cell, field.attr, next == null ? "" : String(next));
+          return;
+        }
         setCellAttr(graph, cell, field.attr, next ?? null);
       });
       let handledSymbol = false;
@@ -704,7 +831,11 @@ export default function DftsTypeShell(props: {
         if (res && typeof res === "object" && res.handledSymbol)
           handledSymbol = true;
       }
-      if (!handledSymbol && (layoutTouchedCount > 0 || basicTouchedCount > 0))
+      if (
+        category !== "floorplan" &&
+        !handledSymbol &&
+        (layoutTouchedCount > 0 || basicTouchedCount > 0)
+      )
         applySymbolModel(
           graph,
           cell,
@@ -715,7 +846,16 @@ export default function DftsTypeShell(props: {
           basicDraft.showInstance,
           basicDraft.lockBodyLabel,
         );
-        setCellAttr(graph, cell, 'dftsIP_type', rawCellTypeRef.current || def.type);
+      if (category === "floorplan") {
+        setStyleValue(
+          graph,
+          cell,
+          "dftsIP_type",
+          rawCellTypeRef.current || def.type,
+        );
+      } else {
+        setCellAttr(graph, cell, "dftsIP_type", rawCellTypeRef.current || def.type);
+      }
     } finally {
       model.endUpdate();
     }

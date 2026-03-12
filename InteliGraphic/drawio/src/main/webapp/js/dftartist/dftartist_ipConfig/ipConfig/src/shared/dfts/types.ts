@@ -2,7 +2,13 @@
 import type { ComponentType } from 'react';
 
 export type DftsTypeId = string;
-export type DftsCategory = 'dft_ip' | 'logic_gate' | 'interface' | 'data_source' | 'third_party_ip';
+export type DftsCategory =
+  | 'dft_ip'
+  | 'logic_gate'
+  | 'interface'
+  | 'data_source'
+  | 'third_party_ip'
+  | 'floorplan';
 
 export type FieldKind = 'string' | 'number' | 'select' | 'textarea' | 'switch';
 export type SelectOption = { label: string; value: string | number | boolean };

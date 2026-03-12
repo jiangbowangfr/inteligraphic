@@ -1,4 +1,4 @@
-import { setCellAttr } from "../../shared/dfts/cell";
+import { setStyleValue } from "../../shared/dfts/cell";
 import type { DftsTypeDef } from "../../shared/dfts/types";
 
 export const floorplanModuleDefinition: DftsTypeDef = {
@@ -50,7 +50,17 @@ export const floorplanModuleDefinition: DftsTypeDef = {
     },
   ],
   applySpecialBasics: ({ graph, cell, basicDraft }) => {
-    setCellAttr(graph, cell, "dftsFloorplan_moduleName", basicDraft.bodyLabel || null);
-    setCellAttr(graph, cell, "dftsFloorplan_instanceName", basicDraft.instanceName || null);
+    setStyleValue(
+      graph,
+      cell,
+      "dftsFloorplan_moduleName",
+      basicDraft.bodyLabel || "",
+    );
+    setStyleValue(
+      graph,
+      cell,
+      "dftsFloorplan_instanceName",
+      basicDraft.instanceName || "",
+    );
   },
 };
