@@ -17,6 +17,31 @@
         return null;
     }
 
+    function debugLog() {
+        if (typeof console === 'undefined' || !console.log) return;
+        var args = Array.prototype.slice.call(arguments);
+        args.unshift('[DataSourceFloorplan]');
+        try {
+            console.log.apply(console, args);
+        } catch (e) { }
+    }
+
+    function cellDebugInfo(graph, cell) {
+        if (!cell) return { id: null, value: null, style: '', isBody: false, isPin: false };
+        var style = '';
+        try {
+            style = cell.getStyle ? (cell.getStyle() || '') : (cell.style || '');
+        } catch (e) { }
+        return {
+            id: cell.getId ? cell.getId() : cell.id,
+            value: cell.value != null ? String(cell.value) : '',
+            style: style,
+            isBody: !!(graph && NS.isChipBody && NS.isChipBody(graph, cell)),
+            isPin: !!(graph && NS.isPinCell && NS.isPinCell(graph, cell)),
+            isSymbolPort: !!(cell.__dftsSymbolChild && cell.__dftsSymbolKind === 'port')
+        };
+    }
+
 
     function getSymbolNS() {
         return NS && NS.Symbol ? NS.Symbol : null;
@@ -50,6 +75,11 @@
             if (String(ports[i].__dftsSymbolKey || '') === String(pinKey)) return ports[i];
         }
         return null;
+    }
+
+    function getSymbolPinModels(body) {
+        var symModel = getSymbolModel(body) || {};
+        return Array.isArray(symModel.pins) ? symModel.pins : [];
     }
 
     function ensureSymbolPortCompatibility(graph, body, def, runtimeOpt, ctx) {
@@ -165,11 +195,11 @@
 
 
     function isFloorplanStartDef(cfg, pinDir, pinType) {
-        return !!(cfg && cfg.floorplanLineStart) || (pinDir === 'input' && pinType === 'data_in');
+        return !!(cfg && cfg.floorplanLineStart) || (pinDir === 'output' && pinType === 'data_out');
     }
 
     function isFloorplanTargetDef(cfg, pinDir, pinType) {
-        return !!(cfg && cfg.floorplanLineTarget) || (pinDir === 'output' && pinType === 'data_out');
+        return !!(cfg && cfg.floorplanLineTarget) || (pinDir === 'input' && pinType === 'data_in');
     }
 
     function markDataSourceAsFloorplan(graph, body, def, runtimeOpt, ctx) {
@@ -181,10 +211,14 @@
         var bodyStyle = body.getStyle() || '';
         bodyStyle = mxUtils.setStyle(bodyStyle, 'floorplan', '1');
         bodyStyle = mxUtils.setStyle(bodyStyle, 'perimeter', 'floorplanAnyPoint');
+        bodyStyle = mxUtils.setStyle(bodyStyle, 'dftsIP_category', String(NS.CATEGORY.DATASOURCE));
+        if (def && def.dftsType) bodyStyle = mxUtils.setStyle(bodyStyle, 'dftsIP_type', String(def.dftsType));
         model.setStyle(body, bodyStyle);
+        debugLog('markDataSourceAsFloorplan', cellDebugInfo(graph, body), 'dftsType=', def && def.dftsType);
 
         if (isSymbolBody(body)) {
             ensureSymbolPortCompatibility(graph, body, def, runtimeOpt, ctx);
+            logBodyFloorplanPins(graph, body, 'markDataSourceAsFloorplan:symbolBody');
             return;
         }
 
@@ -209,6 +243,8 @@
             model.setStyle(pin, pinStyle);
             pin.connectable = !!isFloorplanStart;
         }
+
+        logBodyFloorplanPins(graph, body, 'markDataSourceAsFloorplan:plainBody');
     }
 
     function getPinExitPoint(graph, pin) {
@@ -225,6 +261,15 @@
 
         var x = bg.x + pg.x * bg.width + ox;
         var y = bg.y + pg.y * bg.height + oy;
+
+        if (pin.__dftsSymbolChild && pin.__dftsSymbolKind === 'port') {
+            var cx = x + (pg.width || 0) / 2;
+            var cy = y + (pg.height || 0) / 2;
+            if (side === 'west') return new mxPoint(bg.x, cy);
+            if (side === 'east') return new mxPoint(bg.x + bg.width, cy);
+            if (side === 'north') return new mxPoint(cx, bg.y);
+            return new mxPoint(cx, bg.y + bg.height);
+        }
 
         if (side === 'west') return new mxPoint(x, y + pg.height / 2);
         if (side === 'east') return new mxPoint(x + pg.width, y + pg.height / 2);
@@ -358,6 +403,79 @@
         return String(mxUtils.getValue(style, 'dftsIP_floorplanStart', '0')) === '1';
     }
 
+    function getFloorplanStartPinsForBody(graph, body) {
+        if (!graph || !body) return [];
+        if (isSymbolBody(body)) {
+            var symbolPins = getSymbolPinModels(body);
+            var symbolOut = [];
+            for (var s = 0; s < symbolPins.length; s++) {
+                var pinModel = symbolPins[s] || {};
+                if (!isFloorplanStartDef(pinModel, pinModel.dir || 'input', pinModel.type || '')) continue;
+                var port = getSymbolPortByKey(body, pinModel.key);
+                if (port) symbolOut.push(port);
+            }
+            return symbolOut;
+        }
+
+        var pins = NS.getChipPins(graph, body);
+        var out = [];
+        for (var i = 0; i < pins.length; i++) {
+            if (isFloorplanStartPin(graph, pins[i])) out.push(pins[i]);
+        }
+        return out;
+    }
+
+    function findNearestFloorplanStartPin(graph, body, pt, threshold) {
+        if (!graph || !body || !pt) return null;
+        var maxDist = Math.max(4, Number(threshold) || 18);
+        var pins = getFloorplanStartPinsForBody(graph, body);
+        var best = null;
+        var bestDist = Infinity;
+
+        for (var i = 0; i < pins.length; i++) {
+            var pin = pins[i];
+            var pinPt = getPinExitPoint(graph, pin);
+            if (!pinPt) continue;
+            var dx = pinPt.x - pt.x;
+            var dy = pinPt.y - pt.y;
+            var dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist <= maxDist && dist < bestDist) {
+                best = pin;
+                bestDist = dist;
+            }
+        }
+
+        if (!best) return null;
+        return {
+            pin: best,
+            point: getPinExitPoint(graph, best),
+            distance: bestDist
+        };
+    }
+
+    function isFloorplanStartBody(graph, body) {
+        if (!graph || !body || !NS.isChipBody(graph, body)) return false;
+        var style = graph.getCellStyle(body);
+        var category = String(mxUtils.getValue(style, 'dftsIP_category', '')).toLowerCase();
+        var dftsType = String(mxUtils.getValue(style, 'dftsIP_type', '')).toLowerCase();
+        var isDataSource = category === String(NS.CATEGORY.DATASOURCE).toLowerCase() ||
+            category === 'datasource' ||
+            dftsType === 'pattern_data_source' ||
+            dftsType === 'external_data_source' ||
+            dftsType === 'ssn_data_source' ||
+            /data_source/.test(dftsType);
+        if (!isDataSource) {
+            debugLog('isFloorplanStartBody:notDataSource', cellDebugInfo(graph, body), 'category=', category, 'dftsType=', dftsType);
+            return false;
+        }
+        logBodyFloorplanPins(graph, body, 'isFloorplanStartBody:pins');
+        var pins = getFloorplanStartPinsForBody(graph, body);
+        debugLog('isFloorplanStartBody', cellDebugInfo(graph, body), 'startPins=', pins.map(function (pin) {
+            return cellDebugInfo(graph, pin);
+        }));
+        return pins.length > 0;
+    }
+
 
     function isFloorplanTargetPin(graph, pin) {
         if (!pin) return false;
@@ -372,12 +490,35 @@
 
     function getFloorplanTargetPinsForBody(graph, body) {
         if (!graph || !body) return [];
-        var pins = isSymbolBody(body) ? getSymbolPorts(body) : NS.getChipPins(graph, body);
+        if (isSymbolBody(body)) {
+            var symbolPins = getSymbolPinModels(body);
+            var symbolOut = [];
+            for (var s = 0; s < symbolPins.length; s++) {
+                var pinModel = symbolPins[s] || {};
+                if (!isFloorplanTargetDef(pinModel, pinModel.dir || 'input', pinModel.type || '')) continue;
+                var port = getSymbolPortByKey(body, pinModel.key);
+                if (port) symbolOut.push(port);
+            }
+            return symbolOut;
+        }
+
+        var pins = NS.getChipPins(graph, body);
         var out = [];
         for (var i = 0; i < pins.length; i++) {
             if (isFloorplanTargetPin(graph, pins[i])) out.push(pins[i]);
         }
         return out;
+    }
+
+    function logBodyFloorplanPins(graph, body, tag) {
+        if (!graph || !body) return;
+        var starts = getFloorplanStartPinsForBody(graph, body).map(function (pin) {
+            return cellDebugInfo(graph, pin);
+        });
+        var targets = getFloorplanTargetPinsForBody(graph, body).map(function (pin) {
+            return cellDebugInfo(graph, pin);
+        });
+        debugLog(tag || 'bodyFloorplanPins', cellDebugInfo(graph, body), 'starts=', starts, 'targets=', targets);
     }
 
     function findNearestFloorplanTargetPin(graph, body, pt, threshold) {
@@ -409,8 +550,10 @@
     }
 
     function startFloorplanLineFromPin(realUi, graph, pin) {
+        debugLog('startFloorplanLineFromPin:enter', cellDebugInfo(graph, pin));
         var lineNS = getLineNS();
         if (!lineNS || typeof realUi.startFloorplanLineFromPoint !== 'function') {
+            debugLog('startFloorplanLineFromPin:missingLineTool', !!lineNS, !!(realUi && realUi.startFloorplanLineFromPoint));
             if (typeof mxUtils !== 'undefined' && mxUtils.alert) {
                 mxUtils.alert('请先加载 dft_floorplan_line.js，再使用 Data Source 的 data_in pin 绘制 Floorplan Line。');
             }
@@ -418,6 +561,7 @@
         }
 
         var pt = getPinExitPoint(graph, pin);
+        debugLog('startFloorplanLineFromPin:point', pt);
         if (!pt) return null;
 
         var body = pin.parent || null;
@@ -426,6 +570,58 @@
             autoFinishOnMouseUp: true,
             decorateEdge: function (edge, g) {
                 attachFloorplanLineAnchor(g, edge, pin, 'source');
+                detachFloorplanLineAnchor(g, edge, 'target');
+            },
+            snapPoint: function (basePt) {
+                var hit = findNearestFloorplanTargetPin(graph, body, basePt, 24);
+                if (!hit || !hit.point) return null;
+                return {
+                    point: hit.point,
+                    meta: {
+                        kind: 'floorplanTargetPin',
+                        pin: hit.pin,
+                        body: body,
+                        distance: hit.distance
+                    }
+                };
+            },
+            afterCommitPoint: function (ctx) {
+                var edge = ctx && ctx.tool ? ctx.tool.edge : null;
+                if (!edge) return;
+                if (ctx.snap && ctx.snap.pin) attachFloorplanLineAnchor(graph, edge, ctx.snap.pin, 'target');
+                else detachFloorplanLineAnchor(graph, edge, 'target');
+                syncAnchoredFloorplanLine(graph, edge);
+            }
+        });
+    }
+
+    function startFloorplanLineFromBody(realUi, graph, body, startPt) {
+        debugLog('startFloorplanLineFromBody:enter', cellDebugInfo(graph, body), 'startPt=', startPt);
+        var lineNS = getLineNS();
+        if (!lineNS || typeof realUi.startFloorplanLineFromPoint !== 'function') {
+            debugLog('startFloorplanLineFromBody:missingLineTool', !!lineNS, !!(realUi && realUi.startFloorplanLineFromPoint));
+            if (typeof mxUtils !== 'undefined' && mxUtils.alert) {
+                mxUtils.alert('请先加载 dft_floorplan_line.js，再使用 Data Source 的 body 连接点绘制 Floorplan Line。');
+            }
+            return null;
+        }
+        if (!body || !startPt) return null;
+
+        var sourceHit = findNearestFloorplanStartPin(graph, body, startPt, 24);
+        debugLog('startFloorplanLineFromBody:sourceHit', sourceHit ? {
+            point: sourceHit.point,
+            distance: sourceHit.distance,
+            pin: cellDebugInfo(graph, sourceHit.pin)
+        } : null);
+        var pt = sourceHit && sourceHit.point ? sourceHit.point : startPt;
+        var sourcePin = sourceHit && sourceHit.pin ? sourceHit.pin : null;
+
+        return realUi.startFloorplanLineFromPoint(pt, {
+            commitOnMouseUp: true,
+            autoFinishOnMouseUp: true,
+            decorateEdge: function (edge, g) {
+                if (sourcePin) attachFloorplanLineAnchor(g, edge, sourcePin, 'source');
+                else detachFloorplanLineAnchor(g, edge, 'source');
                 detachFloorplanLineAnchor(g, edge, 'target');
             },
             snapPoint: function (basePt) {
@@ -467,12 +663,67 @@
             graph.connectionHandler._dftsDataSourceFloorplanStartPatched = true;
 
             var ch = graph.connectionHandler;
+            var oldMouseDown = ch.mouseDown;
             var oldStart = ch.start;
+
+            ch.mouseDown = function (sender, me) {
+                var evt = me && me.getEvent ? me.getEvent() : null;
+                var state = me && me.getState ? me.getState() : null;
+                var cell = state && state.cell ? state.cell : (me && me.getCell ? me.getCell() : null);
+                debugLog('connectionHandler.mouseDown', {
+                    cell: cellDebugInfo(graph, cell),
+                    graphX: me && me.getGraphX ? me.getGraphX() : null,
+                    graphY: me && me.getGraphY ? me.getGraphY() : null,
+                    hasState: !!state
+                });
+
+                if (evt && mxEvent.isLeftMouseButton(evt)) {
+                    if (isFloorplanStartPin(graph, cell)) {
+                        debugLog('connectionHandler.mouseDown:hitStartPin', cellDebugInfo(graph, cell));
+                        startFloorplanLineFromPin(realUi, graph, cell);
+                        try {
+                            this.reset();
+                        } catch (e) { }
+                        if (me && typeof me.consume === 'function') me.consume();
+                        mxEvent.consume(evt);
+                        return;
+                    }
+
+                    if (isFloorplanStartBody(graph, cell)) {
+                        var bodyPt = me.getGraphX && me.getGraphY ? new mxPoint(me.getGraphX(), me.getGraphY()) : null;
+                        if (!bodyPt && typeof me.getX === 'function' && typeof me.getY === 'function') {
+                            bodyPt = new mxPoint(me.getX(), me.getY());
+                        }
+                        if (!bodyPt) {
+                            var bodyGeo = cell && cell.geometry ? cell.geometry : null;
+                            bodyPt = bodyGeo ? new mxPoint(bodyGeo.x, bodyGeo.y + bodyGeo.height / 2) : null;
+                        }
+                        if (bodyPt) {
+                            debugLog('connectionHandler.mouseDown:hitStartBody', cellDebugInfo(graph, cell), 'bodyPt=', bodyPt);
+                            startFloorplanLineFromBody(realUi, graph, cell, bodyPt);
+                            try {
+                                this.reset();
+                            } catch (e2) { }
+                            if (me && typeof me.consume === 'function') me.consume();
+                            mxEvent.consume(evt);
+                            return;
+                        }
+                    }
+                }
+
+                return oldMouseDown.apply(this, arguments);
+            };
 
             ch.start = function (state, x, y, edgeState) {
                 var cell = state && state.cell ? state.cell : null;
+                debugLog('connectionHandler.start', {
+                    cell: cellDebugInfo(graph, cell),
+                    x: x,
+                    y: y
+                });
 
                 if (isFloorplanStartPin(graph, cell)) {
+                    debugLog('connectionHandler.start:hitStartPin', cellDebugInfo(graph, cell));
                     // 从绿色连接点开始拖时，直接切到自定义 floorplan tool
                     startFloorplanLineFromPin(realUi, graph, cell);
 
@@ -484,19 +735,68 @@
                     return;
                 }
 
+                if (isFloorplanStartBody(graph, cell)) {
+                    debugLog('connectionHandler.start:hitStartBody', cellDebugInfo(graph, cell), 'point=', { x: x, y: y });
+                    startFloorplanLineFromBody(realUi, graph, cell, new mxPoint(x, y));
+
+                    try {
+                        this.reset();
+                    } catch (e) { }
+
+                    return;
+                }
+
                 return oldStart.apply(this, arguments);
             };
         }
 
+        graph.addMouseListener({
+            mouseDown: function (sender, me) {
+                var evt = me.getEvent ? me.getEvent() : null;
+                if (!evt || !mxEvent.isLeftMouseButton(evt)) return;
+
+                var cell = me.getCell ? me.getCell() : null;
+                if (isFloorplanStartPin(graph, cell)) {
+                    startFloorplanLineFromPin(realUi, graph, cell);
+                    me.consume();
+                    mxEvent.consume(evt);
+                    return;
+                }
+
+                if (isFloorplanStartBody(graph, cell)) {
+                    var pt = me.getGraphX && me.getGraphY ? new mxPoint(me.getGraphX(), me.getGraphY()) : null;
+                    if (!pt) {
+                        var geo = cell && cell.geometry ? cell.geometry : null;
+                        pt = geo ? new mxPoint(geo.x, geo.y + geo.height / 2) : null;
+                    }
+                    if (!pt) return;
+
+                    startFloorplanLineFromBody(realUi, graph, cell, pt);
+                    me.consume();
+                    mxEvent.consume(evt);
+                }
+            },
+            mouseMove: function () { },
+            mouseUp: function () { }
+        });
+
         if (realUi.actions && !realUi._dftsDataSourceActionsInstalled) {
             realUi._dftsDataSourceActionsInstalled = true;
             realUi.actions.addAction('startSelectedDataSourceFloorplanLine', function () {
-                var pin = graph.getSelectionCell();
-                if (!isFloorplanStartPin(graph, pin)) {
-                    if (typeof mxUtils !== 'undefined' && mxUtils.alert) mxUtils.alert('请先选中一个支持 Floorplan Line 的 Data Source data_in pin。');
+                var cell = graph.getSelectionCell();
+                if (isFloorplanStartPin(graph, cell)) {
+                    startFloorplanLineFromPin(realUi, graph, cell);
                     return;
                 }
-                startFloorplanLineFromPin(realUi, graph, pin);
+                if (isFloorplanStartBody(graph, cell)) {
+                    var geo = cell.geometry;
+                    var fallbackPt = geo ? new mxPoint(geo.x, geo.y + geo.height / 2) : null;
+                    var hit = fallbackPt ? findNearestFloorplanStartPin(graph, cell, fallbackPt, Math.max(24, geo.width || 0, geo.height || 0)) : null;
+                    if (hit && hit.point) startFloorplanLineFromBody(realUi, graph, cell, hit.point);
+                    else if (typeof mxUtils !== 'undefined' && mxUtils.alert) mxUtils.alert('当前 Data Source body 上没有可用的 Floorplan Line 起始连接点。');
+                    return;
+                }
+                if (typeof mxUtils !== 'undefined' && mxUtils.alert) mxUtils.alert('请先选中一个支持 Floorplan Line 的 Data Source pin 或 body。');
             });
         }
 
@@ -613,10 +913,15 @@
     NS.installDataSourceIp = function (ui) {
         var realUi = normalizeUi(ui);
         if (realUi && realUi.editor && realUi.editor.graph) NS.ensureGraphPatches(realUi.editor.graph);
+        if (realUi) {
+            try { global.__dftsEditorUi = realUi; } catch (e) {}
+            try { if (typeof window !== 'undefined') window.__dftsEditorUi = realUi; } catch (e2) {}
+        }
         NS.installEditingPolicy(ui);
         NS.installInstanceFollow(ui);
         NS.installConfigAction(ui);
         installDataSourceFloorplanBridge(ui);
+        if (typeof NS.installIpEdgeConfig === 'function') NS.installIpEdgeConfig(ui);
     };
 
 })(this);

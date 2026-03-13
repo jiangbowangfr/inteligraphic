@@ -92,7 +92,70 @@
             /data_source/i.test(dftsType);
     }
 
+    function getSymbolPorts(body) {
+        var out = [];
+        if (!body || !body.children || !body.children.length) return out;
+        for (var i = 0; i < body.children.length; i++) {
+            var ch = body.children[i];
+            if (ch && ch.__dftsSymbolChild && ch.__dftsSymbolKind === 'port') out.push(ch);
+        }
+        return out;
+    }
+
+    function getSymbolPortByKey(body, pinKey) {
+        var ports = getSymbolPorts(body);
+        for (var i = 0; i < ports.length; i++) {
+            if (String(ports[i].__dftsSymbolKey || '') === String(pinKey || '')) return ports[i];
+        }
+        return null;
+    }
+
+    function getSymbolModelPins(body) {
+        try {
+            if (NS.Symbol && typeof NS.Symbol.getModel === 'function') {
+                var model = NS.Symbol.getModel(body) || {};
+                return Array.isArray(model.pins) ? model.pins : [];
+            }
+        } catch (e) { }
+        return [];
+    }
+
+    function isFloorplanStartModelPin(pin) {
+        if (!pin) return false;
+        if (pin.floorplanLineStart === true) return true;
+        return String(pin.dir || 'input') === 'output' && String(pin.type || '') === 'data_out';
+    }
+
+    function getFloorplanStartAnchorCell(graph, cell) {
+        if (!graph || !cell) return null;
+        if (isPinCell(graph, cell)) return cell;
+        if (!isDataSourceBody(graph, cell)) return null;
+
+        var pins = getSymbolModelPins(cell);
+        for (var i = 0; i < pins.length; i++) {
+            var pin = pins[i] || {};
+            if (!isFloorplanStartModelPin(pin)) continue;
+            var port = getSymbolPortByKey(cell, pin.key);
+            if (port) return port;
+        }
+        return null;
+    }
+
+    function getFloorplanStartPoint(graph, cell) {
+        var anchor = getFloorplanStartAnchorCell(graph, cell);
+        return anchor ? getPinExitPoint(graph, anchor) : null;
+    }
+
     function shouldUseFloorplanLine(graph, pin) {
+        if (isDataSourceBody(graph, pin)) {
+            var startAnchor = getFloorplanStartAnchorCell(graph, pin);
+            var bodyResult = !!startAnchor;
+            if (bodyResult) {
+                log('body 命中 floorplan 输出规则', pin.id || '(no id)', 'anchor=', startAnchor.id || '(no id)');
+            }
+            return bodyResult;
+        }
+
         if (!isPinCell(graph, pin)) return false;
 
         var style = graph.getCellStyle(pin);
@@ -166,6 +229,15 @@
         var oy = pinGeo.offset ? (pinGeo.offset.y || 0) : 0;
         absX += ox;
         absY += oy;
+
+        if (pin.__dftsSymbolChild && pin.__dftsSymbolKind === 'port') {
+            var cx = absX + (pinGeo.width || 0) / 2;
+            var cy = absY + (pinGeo.height || 0) / 2;
+            if (side === 'west') return new mxPoint(bodyGeo.x, cy);
+            if (side === 'east') return new mxPoint(bodyGeo.x + bodyGeo.width, cy);
+            if (side === 'north') return new mxPoint(cx, bodyGeo.y);
+            return new mxPoint(cx, bodyGeo.y + bodyGeo.height);
+        }
 
         if (side === 'west') return new mxPoint(absX, absY + (pinGeo.height || 0) / 2);
         if (side === 'east') return new mxPoint(absX + (pinGeo.width || 0), absY + (pinGeo.height || 0) / 2);
@@ -476,11 +548,68 @@
             };
         }
 
+        if (!ch.__dftsMouseDownWrapped) {
+            ch.__dftsMouseDownWrapped = true;
+            ch.__dftsInterceptsFloorplanStart = true;
+            var oldMouseDown = ch.mouseDown;
+            ch.mouseDown = function (sender, me) {
+                try {
+                    var evt = me && me.getEvent ? me.getEvent() : null;
+                    if (!evt || !mxEvent.isLeftMouseButton(evt)) {
+                        return oldMouseDown.apply(this, arguments);
+                    }
+
+                    var cell = me && me.getCell ? me.getCell() : null;
+                    var sourceIsMarked = shouldUseFloorplanLine(graph, cell);
+                    log('connectionHandler.mouseDown', 'cell=', cell && cell.id, 'sourceIsMarked=', sourceIsMarked);
+
+                    if (!sourceIsMarked) {
+                        return oldMouseDown.apply(this, arguments);
+                    }
+
+                    var anchorCell = getFloorplanStartAnchorCell(graph, cell);
+                    var pt = getFloorplanStartPoint(graph, cell);
+                    if (!pt || !realUi.startFloorplanLineFromPoint) {
+                        warn('mouseDown: floorplan 起线失败', 'hasPoint=', !!pt, 'hasTool=', !!(realUi && realUi.startFloorplanLineFromPoint));
+                        return oldMouseDown.apply(this, arguments);
+                    }
+
+                    this.__dftsSuppressNextConnect = true;
+                    realUi.startFloorplanLineFromPoint(pt, {
+                        decorateEdge: function (edge, g) {
+                            if (NS.attachFloorplanLineAnchor && anchorCell) {
+                                NS.attachFloorplanLineAnchor(g, edge, anchorCell, 'source');
+                            }
+                        }
+                    });
+
+                    try {
+                        this.reset();
+                    } catch (e) { }
+
+                    if (me && typeof me.consume === 'function') me.consume();
+                    mxEvent.consume(evt);
+                    return;
+                } catch (e2) {
+                    error('connectionHandler.mouseDown 自定义 floorplan 起线失败', e2);
+                }
+
+                return oldMouseDown.apply(this, arguments);
+            };
+        }
+
         if (!ch.__dftsConnectWrapped) {
             ch.__dftsConnectWrapped = true;
             var oldConnect = ch.connect;
             ch.connect = function (source, target, evt, dropTarget) {
                 try {
+                    if (this.__dftsSuppressNextConnect) {
+                        this.__dftsSuppressNextConnect = false;
+                        log('connect 已抑制，避免默认黑线/重复红线');
+                        if (evt) mxEvent.consume(evt);
+                        return null;
+                    }
+
                     var sourceCell = normalizeTerminalCell(source);
                     var targetCell = normalizeTerminalCell(target);
                     var sourceIsMarked = shouldUseFloorplanLine(graph, sourceCell);
@@ -493,9 +622,9 @@
                     );
 
                     if (sourceIsMarked) {
-                        var spt = getPinExitPoint(graph, sourceCell);
+                        var spt = getFloorplanStartPoint(graph, sourceCell);
                         if (!spt) {
-                            warn('connect: getPinExitPoint 失败，退回默认 connect');
+                            warn('connect: getFloorplanStartPoint 失败，退回默认 connect');
                             return oldConnect.apply(this, arguments);
                         }
 
@@ -553,6 +682,11 @@
             var oldInsertEdge = ch.insertEdge;
             ch.insertEdge = function (parent, id, value, source, target, style) {
                 try {
+                    if (this.__dftsSuppressNextConnect) {
+                        log('insertEdge 已抑制，避免默认黑线');
+                        return null;
+                    }
+
                     source = normalizeTerminalCell(source);
                     target = normalizeTerminalCell(target);
 
@@ -591,20 +725,22 @@
         // patchConnectionHandler 里，不要再用 connect() 晚拦截；改成 mouseDown 提前启动自定义工具
         graph.addMouseListener({
             mouseDown: function (sender, me) {
+                if (graph.connectionHandler && graph.connectionHandler.__dftsInterceptsFloorplanStart) return;
                 var evt = me.getEvent();
                 if (!mxEvent.isLeftMouseButton(evt)) return;
 
                 var cell = me.getCell();
                 if (!shouldUseFloorplanLine(graph, cell)) return;
 
-                var pt = getPinExitPoint(graph, cell);
+                var anchorCell = getFloorplanStartAnchorCell(graph, cell);
+                var pt = getFloorplanStartPoint(graph, cell);
                 if (!pt) return;
                 if (!realUi.startFloorplanLineFromPoint) return;
 
                 realUi.startFloorplanLineFromPoint(pt, {
                     decorateEdge: function (edge, g) {
-                        if (NS.attachFloorplanLineAnchor) {
-                            NS.attachFloorplanLineAnchor(g, edge, cell, 'source');
+                        if (NS.attachFloorplanLineAnchor && anchorCell) {
+                            NS.attachFloorplanLineAnchor(g, edge, anchorCell, 'source');
                         }
                     }
                 });
