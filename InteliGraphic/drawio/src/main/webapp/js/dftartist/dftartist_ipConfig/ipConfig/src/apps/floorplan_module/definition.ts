@@ -50,6 +50,7 @@ export const floorplanModuleDefinition: DftsTypeDef = {
     },
   ],
   applySpecialBasics: ({ graph, cell, basicDraft }) => {
+    setStyleValue(graph, cell, "movableLabel", "1");
     setStyleValue(
       graph,
       cell,
