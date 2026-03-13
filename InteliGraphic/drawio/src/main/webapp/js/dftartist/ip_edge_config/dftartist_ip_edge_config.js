@@ -13,8 +13,6 @@
         console.log.apply(console, args);
     }
 
-    debug('module loaded');
-
     var EDGE_FLAG = 'dftsIP_edge';
     var STATUS = {
         RESOLVED: 'resolved',
@@ -330,17 +328,14 @@
 
         var sourceTerminal = graph.getModel().getTerminal(edge, true);
         var targetTerminal = graph.getModel().getTerminal(edge, false);
-        debug('resolve start', 'edge=', edge.id || '', 'source=', sourceTerminal && sourceTerminal.id, 'target=', targetTerminal && targetTerminal.id);
         var sourceInfo = getTerminalPinInfo(graph, sourceTerminal);
         var targetInfo = getTerminalPinInfo(graph, targetTerminal);
         if (!sourceInfo || !targetInfo || !sourceInfo.body || !targetInfo.body) {
-            debug('resolve aborted', 'sourceInfo=', sourceInfo, 'targetInfo=', targetInfo);
             return null;
         }
 
         var sourcePins = collectBodyPins(graph, sourceInfo.body);
         var targetPins = collectBodyPins(graph, targetInfo.body);
-        debug('resolve candidates', 'sourceBody=', sourceInfo.body && sourceInfo.body.id, 'targetBody=', targetInfo.body && targetInfo.body.id, 'sourcePins=', sourcePins.length, 'targetPins=', targetPins.length);
         var sourcePin = getPinCandidate(sourcePins, sourceInfo.pinKey);
         var targetPin = getPinCandidate(targetPins, targetInfo.pinKey);
         var status = STATUS.RESOLVED;
@@ -388,7 +383,6 @@
             graph.getModel().endUpdate();
         }
 
-        debug('resolve done', payload);
 
         if (status === STATUS.AMBIGUOUS) {
             pushAmbiguousWarning(opt.ui, graph, edge, reason);
@@ -626,18 +620,15 @@
         graph.__dftsIpEdgeConfigInstalled = true;
 
         var realUi = normalizeUi(ui) || getEditorUi();
-        debug('install graph', !!graph, 'ui=', !!realUi);
         if (typeof graph.insertEdge === 'function' && !graph.__dftsIpEdgeGraphInsertPatched) {
             graph.__dftsIpEdgeGraphInsertPatched = true;
             var baseGraphInsertEdge = graph.insertEdge;
             graph.insertEdge = function (parent, id, value, source, target, style) {
                 var edge = baseGraphInsertEdge.apply(this, arguments);
                 if (!edge) return edge;
-                debug('graph.insertEdge', 'edge=', edge.id || '', 'source=', source && source.id, 'target=', target && target.id);
                 var styleObj = graph.getCellStyle(edge);
                 if (String(getStyleValue(styleObj, 'floorplanLine', '0')) === '1') return edge;
                 if (!isIpRelatedTerminal(graph, source) || !isIpRelatedTerminal(graph, target)) {
-                    debug('graph.insertEdge skipped', 'sourceOk=', isIpRelatedTerminal(graph, source), 'targetOk=', isIpRelatedTerminal(graph, target), 'sourceStyle=', source && source.getStyle ? source.getStyle() : '', 'targetStyle=', target && target.getStyle ? target.getStyle() : '');
                     return edge;
                 }
                 resolveEdgeConnection(graph, edge, {
@@ -656,11 +647,9 @@
             handler.insertEdge = function (parent, id, value, source, target, style) {
                 var edge = baseInsertEdge.call(this, parent, id, value, source, target, style);
                 if (!edge) return edge;
-                debug('connectionHandler.insertEdge', 'edge=', edge.id || '', 'source=', source && source.id, 'target=', target && target.id);
                 var styleObj = graph.getCellStyle(edge);
                 if (String(getStyleValue(styleObj, 'floorplanLine', '0')) === '1') return edge;
                 if (!isIpRelatedTerminal(graph, source) || !isIpRelatedTerminal(graph, target)) {
-                    debug('connectionHandler.insertEdge skipped', 'sourceOk=', isIpRelatedTerminal(graph, source), 'targetOk=', isIpRelatedTerminal(graph, target), 'sourceStyle=', source && source.getStyle ? source.getStyle() : '', 'targetStyle=', target && target.getStyle ? target.getStyle() : '');
                     return edge;
                 }
                 resolveEdgeConnection(graph, edge, {
@@ -673,7 +662,6 @@
 
             handler.addListener(mxEvent.CONNECT, function (sender, evt) {
                 var edge = evt.getProperty('cell');
-                debug('mxEvent.CONNECT', 'edge=', edge && edge.id);
                 if (!edge || !edge.edge) return;
                 var styleObj = graph.getCellStyle(edge);
                 if (String(getStyleValue(styleObj, 'floorplanLine', '0')) === '1') return;
@@ -692,7 +680,6 @@
             graph.__dftsIpEdgeCellConnectedInstalled = true;
             graph.addListener(mxEvent.CELL_CONNECTED, function (sender, evt) {
                 var edge = evt.getProperty('edge');
-                debug('mxEvent.CELL_CONNECTED', 'edge=', edge && edge.id);
                 if (!edge || !edge.edge) return;
                 var styleObj = graph.getCellStyle(edge);
                 if (String(getStyleValue(styleObj, 'floorplanLine', '0')) === '1') return;
@@ -711,7 +698,6 @@
             graph.__dftsIpEdgeClickInstalled = true;
             graph.addListener(mxEvent.CLICK, function (sender, evt) {
                 var cell = evt.getProperty('cell');
-                debug('graph click', 'cell=', cell && cell.id, 'isEdge=', !!(cell && cell.edge));
                 if (!cell || !cell.edge) return;
                 var cellStyle = graph.getCellStyle(cell);
                 if (String(getStyleValue(cellStyle, 'floorplanLine', '0')) === '1') return;
