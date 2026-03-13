@@ -14,6 +14,7 @@ declare global {
     __DFTS_TYPE_REGISTRY__?: Record<string, DftsTypeDef>;
     __DFTS_DBLCLICK_PATCHED__?: boolean;
     __DFTS_POPUP__?: { destroy: () => void };
+    __DFTS_OPEN_POPUP__?: (graph: any, cell: any) => boolean;
   }
 }
 
@@ -67,6 +68,14 @@ function openPopup(def: DftsTypeDef, graph: any, cell: any) {
   );
 }
 
+window.__DFTS_OPEN_POPUP__ = function (graph: any, cell: any) {
+  const type = getDftsTypeFromCell(graph, cell);
+  const def = resolvePopupDef(type);
+  if (!def) return false;
+  openPopup(def, graph, cell);
+  return true;
+};
+
 /** 注册一个 type（每个 type 的 entry.tsx 调一次即可） */
 export function registerDftsType(def: DftsTypeDef) {
   const reg = getRegistry();
@@ -84,26 +93,6 @@ function patchDblClickOnce() {
 
     const proto = Ctor.prototype;
     if ((proto as any).__DFTS_PATCHED__) return true;
-
-    const orig = proto.dblClick;
-
-    proto.dblClick = function (evt: any, cell: any) {
-      try {
-        const graph = this;
-        const t = getDftsTypeFromCell(graph, cell);
-        const popupDef = resolvePopupDef(t);
-        if (popupDef) {
-          try {
-            window.mxEvent?.consume?.(evt);
-          } catch {}
-          openPopup(popupDef, graph, cell);
-          return;
-        }
-      } catch (e) {
-        console.error('[DFTS] dblClick error:', e);
-      }
-      return orig?.apply(this, arguments as any);
-    };
 
     (proto as any).__DFTS_PATCHED__ = true;
     return true;
