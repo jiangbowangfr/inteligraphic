@@ -353,6 +353,7 @@
         NS.installEditingPolicy(ui);
         NS.installInstanceFollow(ui);
         NS.installConfigAction(ui);
+        if (typeof NS.installIpEdgeConfig === 'function') NS.installIpEdgeConfig(ui);
     };
 
 })(this);

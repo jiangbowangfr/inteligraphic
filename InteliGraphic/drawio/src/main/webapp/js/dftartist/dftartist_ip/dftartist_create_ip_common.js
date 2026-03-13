@@ -107,6 +107,38 @@
 
     NS.findChipBodyForCell = findChipBodyForCell;
 
+    function findChipBodyInSubtree(graph, cell) {
+        if (!graph || !cell) return null;
+        var model = graph.getModel();
+        if (isChipBody(graph, cell)) return cell;
+        var childCount = model.getChildCount(cell);
+        for (var i = 0; i < childCount; i++) {
+            var found = findChipBodyInSubtree(graph, model.getChildAt(cell, i));
+            if (found) return found;
+        }
+        return null;
+    }
+
+    function resolveChipBodyFromContext(graph, cell) {
+        if (!graph) return null;
+
+        var body = findChipBodyForCell(graph, cell);
+        if (body) return body;
+
+        body = findChipBodyInSubtree(graph, cell);
+        if (body) return body;
+
+        var selectionCells = graph.getSelectionCells ? graph.getSelectionCells() : [];
+        for (var i = 0; i < selectionCells.length; i++) {
+            body = findChipBodyForCell(graph, selectionCells[i]) || findChipBodyInSubtree(graph, selectionCells[i]);
+            if (body) return body;
+        }
+
+        return null;
+    }
+
+    NS.resolveChipBodyFromContext = resolveChipBodyFromContext;
+
     function getAllChipBodies(graph) {
         var out = [];
         if (!graph) return out;
@@ -914,13 +946,31 @@
 
         realUi.actions.addAction('openSelectedDftsIpConfig', function () {
             var sel = graph.getSelectionCell();
-            var body = findChipBodyForCell(graph, sel);
+            var body = resolveChipBodyFromContext(graph, sel);
             if (!body) {
                 if (typeof mxUtils !== 'undefined' && mxUtils.alert) mxUtils.alert('请先选中一个 IP。');
                 return;
             }
             openIpConfig(graph, body);
         });
+
+        if (realUi.menus && typeof realUi.menus.createPopupMenu === 'function' && !realUi.__dftsConfigMenuInstalled) {
+            var oldCreatePopupMenu = realUi.menus.createPopupMenu;
+            realUi.menus.createPopupMenu = function (menu, cell, evt) {
+                oldCreatePopupMenu.apply(this, arguments);
+
+                var target = cell || graph.getSelectionCell();
+                var body = resolveChipBodyFromContext(graph, target);
+                if (!body) return;
+
+                menu.addSeparator();
+                menu.addItem('配置参数', null, function () {
+                    graph.setSelectionCell(body);
+                    realUi.actions.get('openSelectedDftsIpConfig').funct();
+                }, null, evt);
+            };
+            realUi.__dftsConfigMenuInstalled = true;
+        }
     }
 
     NS.installConfigAction = installConfigAction;

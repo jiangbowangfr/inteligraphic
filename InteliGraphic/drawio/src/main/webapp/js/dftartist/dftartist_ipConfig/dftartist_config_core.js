@@ -161,7 +161,7 @@
   }
 
   function install(graph) {
-    if (!graph || graph.__dftsConfigDblClickInstalled) { return; }
+    if (!graph || graph.__dftsConfigInstalled) { return; }
     var oldDblClick = graph.dblClick;
     graph.dblClick = function (evt, cell) {
       var body = NS.State.resolveBody(cell);
@@ -174,7 +174,7 @@
         return oldDblClick.apply(this, arguments);
       }
     };
-    graph.__dftsConfigDblClickInstalled = true;
+    graph.__dftsConfigInstalled = true;
   }
 
   NS.open = open;

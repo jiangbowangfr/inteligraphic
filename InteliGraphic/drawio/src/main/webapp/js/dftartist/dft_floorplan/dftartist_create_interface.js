@@ -431,8 +431,13 @@
     NS.installInterfaceIp = function (ui) {
         var realUi = ui && ui.editor ? ui : (ui && ui.editorUi ? ui.editorUi : null);
         if (realUi && realUi.editor && realUi.editor.graph) NS.ensureGraphPatches(realUi.editor.graph);
+        if (realUi) {
+            try { global.__dftsEditorUi = realUi; } catch (e) {}
+            try { if (typeof window !== 'undefined') window.__dftsEditorUi = realUi; } catch (e2) {}
+        }
         NS.installEditingPolicy(ui);
         NS.installConfigAction(ui);
+        if (typeof NS.installIpEdgeConfig === 'function') NS.installIpEdgeConfig(ui);
     };
 
 })(this);
