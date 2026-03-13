@@ -182,17 +182,73 @@
     }
     function getModel(body) {
         if (!body) return null;
-        if (body.__dftsSymbolModel) return body.__dftsSymbolModel;
+        if (body.__dftsSymbolModel) {
+            body.__dftsSymbolModel = recoverModelFromBody(body, body.__dftsSymbolModel);
+            syncEncodedModelStyle(body, body.__dftsSymbolModel);
+            return body.__dftsSymbolModel;
+        }
         var encoded = readStyleValue(body.style || '', 'dftsIP_symbolModel');
-        if (!encoded) return null;
+        if (!encoded) {
+            if (readStyleValue(body.style || '', 'dftsIP_symbol') !== '1') return null;
+            body.__dftsSymbolModel = recoverModelFromBody(body, {});
+            syncEncodedModelStyle(body, body.__dftsSymbolModel);
+            return body.__dftsSymbolModel;
+        }
         var parsed = decodeModel(encoded);
-        if (parsed) body.__dftsSymbolModel = parsed;
-        return parsed;
+        if (parsed) {
+            body.__dftsSymbolModel = recoverModelFromBody(body, parsed);
+            syncEncodedModelStyle(body, body.__dftsSymbolModel);
+            return body.__dftsSymbolModel;
+        }
+        return null;
     }
     function setModel(body, model) {
         if (!body) return null;
-        body.__dftsSymbolModel = normalizeModel(model);
+        body.__dftsSymbolModel = recoverModelFromBody(body, normalizeModel(model));
+        syncEncodedModelStyle(body, body.__dftsSymbolModel);
         return body.__dftsSymbolModel;
+    }
+
+    function readManagedChildText(body, kind) {
+        var children = body && body.children;
+        if (!children || !children.length) return '';
+        for (var i = 0; i < children.length; i++) {
+            var child = children[i];
+            if (!child) continue;
+            if (child.__dftsSymbolKind !== kind) continue;
+            var value = trim(child.value);
+            if (value) return value;
+        }
+        return '';
+    }
+
+    function syncEncodedModelStyle(body, model) {
+        if (!body || !model) return;
+        var style = toStr(body.style || '');
+        var encoded = encodeModel(model);
+        if (typeof mxUtils !== 'undefined' && mxUtils.setStyle) {
+            style = mxUtils.setStyle(style, 'dftsIP_symbolModel', encoded);
+            style = mxUtils.setStyle(style, 'dftsIP_lockBodyLabel', model.lockBodyLabel ? '1' : '0');
+        }
+        body.style = style;
+    }
+
+    function recoverModelFromBody(body, model) {
+        var normalized = normalizeModel(model);
+        if (!body) return normalized;
+
+        var titleText = readManagedChildText(body, 'title');
+        var instanceText = readManagedChildText(body, 'instance');
+
+        if ((!trim(normalized.title) || trim(normalized.title) === 'IP') && titleText) {
+            normalized.title = titleText;
+        }
+
+        if (!trim(normalized.instanceName) && instanceText) {
+            normalized.instanceName = instanceText;
+        }
+
+        return normalized;
     }
 
     function groupPins(model, includeHidden) {
