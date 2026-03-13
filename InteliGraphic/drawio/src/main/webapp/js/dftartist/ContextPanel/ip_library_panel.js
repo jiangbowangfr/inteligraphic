@@ -417,6 +417,10 @@
             x = ((c.scrollLeft || 0) + c.clientWidth / 2) / scale - tr.x - w / 2;
             y = ((c.scrollTop || 0) + c.clientHeight / 2) / scale - tr.y - h / 2;
         }
+        if (!isFloorplan && NS && typeof NS.snapValueToGrid === 'function') {
+            x = NS.snapValueToGrid(graph, x);
+            y = NS.snapValueToGrid(graph, y);
+        }
 
         var inserted = null;
         if (typeof graph.importCells === 'function') {
@@ -458,6 +462,10 @@
         var rect = graph.container && graph.container.getBoundingClientRect ? graph.container.getBoundingClientRect() : { left: 0, top: 0 };
         var x = (clientX - rect.left) / scale - tr.x - w / 2;
         var y = (clientY - rect.top) / scale - tr.y - h / 2;
+        if (!isFloorplan && NS && typeof NS.snapValueToGrid === 'function') {
+            x = NS.snapValueToGrid(graph, x);
+            y = NS.snapValueToGrid(graph, y);
+        }
 
         var arr = graph.importCells([cell], x, y, parent) || [];
         var inserted = arr[0] || null;

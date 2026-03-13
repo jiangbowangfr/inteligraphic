@@ -721,6 +721,37 @@
 
     NS.installBodyGridSnap = installBodyGridSnap;
 
+    function snapChipBodiesForCells(graph, cells) {
+        if (!graph || !cells || !cells.length) return;
+        var model = graph.getModel();
+        var seen = {};
+
+        model.beginUpdate();
+        try {
+            for (var i = 0; i < cells.length; i++) {
+                var body = findChipBodyForCell(graph, cells[i]) || cells[i];
+                if (!body || !isChipBody(graph, body) || !body.geometry) continue;
+                var id = body.getId ? body.getId() : body.id;
+                if (seen[id]) continue;
+                seen[id] = true;
+
+                var snapped = snapRectToGrid(graph, body.geometry);
+                if (
+                    snapped.x !== body.geometry.x ||
+                    snapped.y !== body.geometry.y ||
+                    snapped.width !== body.geometry.width ||
+                    snapped.height !== body.geometry.height
+                ) {
+                    model.setGeometry(body, snapped);
+                }
+            }
+        } finally {
+            model.endUpdate();
+        }
+    }
+
+    NS.snapChipBodiesForCells = snapChipBodiesForCells;
+
     function ensureGraphPatches(graph) {
         if (!graph || graph.__dftsCommonPatched) return;
         graph.__dftsCommonPatched = true;

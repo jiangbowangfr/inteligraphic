@@ -1340,6 +1340,9 @@
 
         graph.addListener(mxEvent.CELLS_ADDED, function (sender, evt) {
             var cells = evt.getProperty('cells') || [];
+            try {
+                if (typeof NS.snapChipBodiesForCells === 'function') NS.snapChipBodiesForCells(graph, cells);
+            } catch (e) { }
             ensureUniqueInstanceNamesForCells(graph, cells);
             scheduleEnsureUniqueInstanceNamesForCells(graph, cells, 'cellsAdded');
         });
@@ -1350,6 +1353,7 @@
             graph.importCells = function () {
                 var ret = baseImportCells.apply(this, arguments);
                 try {
+                    if (typeof NS.snapChipBodiesForCells === 'function') NS.snapChipBodiesForCells(graph, ret || []);
                     ensureUniqueInstanceNamesForCells(graph, ret || []);
                     scheduleEnsureUniqueInstanceNamesForCells(graph, ret || [], 'importCells');
                 } catch (e) { }
