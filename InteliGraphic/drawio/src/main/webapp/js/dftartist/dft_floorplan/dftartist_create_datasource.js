@@ -192,6 +192,25 @@
             /data_source/.test(dftsType);
     }
 
+    function getDataSourceDefinitionForBody(graph, body) {
+        if (!graph || !body || !NS || !NS._defsByType) return null;
+        var style = graph.getCellStyle(body);
+        var dftsType = String(mxUtils.getValue(style, 'dftsIP_type', ''));
+        if (!dftsType) return null;
+        return NS._defsByType[dftsType] || null;
+    }
+
+    function getLogicalPinsFromDefinition(graph, body) {
+        var def = getDataSourceDefinitionForBody(graph, body);
+        if (!def) return [];
+        var pinDefs = getPinDefMap(def, null, null);
+        var out = [];
+        for (var key in pinDefs) {
+            if (Object.prototype.hasOwnProperty.call(pinDefs, key) && pinDefs[key]) out.push(pinDefs[key]);
+        }
+        return out;
+    }
+
     function resolveDataSourceBody(graph, cell) {
         if (!graph || !cell) return null;
         if (isDataSourceBody(graph, cell)) return cell;
@@ -218,12 +237,18 @@
                 var pin = symbolPins[i] || {};
                 if (isFloorplanStartDef(pin, pin.dir || 'input', pin.type || '')) return true;
             }
-            return false;
+            if (symbolPins.length) return false;
         }
 
         var pins = NS.getChipPins(graph, body);
         for (var j = 0; j < pins.length; j++) {
             if (isFloorplanStartPin(graph, pins[j])) return true;
+        }
+
+        var defPins = getLogicalPinsFromDefinition(graph, body);
+        for (var k = 0; k < defPins.length; k++) {
+            var defPin = defPins[k] || {};
+            if (isFloorplanStartDef(defPin, defPin.dir || 'input', defPin.type || '')) return true;
         }
         return false;
     }
@@ -236,12 +261,18 @@
                 var pin = symbolPins[i] || {};
                 if (isFloorplanTargetDef(pin, pin.dir || 'input', pin.type || '')) return true;
             }
-            return false;
+            if (symbolPins.length) return false;
         }
 
         var pins = NS.getChipPins(graph, body);
         for (var j = 0; j < pins.length; j++) {
             if (isFloorplanTargetPin(graph, pins[j])) return true;
+        }
+
+        var defPins = getLogicalPinsFromDefinition(graph, body);
+        for (var k = 0; k < defPins.length; k++) {
+            var defPin = defPins[k] || {};
+            if (isFloorplanTargetDef(defPin, defPin.dir || 'input', defPin.type || '')) return true;
         }
         return false;
     }
