@@ -1005,25 +1005,25 @@
         }
     });
 
-    registerDataSource({
-        key: 'PatternDataSource',
-        dftsType: 'pattern_data_source',
-        defaultLabel: 'PatternDataSource',
-        instanceBaseName: 'PatternDataSource',
-        configKey: 'data_source_common',
-        w: 320,
-        h: 120,
-        rounded: 8,
-        strokeWidth: 1,
-        bodyFont: 20,
-        pinFont: 16,
-        pinsFactory: staticPins({
-            east: [
-                { name: 'pattern_data_out', type: 'data_out', dir: 'output', pinKey: 'pattern_data_out', busWidth: 8, isBus: true, floorplanLineTarget: true },
-                { name: 'pattern_valid', type: 'status_out', dir: 'output', pinKey: 'pattern_valid' }
-            ]
-        })
-    });
+    // registerDataSource({
+    //     key: 'PatternDataSource',
+    //     dftsType: 'pattern_data_source',
+    //     defaultLabel: 'PatternDataSource',
+    //     instanceBaseName: 'PatternDataSource',
+    //     configKey: 'data_source_common',
+    //     w: 320,
+    //     h: 120,
+    //     rounded: 8,
+    //     strokeWidth: 1,
+    //     bodyFont: 20,
+    //     pinFont: 16,
+    //     pinsFactory: staticPins({
+    //         east: [
+    //             { name: 'pattern_data_out', type: 'data_out', dir: 'output', pinKey: 'pattern_data_out', busWidth: 8, isBus: true, floorplanLineTarget: true },
+    //             { name: 'pattern_valid', type: 'status_out', dir: 'output', pinKey: 'pattern_valid' }
+    //         ]
+    //     })
+    // });
 
     registerDataSource({
         key: 'SSNPadSource',
@@ -1031,8 +1031,8 @@
         defaultLabel: 'SSNPadSource',
         instanceBaseName: 'SSNPadSource',
         configKey: 'data_source_common',
-        w: 320,
-        h: 120,
+        useDefSize: true,
+        w: 140, h: 120,
         rounded: 8,
         strokeWidth: 1,
         bodyFont: 20,
@@ -1048,32 +1048,32 @@
         })
     });
 
-    registerDataSource({
-        key: 'ExternalDataSource',
-        dftsType: 'external_data_source',
-        defaultLabel: 'ExternalDataSource',
-        instanceBaseName: 'ExternalDataSource',
-        configKey: 'data_source_common',
-        w: 320,
-        h: 120,
-        rounded: 8,
-        strokeWidth: 1,
-        bodyFont: 20,
-        pinFont: 16,
-        pinsFactory: staticPins({
-            west: [
-                { name: 'enable', type: 'enable_in', dir: 'input', pinKey: 'enable' }
-            ],
-            east: [
-                { name: 'data_out', type: 'data_out', dir: 'output', pinKey: 'data_out', busWidth: 16, isBus: true, floorplanLineTarget: true },
-                { name: 'status', type: 'status_out', dir: 'output', pinKey: 'status' }
-            ]
-        })
-    });
+    // registerDataSource({
+    //     key: 'ExternalDataSource',
+    //     dftsType: 'external_data_source',
+    //     defaultLabel: 'ExternalDataSource',
+    //     instanceBaseName: 'ExternalDataSource',
+    //     configKey: 'data_source_common',
+    //     w: 320,
+    //     h: 120,
+    //     rounded: 8,
+    //     strokeWidth: 1,
+    //     bodyFont: 20,
+    //     pinFont: 16,
+    //     pinsFactory: staticPins({
+    //         west: [
+    //             { name: 'enable', type: 'enable_in', dir: 'input', pinKey: 'enable' }
+    //         ],
+    //         east: [
+    //             { name: 'data_out', type: 'data_out', dir: 'output', pinKey: 'data_out', busWidth: 16, isBus: true, floorplanLineTarget: true },
+    //             { name: 'status', type: 'status_out', dir: 'output', pinKey: 'status' }
+    //         ]
+    //     })
+    // });
 
-    global.buildPatternDataSource = NS.makeCreateFn('PatternDataSource');
+    // global.buildPatternDataSource = NS.makeCreateFn('PatternDataSource');
     global.buildSSNDataSource = NS.makeCreateFn('SSNPadSource');
-    global.buildExternalDataSource = NS.makeCreateFn('ExternalDataSource');
+    // global.buildExternalDataSource = NS.makeCreateFn('ExternalDataSource');
 
     NS.getPinExitPoint = getPinExitPoint;
     NS.attachFloorplanLineAnchor = attachFloorplanLineAnchor;

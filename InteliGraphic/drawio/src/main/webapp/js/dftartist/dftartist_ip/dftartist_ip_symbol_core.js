@@ -17,8 +17,8 @@
         pinStub: 26,
         labelGap: 8,
         instanceGap: 10,
-        minBodyWidth: 120,
-        minBodyHeight: 56,
+        minBodyWidth: 40,
+        minBodyHeight: 20,
         minScale: 0.25,
         maxScale: 3
     };
@@ -27,6 +27,21 @@
     function trim(v) { return toStr(v).replace(/^\s+|\s+$/g, ''); }
     function clone(v) { return v ? JSON.parse(JSON.stringify(v)) : v; }
     function clamp(v, a, b) { v = Number(v); if (isNaN(v)) v = a; return Math.max(a, Math.min(b, v)); }
+    function gridSize(graph) {
+        var size = Number(graph && graph.gridSize);
+        if (!isFinite(size) || size <= 0) size = 10;
+        return Math.max(1, Math.round(size));
+    }
+    function regularMinSize(graph) {
+        var g = gridSize(graph);
+        return { minW: g * 4, minH: g * 2 };
+    }
+    function snapValue(graph, value) {
+        var n = Number(value);
+        if (!isFinite(n)) n = 0;
+        var g = gridSize(graph);
+        return Math.round(n / g) * g;
+    }
     function encodeModel(model) {
         try { return encodeURIComponent(JSON.stringify(model || {})); } catch (e) { return ''; }
     }
@@ -201,7 +216,8 @@
         var grouped = groupPins(model, true);
         var visibleGrouped = groupPins(model, false);
         var l = model.layout;
-        var rows = Math.max(grouped.west.length, grouped.east.length, 1);
+        var sizingGrouped = hasVisiblePins(model) ? visibleGrouped : { west: [], east: [], north: [], south: [] };
+        var rows = Math.max(sizingGrouped.west.length, sizingGrouped.east.length, 1);
 
         var maxWestLabel = 0, maxEastLabel = 0, maxNorthLabel = 0, maxSouthLabel = 0;
         if (!model.hidePinLabels) {
@@ -213,6 +229,7 @@
 
         var titleW = estimateTextWidth(model.title, l.titleFontSize);
         var titleH = Math.ceil(l.titleFontSize * 1.2);
+        var instanceH = model.showInstance !== false && model.instanceName ? Math.ceil(l.instanceFontSize * 1.2) : 0;
         var leftTextW = (!model.hidePinLabels && visibleGrouped.west.length) ? maxWestLabel : 0;
         var rightTextW = (!model.hidePinLabels && visibleGrouped.east.length) ? maxEastLabel : 0;
         var leftColW = leftTextW > 0 ? (l.labelGap + leftTextW + 4) : 0;
@@ -222,10 +239,10 @@
         var naturalW = Math.max(
             l.minBodyWidth,
             l.bodyPaddingX * 2 + leftColW + centerMinW + rightColW,
-            92 + Math.max(grouped.north.length, grouped.south.length) * Math.max(20, Math.ceil(l.fontSize * 0.82))
+            92 + Math.max(sizingGrouped.north.length, sizingGrouped.south.length) * Math.max(20, Math.ceil(l.fontSize * 0.82))
         );
 
-        var rowH = Math.max(titleH + l.titlePadding * 2, rows * l.pinRowPitch);
+        var rowH = Math.max(titleH + l.titlePadding * 2 + (instanceH > 0 ? (l.instanceGap + instanceH) : 0), rows * l.pinRowPitch);
         var naturalH = Math.max(
             l.minBodyHeight,
             l.bodyPaddingY * 2 + rowH
@@ -303,11 +320,22 @@
         var vertMaxByW = Math.max(1, Math.floor((Math.max(8, centerW) - 4) / 1.2));
         var vertFont = Math.max(1, Math.min(titleFontSize, vertMaxByH, vertMaxByW));
         var verticalTitle = (horizFont < Math.max(3, Math.floor(titleFontSize * 0.55)) && vertFont >= horizFont) || (bodyH2 > bodyW2 * 1.18 && centerW < Math.max(40, bodyW2 * 0.42));
+        if (model.showInstance !== false && model.instanceName) verticalTitle = false;
         var titleFontSizeEff = verticalTitle ? vertFont : horizFont;
         var titleTextW = estimateTextWidth(model.title, titleFontSizeEff);
         var titleTextH = Math.ceil(titleFontSizeEff * 1.2);
         var titleBoxW = verticalTitle ? Math.max(8, Math.min(centerW, Math.ceil(titleTextH * 1.15))) : Math.max(8, Math.min(centerW, titleTextW + 6));
         var titleBoxH = verticalTitle ? Math.max(8, Math.min(availH, titleTextW + 4)) : Math.max(8, Math.min(availH, Math.ceil(titleTextH * 1.15)));
+        var instanceBoxH = model.showInstance !== false && model.instanceName ? Math.max(10, Math.ceil(instanceFontSize * 1.2)) : 0;
+        var titleStackTop = Math.round((bodyH2 - (titleBoxH + (instanceBoxH > 0 ? instanceGap + instanceBoxH : 0))) / 2);
+        if (model.showInstance !== false && model.instanceName) {
+            var availInstanceW = Math.max(12, bodyW2 - bodyPaddingX * 2 - 4);
+            var instanceChars = Math.max(1, trim(model.instanceName).length);
+            var maxInstanceFontByW = Math.max(4, Math.floor(availInstanceW / Math.max(instanceChars * 0.58, 1)));
+            instanceFontSize = Math.max(4, Math.min(instanceFontSize, maxInstanceFontByW));
+            instanceBoxH = Math.max(10, Math.ceil(instanceFontSize * 1.2));
+            titleStackTop = Math.round((bodyH2 - (titleBoxH + instanceGap + instanceBoxH)) / 2);
+        }
 
         var centerLeftX = bodyPaddingX + leftColW;
         var centerRightX = bodyW2 - bodyPaddingX - rightColW;
@@ -351,7 +379,8 @@
             titleBoxW: titleBoxW,
             titleBoxH: titleBoxH,
             instanceFontSize: instanceFontSize,
-            instanceH: model.showInstance !== false && model.instanceName ? Math.ceil(instanceFontSize * 1.2) : 0,
+            instanceH: instanceBoxH,
+            titleStackTop: titleStackTop,
             verticalTitle: verticalTitle,
             pinPos: pinPos,
             leftTextW: leftTextW,
@@ -366,9 +395,16 @@
 
     function computeBodyMinSize(graph, body) {
         var model = getModel(body);
-        if (!model) return { minW: 36, minH: 24 };
+        if (!model) {
+            var fallbackMin = regularMinSize(graph);
+            return { minW: fallbackMin.minW, minH: fallbackMin.minH };
+        }
         var layout = computeLayout(model);
-        return { minW: layout.minW, minH: layout.minH };
+        var baseMin = regularMinSize(graph);
+        return {
+            minW: Math.max(baseMin.minW, snapValue(graph, layout.minW)),
+            minH: Math.max(baseMin.minH, snapValue(graph, layout.minH))
+        };
     }
 
     function hasVisiblePins(model) {
@@ -946,7 +982,7 @@
             var titleShiftX = getLogicGateTitleShiftX(model, layout);
             var titleGeo = new mxGeometry(
                 Math.round(layout.centerLeftX + (layout.centerW - layout.titleBoxW) / 2 + titleShiftX),
-                Math.round((layout.bodyH - layout.titleBoxH) / 2),
+                layout.titleStackTop,
                 Math.max(12, layout.titleBoxW),
                 Math.max(12, layout.titleBoxH)
             );
@@ -957,7 +993,12 @@
             instanceCell.connectable = false;
             instanceCell.visible = model.showInstance !== false && !!model.instanceName;
             valid['instance:'] = true;
-            var instanceGeo = new mxGeometry(0, layout.bodyH + layout.instanceGap, layout.bodyW, Math.max(10, layout.instanceH || Math.ceil(layout.instanceFontSize * 1.2)));
+            var instanceGeo = new mxGeometry(
+                layout.bodyPaddingX,
+                layout.titleStackTop + layout.titleBoxH + layout.instanceGap,
+                Math.max(12, layout.bodyW - layout.bodyPaddingX * 2),
+                Math.max(10, layout.instanceH || Math.ceil(layout.instanceFontSize * 1.2))
+            );
             instanceGeo.relative = false;
             m.setGeometry(instanceCell, instanceGeo);
 
@@ -1083,6 +1124,7 @@
 
     function buildModelFromDefinition(graph, def, runtimeOpt) {
         runtimeOpt = runtimeOpt || {};
+        var baseMin = regularMinSize(graph);
         var title = trim(runtimeOpt.resolvedBodyLabel || runtimeOpt.label || def.defaultLabel || def.key || 'IP');
         var instanceName = trim(runtimeOpt.instanceName || '');
         var instancePolicy = def.instancePolicy || (NS.POLICY && NS.POLICY.INSTANCE_REQUIRED) || 'required';
@@ -1101,8 +1143,8 @@
                 fontSize: runtimeOpt.pinFont || def.pinFont || DEFAULTS.fontSize,
                 titleFontSize: runtimeOpt.bodyFont || def.bodyFont || DEFAULTS.titleFontSize,
                 instanceFontSize: Math.max(8, Math.round((runtimeOpt.pinFont || def.pinFont || DEFAULTS.fontSize) * 0.9)),
-                minBodyWidth: Math.max(DEFAULTS.minBodyWidth, Number((runtimeOpt.symbolMinW || 0)) || 0),
-                minBodyHeight: Math.max(DEFAULTS.minBodyHeight, Number((runtimeOpt.symbolMinH || 0)) || 0)
+                minBodyWidth: Math.max(baseMin.minW, Number((runtimeOpt.symbolMinW || 0)) || 0),
+                minBodyHeight: Math.max(baseMin.minH, Number((runtimeOpt.symbolMinH || 0)) || 0)
             },
             pins: extractPinsFromDefinition(def, Object.assign({}, runtimeOpt, { resolvedBodyLabel: title }))
         });
@@ -1146,10 +1188,21 @@
 
         var model = buildModelFromDefinition(graph, def, runtimeOpt);
         var natural = computeNaturalMetrics(model);
+        var baseMin = regularMinSize(graph);
         var defW = Number(def && def.w || 0) || 0;
         var defH = Number(def && def.h || 0) || 0;
-        var w = runtimeOpt.w != null ? Math.max(36, Number(runtimeOpt.w) || natural.naturalW) : Math.max(36, Math.ceil(natural.naturalW * 0.92), defW > 0 ? Math.min(defW, Math.ceil(natural.naturalW * 1.05)) : 0);
-        var h = runtimeOpt.h != null ? Math.max(24, Number(runtimeOpt.h) || natural.naturalH) : Math.max(24, Math.ceil(natural.naturalH * 0.92), defH > 0 ? Math.min(defH, Math.ceil(natural.naturalH * 1.05)) : 0);
+        var useDefSize = !!(def && def.useDefSize);
+        var desiredW = runtimeOpt.w != null
+            ? (Number(runtimeOpt.w) || natural.naturalW)
+            : (useDefSize && defW > 0 ? defW : natural.naturalW);
+        var desiredH = runtimeOpt.h != null
+            ? (Number(runtimeOpt.h) || natural.naturalH)
+            : (useDefSize && defH > 0 ? defH : natural.naturalH);
+        var minSize = computeLayout(model, desiredW, desiredH);
+        var w = Math.max(baseMin.minW, desiredW, minSize.minW);
+        var h = Math.max(baseMin.minH, desiredH, minSize.minH);
+        w = Math.max(gridSize(graph), snapValue(graph, w));
+        h = Math.max(gridSize(graph), snapValue(graph, h));
 
         var body = new mxCell(
             '',
