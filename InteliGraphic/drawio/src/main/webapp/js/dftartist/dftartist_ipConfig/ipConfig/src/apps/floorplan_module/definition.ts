@@ -48,8 +48,18 @@ export const floorplanModuleDefinition: DftsTypeDef = {
         { label: "Tailing", value: "tailing" },
       ],
     },
+    {
+      attr: "dftsFloorplan_fontSize",
+      label: "Text Scale",
+      kind: "number",
+      defaultValue: 24,
+      min: 6,
+      max: 200,
+      placeholder: "请输入字号",
+      help: "控制模块标题文字大小。",
+    },
   ],
-  applySpecialBasics: ({ graph, cell, basicDraft }) => {
+  applySpecialBasics: ({ graph, cell, basicDraft, specialDraft }) => {
     setStyleValue(graph, cell, "movableLabel", "1");
     setStyleValue(
       graph,
@@ -62,6 +72,13 @@ export const floorplanModuleDefinition: DftsTypeDef = {
       cell,
       "dftsFloorplan_instanceName",
       basicDraft.instanceName || "",
+    );
+    const fontSize = specialDraft.dftsFloorplan_fontSize;
+    setStyleValue(
+      graph,
+      cell,
+      "fontSize",
+      fontSize == null || fontSize === "" ? "" : String(fontSize),
     );
   },
 };

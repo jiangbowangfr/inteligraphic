@@ -309,7 +309,11 @@ function readInitialSpecialValues(
   const out: Record<string, any> = {};
   fields.forEach((field) => {
     const raw =
-      field.attr.startsWith("dftsFloorplan_")
+      field.attr === "dftsFloorplan_fontSize"
+        ? parseStyle(getRawStyle(graph, cell), "fontSize") ??
+          parseStyle(getRawStyle(graph, cell), field.attr) ??
+          getCellAttr(graph, cell, field.attr, field.defaultValue)
+        : field.attr.startsWith("dftsFloorplan_")
         ? parseStyle(getRawStyle(graph, cell), field.attr) ??
           getCellAttr(graph, cell, field.attr, field.defaultValue)
         : getCellAttr(graph, cell, field.attr, field.defaultValue);

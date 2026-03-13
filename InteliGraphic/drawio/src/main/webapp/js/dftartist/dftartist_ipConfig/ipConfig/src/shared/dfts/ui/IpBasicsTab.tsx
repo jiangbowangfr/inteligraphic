@@ -124,7 +124,7 @@ export default function IpBasicsTab(props: {
               <Row gutter={16}>
                 {specialFields.map((field) => (
                   <Col span={12} key={field.attr}>
-                    <Form.Item label={field.label} extra={field.help || '留空时按默认规则处理。'}>
+                    <Form.Item label={field.label} extra={field.help || ''}>
                       {field.kind === 'number' ? (
                         <InputNumber
                           value={specialValues[field.attr]}
