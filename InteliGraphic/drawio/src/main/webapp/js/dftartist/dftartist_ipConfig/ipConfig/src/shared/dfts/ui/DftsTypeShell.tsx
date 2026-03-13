@@ -555,15 +555,18 @@ export default function DftsTypeShell(props: {
   }, [rawTreeData, search, dirtyOnly, dirtyNodeKeys]);
   const treeScrollRef = useRef<HTMLDivElement | null>(null);
   const formScrollRef = useRef<HTMLDivElement | null>(null);
+  const prevActiveTabRef = useRef(activeTab);
   useEffect(() => {
     if (!selected && rawTreeData[0]?.key) setSelected(String(rawTreeData[0].key));
   }, [selected, rawTreeData]);
   useEffect(() => {
-    if (activeTab === "dft") {
+    const prevActiveTab = prevActiveTabRef.current;
+    prevActiveTabRef.current = activeTab;
+    if (activeTab === "dft" && prevActiveTab !== "dft") {
       treeScrollRef.current?.scrollTo({ top: 0 });
       formScrollRef.current?.scrollTo({ top: 0 });
     }
-  }, [activeTab, selected]);
+  }, [activeTab]);
   useEffect(() => {
     treeScrollRef.current?.scrollTo({ top: 0 });
   }, [search]);
