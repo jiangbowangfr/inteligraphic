@@ -83,7 +83,7 @@
         geo.points = [];
 
         var strokeWidth = Math.max(1, parseInt(opt.strokeWidth, 10) || 2);
-        var strokeColor = opt.strokeColor || '#000000';
+        var strokeColor = opt.strokeColor || '#ff0000';
         var endArrow = (opt.endArrow == null) ? 'classic' : String(opt.endArrow);
         var dashed = toBool(opt.dashed) ? '1' : '0';
 
