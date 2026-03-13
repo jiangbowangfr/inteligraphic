@@ -248,7 +248,27 @@
             normalized.instanceName = instanceText;
         }
 
+        var styleRotation = normalizeRotation(readStyleValue(body.style || '', 'rotation'));
+        var orientRotation = normalizeRotation(readStyleValue(body.style || '', 'dftsIP_orient'));
+        var currentRotation = normalizeRotation(normalized.transform && normalized.transform.rotation);
+        var resolvedRotation = styleRotation || orientRotation || currentRotation;
+
+        if (!normalized.transform) normalized.transform = {};
+        normalized.transform.rotation = resolvedRotation;
+
         return normalized;
+    }
+
+    function normalizeRotation(rotation) {
+        rotation = Number(rotation) || 0;
+        rotation = rotation % 360;
+        if (rotation < 0) rotation += 360;
+        return rotation;
+    }
+
+    function titleTextRotation(model, verticalTitle) {
+        var bodyRotation = normalizeRotation(model && model.transform && model.transform.rotation);
+        return normalizeRotation(bodyRotation + (verticalTitle ? 90 : 0));
     }
 
     function groupPins(model, includeHidden) {
@@ -373,11 +393,13 @@
         var horizMaxByH = Math.max(1, Math.floor((Math.max(8, availH) - 4) / 1.2));
         var horizFont = Math.max(1, Math.min(titleFontSize, horizMaxByW, horizMaxByH));
         var vertMaxByH = Math.max(1, Math.floor((Math.max(8, availH) - 4) / Math.max(titleChars * 0.58, 1)));
-        var vertMaxByW = Math.max(1, Math.floor((Math.max(8, centerW) - 4) / 1.2));
+        var vertMaxByW = Math.max(1, Math.floor((Math.max(8, centerW) - 2) / 1.02));
         var vertFont = Math.max(1, Math.min(titleFontSize, vertMaxByH, vertMaxByW));
-        var verticalTitle = (horizFont < Math.max(3, Math.floor(titleFontSize * 0.55)) && vertFont >= horizFont) || (bodyH2 > bodyW2 * 1.18 && centerW < Math.max(40, bodyW2 * 0.42));
+        var verticalTitle = bodyH2 > bodyW2 * 1.16;
         if (model.showInstance !== false && model.instanceName) verticalTitle = false;
-        var titleFontSizeEff = verticalTitle ? vertFont : horizFont;
+        var verticalMinFont = Math.max(12, Math.floor(Math.max(14, centerW) * 1.02));
+        var verticalTitleCap = Math.max(titleFontSize, Number(l.titleFontSize) || titleFontSize);
+        var titleFontSizeEff = verticalTitle ? Math.min(verticalTitleCap, vertMaxByH, Math.max(vertFont, verticalMinFont)) : horizFont;
         var titleTextW = estimateTextWidth(model.title, titleFontSizeEff);
         var titleTextH = Math.ceil(titleFontSizeEff * 1.2);
         var titleBoxW = verticalTitle ? Math.max(8, Math.min(centerW, Math.ceil(titleTextH * 1.15))) : Math.max(8, Math.min(centerW, titleTextW + 6));
@@ -1031,7 +1053,7 @@
 
             var valid = {};
 
-            var titleCell = ensureChild(graph, body, 'title', '', textStyle(layout.titleFontSize, 'center', true, layout.verticalTitle ? 90 : 0, 'visible'), model.title);
+            var titleCell = ensureChild(graph, body, 'title', '', textStyle(layout.titleFontSize, 'center', true, titleTextRotation(model, layout.verticalTitle), 'visible'), model.title);
             titleCell.connectable = false;
             titleCell.visible = !!model.title;
             valid['title:'] = true;
