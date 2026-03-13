@@ -13,3 +13,5 @@ import "./interface/entry";
 import "./logic_gates/entry";
 import "./data_source/entry";
 import "./floorplan_module/entry";
+import "./in_system_test/entry";
+import "./memory_bisr/entry";
