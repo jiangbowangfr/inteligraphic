@@ -86,6 +86,13 @@ function inferCategory(def: DftsTypeDef): DftsCategory {
   if (def.category) return def.category;
   return def.nodes && Object.keys(def.nodes).length ? "dft_ip" : "dft_ip";
 }
+function inferHostCategory(def: DftsTypeDef): string {
+  try {
+    const hostCategory = (window as any).DftsIP?._defsByType?.[def.type]?.category;
+    if (hostCategory) return String(hostCategory);
+  } catch {}
+  return String(def.category || "");
+}
 function defaultTabsForCategory(category: DftsCategory): string[] {
   switch (category) {
     case "logic_gate":
@@ -332,6 +339,7 @@ export default function DftsTypeShell(props: {
 }) {
   const { def, graph, cell, onClose } = props;
   const category = inferCategory(def);
+  const hostCategory = inferHostCategory(def);
   const nodes = def.nodes || {};
   const nodeKeys = useMemo(() => Object.keys(nodes), [nodes]);
   const rawTreeData = useMemo(
@@ -1081,6 +1089,7 @@ export default function DftsTypeShell(props: {
           <IpBasicsTab
             typeLabel={def.title.replace(/^DFT\s*[·•-]\s*/i, "")}
             categoryLabel={String(category)}
+            instanceNameLabel={hostCategory === "functional" ? "ID" : "实例名"}
             value={basicDraft}
             onChange={setBasicDraft}
             specialFields={specialFields}

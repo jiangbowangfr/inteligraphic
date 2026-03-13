@@ -1,6 +1,6 @@
 // src/shared/dfts/ui/IpBasicsTab.tsx
 import React, { useRef } from 'react';
-import { Button, Card, Col, Form, Input, InputNumber, Row, Select, Space, Switch, Tag, Typography } from 'antd';
+import { Button, Card, Col, Form, Input, InputNumber, Row, Select, Space, Tag, Typography } from 'antd';
 import type { SpecialFieldDef } from '../types';
 
 const { Text } = Typography;
@@ -17,6 +17,7 @@ export type IpBasicsDraft = {
 export default function IpBasicsTab(props: {
   typeLabel: string;
   categoryLabel: string;
+  instanceNameLabel?: string;
   value: IpBasicsDraft;
   onChange: (next: IpBasicsDraft) => void;
   specialFields?: SpecialFieldDef[];
@@ -26,6 +27,7 @@ export default function IpBasicsTab(props: {
   const {
     typeLabel,
     categoryLabel,
+    instanceNameLabel = '实例名',
     value,
     onChange,
     specialFields = [],
@@ -96,7 +98,7 @@ export default function IpBasicsTab(props: {
           <div style={{ width: 210, padding: '16px 14px 18px', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 12, textAlign: 'center' }}>
             <div style={{ fontSize: 18, fontWeight: 700, color: '#0F172A' }}>{value.bodyLabel || typeLabel}</div>
             <div style={{ marginTop: 10, color: '#64748B', fontSize: 12 }}>
-              {value.showInstance ? value.instanceName || '未设置实例名' : '实例名已隐藏'}
+              {value.instanceName || `未设置${instanceNameLabel}`}
             </div>
           </div>
         </Card>
@@ -112,8 +114,8 @@ export default function IpBasicsTab(props: {
                 </Form.Item>
               </Col>
               <Col span={12}>
-                <Form.Item label="实例名">
-                  <Input value={value.instanceName} placeholder="显示在图形下方的实例名" onChange={(e) => setField('instanceName', e.target.value)} />
+                <Form.Item label={instanceNameLabel}>
+                  <Input value={value.instanceName} placeholder={`显示在图形下方的${instanceNameLabel}`} onChange={(e) => setField('instanceName', e.target.value)} />
                 </Form.Item>
               </Col>
             </Row>
@@ -190,20 +192,6 @@ export default function IpBasicsTab(props: {
             </Card>
           ) : null}
 
-          <Card size="small" title="显示与行为" style={{ marginBottom: 16, borderRadius: 12, borderColor: '#EEF2F7' }} styles={{ body: { paddingBottom: 6 } }}>
-            <Row gutter={16}>
-              <Col span={12}>
-                <Form.Item label="显示实例名" extra="关闭后仅隐藏实例名展示，不删除存储值。">
-                  <Switch checked={value.showInstance} onChange={(v) => setField('showInstance', v)} />
-                </Form.Item>
-              </Col>
-              <Col span={12}>
-                <Form.Item label="锁定模块标题" extra="开启后可作为外部逻辑的“禁止编辑标题”依据。">
-                  <Switch checked={value.lockBodyLabel} onChange={(v) => setField('lockBodyLabel', v)} />
-                </Form.Item>
-              </Col>
-            </Row>
-          </Card>
         </Form>
       </Card>
     </div>
