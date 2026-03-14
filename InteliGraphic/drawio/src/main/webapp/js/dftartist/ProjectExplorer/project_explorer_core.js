@@ -303,6 +303,13 @@
     return normalizePath((ui && (ui._projectRootPath || ui._projectYamlDir)) || '');
   }
 
+  function getProjectStorageRoot(ui) {
+    var dbRoot = normalizePath((ui && ui._projectDbDirPath) || '');
+    if (dbRoot) return dbRoot;
+    var root = getProjectRoot(ui);
+    return root ? joinPath(root, 'db') : '';
+  }
+
   function isProjectReady(ui) {
     var model = ui && ui.projectModel;
     if (!model) return false;
@@ -329,7 +336,7 @@
   function getDesignAbsDir(ui, design) {
     if (!design) return '';
     if (design._absDir) return normalizePath(design._absDir);
-    var root = getProjectRoot(ui);
+    var root = getProjectStorageRoot(ui);
     var segs = Array.isArray(design._dirRel) ? design._dirRel.slice() : [];
     if (isFloorplanDesign(design)) {
       if (root) return joinPath(root, 'floorplan');
@@ -350,7 +357,7 @@
   function hydrateDesignDirs(ui) {
     var model = ui.projectModel || {};
     var designs = Array.isArray(model.designs) ? model.designs : [];
-    var root = getProjectRoot(ui) || normalizePath(model.path || '');
+    var root = getProjectStorageRoot(ui) || normalizePath(model.path || '');
 
     function walk(design, parentSegs) {
       if (!design) return;
@@ -410,7 +417,7 @@
       env_file: '',
       page_meta: {}
     };
-    if (getProjectRoot(ui)) fp._absDir = joinPath(getProjectRoot(ui), 'floorplan');
+    if (getProjectStorageRoot(ui)) fp._absDir = joinPath(getProjectStorageRoot(ui), 'floorplan');
     model.designs.unshift(fp);
     markProjectReady(model);
     hydrateDesignDirs(ui);
@@ -431,7 +438,7 @@
       env_file: '',
       page_meta: {}
     };
-    if (getProjectRoot(ui)) ipc._absDir = joinPath(getProjectRoot(ui), 'ipconfig');
+    if (getProjectStorageRoot(ui)) ipc._absDir = joinPath(getProjectStorageRoot(ui), 'ipconfig');
     model.designs.push(ipc);
     markProjectReady(model);
     hydrateDesignDirs(ui);
@@ -797,7 +804,9 @@
     if (!pageName) throw new Error('pageName is required');
     var base = getDesignAbsDir(ui, designRef);
     if (!base) throw new Error('Please create or open a project first.');
-    if (isFloorplanDesign(designRef)) return joinPath(base, sanitizeName(pageName) + '.dftart');
+    if (isFloorplanDesign(designRef) || normalizePath(base).toLowerCase().replace(/\/$/, '').slice(-10) === '/floorplan' || normalizePath(base).toLowerCase() === 'floorplan') {
+      return joinPath(base, sanitizeName(pageName) + '.dftart');
+    }
     return joinPath(base, 'page', sanitizeName(pageName) + '.dftart');
   }
 
@@ -960,7 +969,7 @@
 
   async function fallbackSaveProjectFile(ui) {
     var model = ensureModel(ui);
-    var root = getProjectRoot(ui);
+    var root = getProjectStorageRoot(ui);
     if (!root) return;
     var file = ui._projectYamlFilePath || joinPath(root, sanitizeName(model.name || 'project') + '.dftart');
     ui._projectYamlFilePath = file;
@@ -987,15 +996,16 @@
   }
 
   async function ensureProjectScaffoldOnDisk(ui) {
-    var root = getProjectRoot(ui);
+    var projectRoot = getProjectRoot(ui);
+    var root = getProjectStorageRoot(ui);
+    if (projectRoot) await ensureDirs(projectRoot);
     if (!root) return;
     await ensureDirs(root);
-    await ensureDirs(joinPath(root, 'db'));
   }
 
   async function ensureIpConfigFile(ui) {
     var model = ensureModel(ui);
-    var root = getProjectRoot(ui);
+    var root = getProjectStorageRoot(ui);
     if (!root) return '';
     var rel = text(model.ip_config_file || 'ip_config.json') || 'ip_config.json';
     model.ip_config_file = rel;
@@ -1028,7 +1038,7 @@
   }
 
   function ensureIpconfigScaffoldIfNeeded(ui) {
-    var root = getProjectRoot(ui);
+    var root = getProjectStorageRoot(ui);
     if (!root || !isProjectReady(ui)) return;
     var ipc = getExistingRootIpconfigContainer(ui);
     if (!ipc) return;
@@ -1251,7 +1261,7 @@
     var containerName = kind === 'floorplan' ? 'floorplan' : 'ipconfig';
     var parentDirRel = parentDesign && Array.isArray(parentDesign._dirRel) ? parentDesign._dirRel.slice() : [];
     var dirRel = parentDirRel.concat([containerName]);
-    var parentAbs = parentDesign ? getDesignAbsDir(ui, parentDesign) : getProjectRoot(ui);
+    var parentAbs = parentDesign ? getDesignAbsDir(ui, parentDesign) : getProjectStorageRoot(ui);
     var absDir = parentAbs ? joinPath(parentAbs, containerName) : '';
     return makeDesignRecord(containerName, absDir, {
       dirRel: dirRel,
@@ -1320,12 +1330,7 @@
   }
 
   function getAddDesignParent(ui) {
-    var state = getState(ui);
-    var selectedKey = text(state.selectedKey || '');
-    var model = ensureModel(ui);
-    if (!selectedKey || selectedKey === 'project:root') return null;
-    var found = findOwningDesignBySelectedKey(model.designs, selectedKey);
-    return found && !isFloorplanDesign(found) && !isIpconfigDesign(found) ? found : null;
+    return null;
   }
 
   function collectCopyableDesigns(list, out, prefix) {
@@ -1360,7 +1365,8 @@
     if (!isFloorplanDesign(designRef)) await ensureDirs(joinPath(designAbs, 'page'));
     if (isIpconfigDesign(designRef)) await ensureDirs(joinPath(designAbs, 'yaml'));
     if (!isFloorplanDesign(designRef) && !isIpconfigDesign(designRef)) {
-      var envAbs = pathWithinRoot(getProjectRoot(ui), designAbs) ? joinPath(getProjectRoot(ui), designRef.env_file) : joinPath(designAbs, 'env.json');
+      var storageRoot = getProjectStorageRoot(ui);
+      var envAbs = pathWithinRoot(storageRoot, designAbs) ? joinPath(storageRoot, designRef.env_file) : joinPath(designAbs, 'env.json');
       if (!await statExists(envAbs)) {
         try { await writeTextFile(envAbs, JSON.stringify({ design: designRef.name }, null, 2)); } catch (e) {}
       }
@@ -1427,7 +1433,7 @@
       if (sibling && sibling.name === name) throw new Error('Design already exists: ' + name);
     }
 
-    var parentAbs = parentDesign ? getDesignAbsDir(ui, parentDesign) : getProjectRoot(ui);
+    var parentAbs = parentDesign ? getDesignAbsDir(ui, parentDesign) : getProjectStorageRoot(ui);
     if (!parentAbs) throw new Error('Create or open a project first.');
     var targetAbs = joinPath(parentAbs, sanitizeName(name));
     var sourceAbs = sourceDesign ? getDesignAbsDir(ui, sourceDesign) : '';
@@ -1436,7 +1442,7 @@
     }
     var targetDirRel = parentDesign
       ? (parentDesign._dirRel || []).concat([sanitizeName(name)])
-      : (relSegsFromRoot(getProjectRoot(ui), targetAbs) || [sanitizeName(name)]);
+      : (relSegsFromRoot(getProjectStorageRoot(ui), targetAbs) || [sanitizeName(name)]);
 
     var design = sourceDesign
       ? buildClonedDesignTree(ui, sourceDesign, name, targetAbs, targetDirRel)
@@ -1481,8 +1487,8 @@
     var model = { name: projectName, path: rootPath, designs: [], ip_config_file: 'ip_config.json', __placeholder: false, __createdByProjectExplorer: true };
     ui.projectModel = model;
     ui._projectRootPath = rootPath;
-    ui._projectYamlDir = rootPath;
-    ui._projectYamlFilePath = joinPath(rootPath, sanitizeName(projectName) + '.dftart');
+    ui._projectYamlDir = joinPath(rootPath, 'db');
+    ui._projectYamlFilePath = joinPath(rootPath, 'db', sanitizeName(projectName) + '.dftart');
     ui._projectDbDirPath = joinPath(rootPath, 'db');
     ui._projectDbFilePath = joinPath(rootPath, 'db', 'project.db');
     ui._projectRootDirHandle = null;
@@ -1523,8 +1529,8 @@
       };
       ui.projectModel = model;
       ui._projectRootPath = designAbsPath;
-      ui._projectYamlDir = designAbsPath;
-      ui._projectYamlFilePath = joinPath(designAbsPath, designDirName + '.dftart');
+      ui._projectYamlDir = joinPath(designAbsPath, 'db');
+      ui._projectYamlFilePath = joinPath(designAbsPath, 'db', designDirName + '.dftart');
       ui._projectDbDirPath = joinPath(designAbsPath, 'db');
       ui._projectDbFilePath = joinPath(designAbsPath, 'db', 'project.db');
       ui._projectRootDirHandle = null;
@@ -1540,8 +1546,10 @@
       }
     }
 
-    var dirRel = relSegsFromRoot(getProjectRoot(ui), designAbsPath);
-    var design = makeDesignRecord(designName, designAbsPath, { dirRel: dirRel || [designDirName] });
+    var storageRoot = getProjectStorageRoot(ui);
+    var designStorageAbsPath = joinPath(storageRoot, designDirName);
+    var dirRel = relSegsFromRoot(storageRoot, designStorageAbsPath);
+    var design = makeDesignRecord(designName, designStorageAbsPath, { dirRel: dirRel || [designDirName] });
     model.designs.push(design);
     markProjectReady(model);
     ensureDefaultContainerChildren(design, ui);
@@ -1552,8 +1560,8 @@
       await ensureDirs(designAbs);
       await ensureDirs(joinPath(designAbs, 'page'));
       if (design.env_file && !isIpconfigDesign(design)) {
-        var envAbs = joinPath(getProjectRoot(ui), design.env_file);
-        if (!pathWithinRoot(getProjectRoot(ui), designAbs)) envAbs = joinPath(designAbs, 'env.json');
+        var envAbs = joinPath(storageRoot, design.env_file);
+        if (!pathWithinRoot(storageRoot, designAbs)) envAbs = joinPath(designAbs, 'env.json');
         if (!await statExists(envAbs)) {
           try { await writeTextFile(envAbs, JSON.stringify({ design: design.name }, null, 2)); } catch (e2) {}
         }
@@ -1664,13 +1672,13 @@
     return true;
   }
 
-  function floorplanPageName(projectName, contentKey) {
-    return sanitizeName(projectName || 'project') + '_' + contentKey.toLowerCase() + '_floorplan';
+  function floorplanPageName(projectName) {
+    return sanitizeName(projectName || 'project') + '_floorplan';
   }
 
   async function showFloorplanPageDialog(ui) {
     return showDialog(ui, 'Create Floorplan Page', 640, 360, function (body, done) {
-      body.appendChild(createEl('div', 'phase2-dlg-note', 'Choose the floorplan structure and the DFT content to generate. A page will be created for each selected content item.'));
+      body.appendChild(createEl('div', 'phase2-dlg-note', 'Choose the floorplan structure to generate. A single floorplan page will be created, and DFT content can be managed with layers inside that page.'));
 
       var grid = createEl('div', 'phase2-dlg-grid');
       body.appendChild(grid);
@@ -1706,49 +1714,13 @@
       }
       grid.appendChild(structureWrap);
 
-      grid.appendChild(createEl('div', 'phase2-dlg-label', 'Contents'));
-      var checksWrap = createEl('div', 'phase2-check-grid');
-      var contentDefs = ['SSN', 'BSCAN', 'JTAG', 'BISR', 'Other'];
-      var checkMap = {};
-
-      function syncCheckCard(card, input) {
-        card.className = input.checked ? 'phase2-check-card active' : 'phase2-check-card';
-      }
-
-      for (var j = 0; j < contentDefs.length; j++) {
-        (function (key) {
-          var ckLabel = createEl('label', 'phase2-check-card');
-          var ck = createEl('input');
-          ck.type = 'checkbox';
-          ck.onchange = function () { syncCheckCard(ckLabel, ck); };
-          checkMap[key] = ck;
-          ckLabel.appendChild(ck);
-          ckLabel.appendChild(createEl('span', null, key));
-          ckLabel.onclick = function () { setTimeout(function () { syncCheckCard(ckLabel, ck); }, 0); };
-          checksWrap.appendChild(ckLabel);
-          syncCheckCard(ckLabel, ck);
-        })(contentDefs[j]);
-      }
-      grid.appendChild(checksWrap);
-
-      var errorNode = createEl('div', 'phase2-inline-error');
-      errorNode.style.display = 'none';
-      body.appendChild(errorNode);
-
       var actions = createEl('div', 'phase2-dlg-actions');
       body.appendChild(actions);
       var cancelBtn = createEl('button', 'phase2-btn ghost', (global.mxResources && global.mxResources.get ? (global.mxResources.get('cancel') || 'Cancel') : 'Cancel'));
       var okBtn = createEl('button', 'phase2-btn primary', (global.mxResources && global.mxResources.get ? (global.mxResources.get('create') || 'Create') : 'Create'));
 
       function submit() {
-        var picked = [];
-        for (var k = 0; k < contentDefs.length; k++) if (checkMap[contentDefs[k]].checked) picked.push(contentDefs[k]);
-        if (!picked.length) {
-          errorNode.textContent = 'Select at least one floorplan content item.';
-          errorNode.style.display = '';
-          return;
-        }
-        done({ structure: selectedStructure, contents: picked });
+        done({ structure: selectedStructure });
       }
 
       cancelBtn.onclick = function () { done(null); };
@@ -1770,21 +1742,19 @@
     fp.page_meta = fp.page_meta || {};
     var created = [];
     var skipped = [];
-    for (var i = 0; i < selection.contents.length; i++) {
-      var key = selection.contents[i];
-      var pageName = floorplanPageName(model.name || 'project', key);
-      if (Array.isArray(fp.pages) && fp.pages.indexOf(pageName) >= 0) {
-        skipped.push(pageName);
-        fp.page_meta[pageName] = { structure: selection.structure, content: key, kind: 'floorplan' };
-        continue;
-      }
+    var pageName = floorplanPageName(model.name || 'project');
+    if (Array.isArray(fp.pages) && fp.pages.indexOf(pageName) >= 0) {
+      skipped.push(pageName);
+      fp.page_meta[pageName] = { structure: selection.structure, kind: 'floorplan' };
+    }
+    else {
       await addStandardPage(ui, fp, pageName);
-      fp.page_meta[pageName] = { structure: selection.structure, content: key, kind: 'floorplan' };
+      fp.page_meta[pageName] = { structure: selection.structure, kind: 'floorplan' };
       created.push(pageName);
     }
     saveProjectYaml(ui, 'createFloorplanPages');
     if (created.length && opts.openFirst !== false) await openPage(ui, fp, created[0]);
-    setStatus(ui, created.length ? ('Created floorplan page(s): ' + created.join(', ')) : 'Selected floorplan page(s) already exist.');
+    setStatus(ui, created.length ? ('Created floorplan page: ' + created[0]) : 'Floorplan page already exists.');
     NS.refresh(ui);
     return { design: fp, created: created, skipped: skipped, selection: selection };
   }
@@ -1986,7 +1956,7 @@
       showTextDialog(ui, 'ip_config', JSON.stringify({ file: ensureModel(ui).ip_config_file || 'ip_config.json' }, null, 2));
       return;
     }
-    var rootPath = getProjectRoot(ui) || '';
+    var rootPath = getProjectStorageRoot(ui) || '';
     var designBase = getDesignAbsDir(ui, designRef);
     var abs = pathWithinRoot(rootPath, designBase) ? joinPath(rootPath, designRef.env_file) : joinPath(designBase, 'env.json');
     console.log('[env-open:project-explorer] resolved', {
@@ -2394,12 +2364,12 @@
     var files = [];
     if (!isProjectReady(ui)) return files;
     if (ui._projectYamlFilePath) files.push({ icon: '🧾', label: (model.name || 'project') + '.dftart', path: ui._projectYamlFilePath });
-    if (model.ip_config_file) files.push({ icon: '🧩', label: 'ip_config.json', path: joinPath(getProjectRoot(ui), model.ip_config_file) });
+    if (model.ip_config_file) files.push({ icon: '🧩', label: 'ip_config.json', path: joinPath(getProjectStorageRoot(ui), model.ip_config_file) });
     var flowState = ui && ui.__dftFlowNavState ? ui.__dftFlowNavState : null;
     function walk(design) {
       if (!design) return;
       var base = getDesignAbsDir(ui, design) || joinPath.apply(null, design._dirRel || []);
-      if (!isFloorplanDesign(design) && !isIpconfigDesign(design)) files.push({ icon: '⚙', label: (design.name || 'design') + ' / env.json', path: pathWithinRoot(getProjectRoot(ui), base) ? joinPath(getProjectRoot(ui), design.env_file) : joinPath(base, 'env.json') });
+      if (!isFloorplanDesign(design) && !isIpconfigDesign(design)) files.push({ icon: '⚙', label: (design.name || 'design') + ' / env.json', path: pathWithinRoot(getProjectStorageRoot(ui), base) ? joinPath(getProjectStorageRoot(ui), design.env_file) : joinPath(base, 'env.json') });
       if (isIpconfigDesign(design)) {
         files.push({ icon: '🗂', label: 'ipconfig / yaml', path: joinPath(base, 'yaml') });
         if (flowState && flowState.lastIpconfigPath) files.push({ icon: '📄', label: basenamePath(flowState.lastIpconfigPath), path: flowState.lastIpconfigPath });

@@ -39,6 +39,31 @@
         return JSON.parse(JSON.stringify(obj));
     }
 
+    function getGridSize(graph) {
+        if (!graph) return 10;
+        var size = Number(graph.gridSize);
+        if (!isFinite(size) || size <= 0) size = 10;
+        return Math.max(1, Math.round(size));
+    }
+
+    function snapValueToGrid(graph, value) {
+        var n = Number(value);
+        if (!isFinite(n)) n = 0;
+        var grid = getGridSize(graph);
+        return Math.round(n / grid) * grid;
+    }
+
+    function snapRectToGrid(graph, rect) {
+        if (!rect) return rect;
+        var grid = getGridSize(graph);
+        return new mxRectangle(
+            snapValueToGrid(graph, rect.x),
+            snapValueToGrid(graph, rect.y),
+            Math.max(grid, snapValueToGrid(graph, rect.width)),
+            Math.max(grid, snapValueToGrid(graph, rect.height))
+        );
+    }
+
     function normalizeNameForId(v) {
         var s = trimOrEmpty(v);
         if (!s) return 'ip';
@@ -55,6 +80,9 @@
     }
 
     NS.rejectCreate = rejectCreate;
+    NS.getGridSize = getGridSize;
+    NS.snapValueToGrid = snapValueToGrid;
+    NS.snapRectToGrid = snapRectToGrid;
 
     function styleValue(styleObj, key, fallback) {
         if (!styleObj) return fallback;
@@ -106,6 +134,38 @@
     }
 
     NS.findChipBodyForCell = findChipBodyForCell;
+
+    function findChipBodyInSubtree(graph, cell) {
+        if (!graph || !cell) return null;
+        var model = graph.getModel();
+        if (isChipBody(graph, cell)) return cell;
+        var childCount = model.getChildCount(cell);
+        for (var i = 0; i < childCount; i++) {
+            var found = findChipBodyInSubtree(graph, model.getChildAt(cell, i));
+            if (found) return found;
+        }
+        return null;
+    }
+
+    function resolveChipBodyFromContext(graph, cell) {
+        if (!graph) return null;
+
+        var body = findChipBodyForCell(graph, cell);
+        if (body) return body;
+
+        body = findChipBodyInSubtree(graph, cell);
+        if (body) return body;
+
+        var selectionCells = graph.getSelectionCells ? graph.getSelectionCells() : [];
+        for (var i = 0; i < selectionCells.length; i++) {
+            body = findChipBodyForCell(graph, selectionCells[i]) || findChipBodyInSubtree(graph, selectionCells[i]);
+            if (body) return body;
+        }
+
+        return null;
+    }
+
+    NS.resolveChipBodyFromContext = resolveChipBodyFromContext;
 
     function getAllChipBodies(graph) {
         var out = [];
@@ -466,15 +526,17 @@
 
         function clampBody(cell, b) {
             if (!isChipBody(graph, cell)) return b;
-            if (NS.Symbol && typeof NS.Symbol.isSymbolBody === 'function' && NS.Symbol.isSymbolBody(cell)) {
-                return b;
-            }
-            var min = computeChipMinSize(graph, cell);
-            return new mxRectangle(
+            var rect = new mxRectangle(
                 b.x, b.y,
-                Math.max(b.width, min.minW),
-                Math.max(b.height, min.minH)
+                b.width,
+                b.height
             );
+            if (!(NS.Symbol && typeof NS.Symbol.isSymbolBody === 'function' && NS.Symbol.isSymbolBody(cell))) {
+                var min = computeChipMinSize(graph, cell);
+                rect.width = Math.max(rect.width, min.minW);
+                rect.height = Math.max(rect.height, min.minH);
+            }
+            return snapRectToGrid(graph, rect);
         }
 
         graph.resizeCell = function (cell, bounds, recurse) {
@@ -591,12 +653,112 @@
 
     NS.installChipMinSizeGuards = installChipMinSizeGuards;
 
+    function installBodyGridSnap(graph) {
+        if (!graph || graph.__dftsBodyGridSnapInstalled) return;
+        graph.__dftsBodyGridSnapInstalled = true;
+
+        var _cellsMoved = graph.cellsMoved;
+        graph.cellsMoved = function (cells, dx, dy, disconnect, constrain, extend) {
+            var result = _cellsMoved.call(this, cells, dx, dy, disconnect, constrain, extend);
+            if (!cells || !cells.length) return result;
+
+            var model = graph.getModel();
+            var seen = {};
+            model.beginUpdate();
+            try {
+                for (var i = 0; i < cells.length; i++) {
+                    var body = findChipBodyForCell(graph, cells[i]);
+                    if (!body || !isChipBody(graph, body) || !body.geometry) continue;
+                    var id = body.getId ? body.getId() : body.id;
+                    if (seen[id]) continue;
+                    seen[id] = true;
+
+                    var snapped = snapRectToGrid(graph, body.geometry);
+                    if (
+                        snapped.x !== body.geometry.x ||
+                        snapped.y !== body.geometry.y ||
+                        snapped.width !== body.geometry.width ||
+                        snapped.height !== body.geometry.height
+                    ) {
+                        model.setGeometry(body, snapped);
+                    }
+                }
+            } finally {
+                model.endUpdate();
+            }
+            return result;
+        };
+
+        graph.addListener(mxEvent.CELLS_MOVED, function (sender, evt) {
+            var cells = evt.getProperty('cells') || [];
+            var model = graph.getModel();
+            var seen = {};
+
+            model.beginUpdate();
+            try {
+                for (var i = 0; i < cells.length; i++) {
+                    var body = findChipBodyForCell(graph, cells[i]);
+                    if (!body || !isChipBody(graph, body) || !body.geometry) continue;
+                    var id = body.getId ? body.getId() : body.id;
+                    if (seen[id]) continue;
+                    seen[id] = true;
+
+                    var snapped = snapRectToGrid(graph, body.geometry);
+                    if (
+                        snapped.x !== body.geometry.x ||
+                        snapped.y !== body.geometry.y ||
+                        snapped.width !== body.geometry.width ||
+                        snapped.height !== body.geometry.height
+                    ) {
+                        model.setGeometry(body, snapped);
+                    }
+                }
+            } finally {
+                model.endUpdate();
+            }
+        });
+    }
+
+    NS.installBodyGridSnap = installBodyGridSnap;
+
+    function snapChipBodiesForCells(graph, cells) {
+        if (!graph || !cells || !cells.length) return;
+        var model = graph.getModel();
+        var seen = {};
+
+        model.beginUpdate();
+        try {
+            for (var i = 0; i < cells.length; i++) {
+                var body = findChipBodyForCell(graph, cells[i]) || cells[i];
+                if (!body || !isChipBody(graph, body) || !body.geometry) continue;
+                var id = body.getId ? body.getId() : body.id;
+                if (seen[id]) continue;
+                seen[id] = true;
+
+                var snapped = snapRectToGrid(graph, body.geometry);
+                if (
+                    snapped.x !== body.geometry.x ||
+                    snapped.y !== body.geometry.y ||
+                    snapped.width !== body.geometry.width ||
+                    snapped.height !== body.geometry.height
+                ) {
+                    model.setGeometry(body, snapped);
+                }
+            }
+        } finally {
+            model.endUpdate();
+        }
+    }
+
+    NS.snapChipBodiesForCells = snapChipBodiesForCells;
+
     function ensureGraphPatches(graph) {
         if (!graph || graph.__dftsCommonPatched) return;
         graph.__dftsCommonPatched = true;
         installResizeClamp(graph);
         installPinGuards(graph);
         installChipMinSizeGuards(graph);
+        installBodyGridSnap(graph);
     }
 
     NS.ensureGraphPatches = ensureGraphPatches;
@@ -619,7 +781,8 @@
         var labelSpacing = opt.labelSpacing || { left: 0, top: 0, right: 0, bottom: 0 };
         var hideBodyLabel = !!opt.hideBodyLabel;
 
-        var bodyGeo = new mxGeometry(0, 0, w, h);
+        var snappedBody = snapRectToGrid(graph, new mxRectangle(0, 0, w, h));
+        var bodyGeo = new mxGeometry(snappedBody.x, snappedBody.y, snappedBody.width, snappedBody.height);
         var bodyStyle = [
             'dftsIP_chipBody=1',
             'shape=rectangle',
@@ -762,22 +925,22 @@
             if (orient === 0) {
                 geo.x = 0; geo.y = 1;
                 geo.width = bw; geo.height = thickness;
-                geo.offset = new mxPoint(0, gap);
+                geo.offset = new mxPoint(0, -(thickness + gap));
                 style = mxUtils.setStyle(style, 'rotation', '0');
             } else if (orient === 90) {
                 geo.x = 1; geo.y = 0;
                 geo.width = thickness; geo.height = bh;
-                geo.offset = new mxPoint(gap, 0);
+                geo.offset = new mxPoint(-(thickness + gap), 0);
                 style = mxUtils.setStyle(style, 'rotation', '90');
             } else if (orient === 180) {
                 geo.x = 0; geo.y = 0;
                 geo.width = bw; geo.height = thickness;
-                geo.offset = new mxPoint(0, -(thickness + gap));
+                geo.offset = new mxPoint(0, gap);
                 style = mxUtils.setStyle(style, 'rotation', '180');
             } else {
                 geo.x = 0; geo.y = 0;
                 geo.width = thickness; geo.height = bh;
-                geo.offset = new mxPoint(-(thickness + gap), 0);
+                geo.offset = new mxPoint(gap, 0);
                 style = mxUtils.setStyle(style, 'rotation', '270');
             }
 
@@ -914,13 +1077,31 @@
 
         realUi.actions.addAction('openSelectedDftsIpConfig', function () {
             var sel = graph.getSelectionCell();
-            var body = findChipBodyForCell(graph, sel);
+            var body = resolveChipBodyFromContext(graph, sel);
             if (!body) {
                 if (typeof mxUtils !== 'undefined' && mxUtils.alert) mxUtils.alert('请先选中一个 IP。');
                 return;
             }
             openIpConfig(graph, body);
         });
+
+        if (realUi.menus && typeof realUi.menus.createPopupMenu === 'function' && !realUi.__dftsConfigMenuInstalled) {
+            var oldCreatePopupMenu = realUi.menus.createPopupMenu;
+            realUi.menus.createPopupMenu = function (menu, cell, evt) {
+                oldCreatePopupMenu.apply(this, arguments);
+
+                var target = cell || graph.getSelectionCell();
+                var body = resolveChipBodyFromContext(graph, target);
+                if (!body) return;
+
+                menu.addSeparator();
+                menu.addItem('配置参数', null, function () {
+                    graph.setSelectionCell(body);
+                    realUi.actions.get('openSelectedDftsIpConfig').funct();
+                }, null, evt);
+            };
+            realUi.__dftsConfigMenuInstalled = true;
+        }
     }
 
     NS.installConfigAction = installConfigAction;

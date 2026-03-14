@@ -83,7 +83,7 @@
         geo.points = [];
 
         var strokeWidth = Math.max(1, parseInt(opt.strokeWidth, 10) || 2);
-        var strokeColor = opt.strokeColor || '#000000';
+        var strokeColor = opt.strokeColor || '#ff0000';
         var endArrow = (opt.endArrow == null) ? 'classic' : String(opt.endArrow);
         var dashed = toBool(opt.dashed) ? '1' : '0';
 
@@ -117,6 +117,25 @@
 
         ensurePerimeterRegistered();
 
+        function debugLog() {
+            if (typeof console === 'undefined' || !console.log) return;
+            console.log.apply(console, ['[FloorplanLine]'].concat(Array.prototype.slice.call(arguments)));
+        }
+
+        function getBodyConstraints(cell, source) {
+            try {
+                var ipNS = global.DftsIP;
+                if (ipNS && typeof ipNS.getDataSourceConnectionConstraints === 'function') {
+                    var constraints = ipNS.getDataSourceConnectionConstraints(graph, cell, source);
+                    if (constraints && constraints.length) {
+                        debugLog('bodyConstraints', cell && (cell.id || (cell.getId && cell.getId())), constraints.length);
+                    }
+                    return constraints;
+                }
+            } catch (e) { }
+            return null;
+        }
+
         var ch = graph.connectionHandler && graph.connectionHandler.constraintHandler;
         if (ch && ch.getConstraints) {
             var oldGetConstraints = ch.getConstraints;
@@ -124,7 +143,10 @@
                 try {
                     if (state && state.cell) {
                         var style = graph.getCellStyle(state.cell);
-                        if (style && mxUtils.getValue(style, 'floorplan', '0') === '1') return null;
+                        if (style && mxUtils.getValue(style, 'floorplan', '0') === '1') {
+                            var constraints = getBodyConstraints(state.cell, source);
+                            return constraints != null ? constraints : null;
+                        }
                     }
                 } catch (e) { }
                 return oldGetConstraints.apply(this, arguments);
@@ -137,7 +159,10 @@
                 try {
                     if (terminal && terminal.cell) {
                         var style = graph.getCellStyle(terminal.cell);
-                        if (style && mxUtils.getValue(style, 'floorplan', '0') === '1') return null;
+                        if (style && mxUtils.getValue(style, 'floorplan', '0') === '1') {
+                            var constraints = getBodyConstraints(terminal.cell, source);
+                            return constraints != null ? constraints : null;
+                        }
                     }
                 } catch (e) { }
                 return oldAll.apply(this, arguments);

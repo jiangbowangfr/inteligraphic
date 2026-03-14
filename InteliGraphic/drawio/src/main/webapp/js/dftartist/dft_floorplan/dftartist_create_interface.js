@@ -50,7 +50,9 @@
         defaultLabel: 'SSN_HOST',
         autoLabelPrefix: 'SSN_HOST',
         configKey: 'interface_common',
-        w: 460, h: 140,
+        useDefSize: true,
+        w: 190, h: 40,
+        symbolMinW: 150, symbolMinH: 90,
         bodyFont: 20, pinFont: 16,
         pinsFactory: function (opt) {
             var busWidth = opt.busWidth != null ? opt.busWidth : 4;
@@ -70,7 +72,9 @@
         defaultLabel: 'SSN_SLAVE',
         autoLabelPrefix: 'SSN_SLAVE',
         configKey: 'interface_common',
-        w: 520, h: 140,
+        useDefSize: true,
+        w: 190, h: 40,
+        symbolMinW: 150, symbolMinH: 90,
         bodyFont: 20, pinFont: 16,
         pinsFactory: function (opt) {
             var seed = pinLabelSeed(opt, '');
@@ -91,7 +95,9 @@
         defaultLabel: 'BSCAN_HOST',
         autoLabelPrefix: 'BSCAN_HOST',
         configKey: 'interface_common',
-        w: 520, h: 220,
+        useDefSize: true,
+        w: 190, h: 40,
+        symbolMinW: 160, symbolMinH: 100,
         bodyFont: 20, pinFont: 16,
         pinsFactory: function () {
             return {
@@ -117,7 +123,9 @@
         defaultLabel: 'BSCAN_SLAVE',
         autoLabelPrefix: 'BSCAN_SLAVE',
         configKey: 'interface_common',
-        w: 600, h: 220,
+        useDefSize: true,
+        w: 190, h: 40,
+        symbolMinW: 160, symbolMinH: 100,
         bodyFont: 20, pinFont: 16,
         pinsFactory: function (opt) {
             var seed = pinLabelSeed(opt, '');
@@ -143,7 +151,9 @@
         defaultLabel: 'IJTAG_HOST',
         autoLabelPrefix: 'IJTAG_HOST',
         configKey: 'interface_common',
-        w: 520, h: 200,
+        useDefSize: true,
+        w: 190, h: 40,
+        symbolMinW: 160, symbolMinH: 100,
         bodyFont: 20, pinFont: 16,
         pinsFactory: function () {
             return {
@@ -167,7 +177,9 @@
         defaultLabel: 'IJTAG_SLAVE',
         autoLabelPrefix: 'IJTAG_SLAVE',
         configKey: 'interface_common',
-        w: 600, h: 200,
+        useDefSize: true,
+        w: 190, h: 40,
+        symbolMinW: 160, symbolMinH: 100,
         bodyFont: 20, pinFont: 16,
         pinsFactory: function (opt) {
             var seed = pinLabelSeed(opt, '');
@@ -192,7 +204,9 @@
         defaultLabel: 'BISR_HOST',
         autoLabelPrefix: 'BISR_HOST',
         configKey: 'interface_common',
-        w: 620, h: 220,
+        useDefSize: true,
+        w: 190, h: 40,
+        symbolMinW: 170, symbolMinH: 110,
         bodyFont: 20, pinFont: 16,
         pinsFactory: function (opt) {
             var pdg = opt.pdg || '';
@@ -216,7 +230,9 @@
         defaultLabel: 'BISR_SLAVE',
         autoLabelPrefix: 'BISR_SLAVE',
         configKey: 'interface_common',
-        w: 680, h: 220,
+        useDefSize: true,
+        w: 190, h: 40,
+        symbolMinW: 170, symbolMinH: 110,
         bodyFont: 20, pinFont: 16,
         pinsFactory: function (opt) {
             var pdg = opt.pdg || '';
@@ -431,8 +447,13 @@
     NS.installInterfaceIp = function (ui) {
         var realUi = ui && ui.editor ? ui : (ui && ui.editorUi ? ui.editorUi : null);
         if (realUi && realUi.editor && realUi.editor.graph) NS.ensureGraphPatches(realUi.editor.graph);
+        if (realUi) {
+            try { global.__dftsEditorUi = realUi; } catch (e) {}
+            try { if (typeof window !== 'undefined') window.__dftsEditorUi = realUi; } catch (e2) {}
+        }
         NS.installEditingPolicy(ui);
         NS.installConfigAction(ui);
+        if (typeof NS.installIpEdgeConfig === 'function') NS.installIpEdgeConfig(ui);
     };
 
 })(this);

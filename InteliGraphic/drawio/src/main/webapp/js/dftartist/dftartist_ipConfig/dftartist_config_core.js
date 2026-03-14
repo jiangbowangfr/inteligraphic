@@ -161,20 +161,8 @@
   }
 
   function install(graph) {
-    if (!graph || graph.__dftsConfigDblClickInstalled) { return; }
-    var oldDblClick = graph.dblClick;
-    graph.dblClick = function (evt, cell) {
-      var body = NS.State.resolveBody(cell);
-      var type = body ? NS.State.readStyleValue(body, 'dftsIP_type') : '';
-      if (type) {
-        open(graph, body);
-        return;
-      }
-      if (typeof oldDblClick === 'function') {
-        return oldDblClick.apply(this, arguments);
-      }
-    };
-    graph.__dftsConfigDblClickInstalled = true;
+    if (!graph || graph.__dftsConfigInstalled) { return; }
+    graph.__dftsConfigInstalled = true;
   }
 
   NS.open = open;

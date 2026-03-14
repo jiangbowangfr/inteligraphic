@@ -17,8 +17,11 @@
     if (document.getElementById(STYLE_ID)) return;
     var css = '' +
       '.dftflow-root{height:100%;display:flex;flex-direction:column;background:#fff;font-family:Helvetica,Arial,sans-serif;color:#374151;font-size:12px;}' +
-      '.dftflow-head{height:40px;display:flex;align-items:center;padding:0 8px;border-bottom:1px solid #e5e7eb;flex:0 0 auto;box-sizing:border-box;}' +
+      '.dftflow-head{height:40px;display:flex;align-items:center;gap:8px;padding:0 8px;border-bottom:1px solid #e5e7eb;flex:0 0 auto;box-sizing:border-box;}' +
       '.dftflow-title{font-size:12px;font-weight:600;line-height:1.2;color:#111827;}' +
+      '.dftflow-spacer{flex:1 1 auto;min-width:0;}' +
+      '.dftflow-toggle{width:24px;height:24px;border:1px solid #d7dce3;border-radius:8px;background:#fff;color:#374151;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;font-size:14px;line-height:1;padding:0;}' +
+      '.dftflow-toggle:hover{background:#f8fafc;}' +
       '.dftflow-scroll{flex:1;min-height:0;overflow:auto;padding:8px;box-sizing:border-box;}' +
       '.dftflow-group{margin-bottom:10px;}' +
       '.dftflow-group-title{font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.4px;margin:4px 4px 6px;}' +
@@ -41,7 +44,16 @@
       '.dftflow-mini-btn{height:28px;border:1px solid #cfd6e3;border-radius:9px;background:#fff;padding:0 10px;font-size:12px;font-weight:400;color:#374151;cursor:pointer;}' +
       '.dftflow-mini-btn.primary{background:#f8fafc;border-color:#bfdbfe;color:#1d4ed8;}' +
       '.dftflow-note{margin:2px 2px 10px;color:#6b7280;font-size:11px;line-height:1.45;}' +
-      '.dftflow-empty{margin:4px 2px 10px;padding:10px;border:1px dashed #d1d5db;border-radius:10px;background:#fafafa;color:#6b7280;font-size:11px;line-height:1.45;}';
+      '.dftflow-empty{margin:4px 2px 10px;padding:10px;border:1px dashed #d1d5db;border-radius:10px;background:#fafafa;color:#6b7280;font-size:11px;line-height:1.45;}' +
+      '.phase1-flow-mini .dftflow-head{height:32px;justify-content:center;padding:4px;border-bottom:0;}' +
+      '.phase1-flow-mini .dftflow-title,.phase1-flow-mini .dftflow-spacer{display:none !important;}' +
+      '.phase1-flow-mini .dftflow-scroll{padding:8px 4px;}' +
+      '.phase1-flow-mini .dftflow-group{margin-bottom:8px;}' +
+      '.phase1-flow-mini .dftflow-group-title,.phase1-flow-mini .dftflow-note,.phase1-flow-mini .dftflow-empty,.phase1-flow-mini .dftflow-name,.phase1-flow-mini .dftflow-stage-body{display:none !important;}' +
+      '.phase1-flow-mini .dftflow-stage{display:flex;align-items:center;justify-content:center;margin:0 auto 8px auto;padding:0;width:18px;min-height:56px;border-radius:18px;}' +
+      '.phase1-flow-mini .dftflow-stage-head{padding:0;gap:0;align-items:center;justify-content:center;width:18px;min-height:56px;}' +
+      '.phase1-flow-mini .dftflow-dot{width:10px;height:10px;margin:0;}' +
+      '.phase1-flow-mini .dftflow-stage.active{border-color:#bfdbfe;background:#eff6ff;}';
     var style = document.createElement('style');
     style.id = STYLE_ID;
     style.type = 'text/css';
@@ -839,7 +851,11 @@ async function execute(ui, cmd) {
     var root = document.createElement('div'); root.className = 'dftflow-root';
     var head = document.createElement('div'); head.className = 'dftflow-head';
     var title = document.createElement('div'); title.className = 'dftflow-title'; title.textContent = 'Flow Navigator (Modular)';
-    head.appendChild(title); root.appendChild(head);
+    var spacer = document.createElement('div'); spacer.className = 'dftflow-spacer';
+    var toggle = document.createElement('button'); toggle.className = 'dftflow-toggle'; toggle.type = 'button';
+    toggle.textContent = (ui && ui._phase1 && ui._phase1.state && ui._phase1.state.flowNavCollapsed) ? '>' : '<';
+    toggle.title = (ui && ui._phase1 && ui._phase1.state && ui._phase1.state.flowNavCollapsed) ? 'Expand Flow Navigator' : 'Collapse Flow Navigator';
+    head.appendChild(title); head.appendChild(spacer); head.appendChild(toggle); root.appendChild(head);
     var scroll = document.createElement('div'); scroll.className = 'dftflow-scroll'; root.appendChild(scroll);
     var project = Shared.getProject(ui);
     var design = Shared.getCurrentDesign(ui);
@@ -888,6 +904,17 @@ async function execute(ui, cmd) {
 
     root.addEventListener('click', function (evt) {
       var cmd = evt.target && evt.target.getAttribute && evt.target.getAttribute('data-cmd');
+      if (evt.target === toggle) {
+        evt.preventDefault(); evt.stopPropagation();
+        if (ui && ui._phase1 && ui._phase1.state) {
+          ui._phase1.state.flowNavCollapsed = !ui._phase1.state.flowNavCollapsed;
+          if (!ui._phase1.state.flowNavCollapsed && ui._phase1.state.flowNavWidth < (ui._phase1.state.minFlowExpanded || 180)) {
+            ui._phase1.state.flowNavWidth = 208;
+          }
+        }
+        if (typeof ui.refresh === 'function') ui.refresh(true);
+        return;
+      }
       if (cmd) {
         evt.preventDefault(); evt.stopPropagation();
         execute(ui, cmd).then(function () { NS.refresh(ui); }).catch(function (err) { Shared.logDock(ui, err && err.message ? err.message : String(err), 'error'); NS.refresh(ui); });

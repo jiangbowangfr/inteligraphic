@@ -17,6 +17,17 @@
         return null;
     }
 
+    function debugEnabled() {
+        return global.DFTS_DATASOURCE_FLOORPLAN_DEBUG !== false &&
+            (!NS || NS.DATASOURCE_FLOORPLAN_DEBUG !== false);
+    }
+
+    function debugLog() {
+        if (!debugEnabled() || typeof console === 'undefined' || !console.log) return;
+        var args = Array.prototype.slice.call(arguments);
+        args.unshift('[DataSourceFloorplan]');
+        console.log.apply(console, args);
+    }
 
     function getSymbolNS() {
         return NS && NS.Symbol ? NS.Symbol : null;
@@ -50,6 +61,11 @@
             if (String(ports[i].__dftsSymbolKey || '') === String(pinKey)) return ports[i];
         }
         return null;
+    }
+
+    function getSymbolPinModels(body) {
+        var symModel = getSymbolModel(body) || {};
+        return Array.isArray(symModel.pins) ? symModel.pins : [];
     }
 
     function ensureSymbolPortCompatibility(graph, body, def, runtimeOpt, ctx) {
@@ -163,6 +179,47 @@
         return map;
     }
 
+    function isDataSourceBody(graph, body) {
+        if (!graph || !body) return false;
+        var style = graph.getCellStyle(body);
+        var category = String(mxUtils.getValue(style, 'dftsIP_category', '')).toLowerCase();
+        var dftsType = String(mxUtils.getValue(style, 'dftsIP_type', '')).toLowerCase();
+        return category === String(NS.CATEGORY.DATASOURCE).toLowerCase() ||
+            category === 'datasource' ||
+            dftsType === 'pattern_data_source' ||
+            dftsType === 'external_data_source' ||
+            dftsType === 'ssn_data_source' ||
+            /data_source/.test(dftsType);
+    }
+
+    function getDataSourceDefinitionForBody(graph, body) {
+        if (!graph || !body || !NS || !NS._defsByType) return null;
+        var style = graph.getCellStyle(body);
+        var dftsType = String(mxUtils.getValue(style, 'dftsIP_type', ''));
+        if (!dftsType) return null;
+        return NS._defsByType[dftsType] || null;
+    }
+
+    function getLogicalPinsFromDefinition(graph, body) {
+        var def = getDataSourceDefinitionForBody(graph, body);
+        if (!def) return [];
+        var pinDefs = getPinDefMap(def, null, null);
+        var out = [];
+        for (var key in pinDefs) {
+            if (Object.prototype.hasOwnProperty.call(pinDefs, key) && pinDefs[key]) out.push(pinDefs[key]);
+        }
+        return out;
+    }
+
+    function resolveDataSourceBody(graph, cell) {
+        if (!graph || !cell) return null;
+        if (isDataSourceBody(graph, cell)) return cell;
+        if (typeof NS.findChipBodyForCell === 'function') {
+            var body = NS.findChipBodyForCell(graph, cell);
+            if (isDataSourceBody(graph, body)) return body;
+        }
+        return null;
+    }
 
     function isFloorplanStartDef(cfg, pinDir, pinType) {
         return !!(cfg && cfg.floorplanLineStart) || (pinDir === 'input' && pinType === 'data_in');
@@ -170,6 +227,54 @@
 
     function isFloorplanTargetDef(cfg, pinDir, pinType) {
         return !!(cfg && cfg.floorplanLineTarget) || (pinDir === 'output' && pinType === 'data_out');
+    }
+
+    function bodyHasLogicalFloorplanStart(graph, body) {
+        if (!graph || !body) return false;
+        if (isSymbolBody(body)) {
+            var symbolPins = getSymbolPinModels(body);
+            for (var i = 0; i < symbolPins.length; i++) {
+                var pin = symbolPins[i] || {};
+                if (isFloorplanStartDef(pin, pin.dir || 'input', pin.type || '')) return true;
+            }
+            if (symbolPins.length) return false;
+        }
+
+        var pins = NS.getChipPins(graph, body);
+        for (var j = 0; j < pins.length; j++) {
+            if (isFloorplanStartPin(graph, pins[j])) return true;
+        }
+
+        var defPins = getLogicalPinsFromDefinition(graph, body);
+        for (var k = 0; k < defPins.length; k++) {
+            var defPin = defPins[k] || {};
+            if (isFloorplanStartDef(defPin, defPin.dir || 'input', defPin.type || '')) return true;
+        }
+        return false;
+    }
+
+    function bodyHasLogicalFloorplanTarget(graph, body) {
+        if (!graph || !body) return false;
+        if (isSymbolBody(body)) {
+            var symbolPins = getSymbolPinModels(body);
+            for (var i = 0; i < symbolPins.length; i++) {
+                var pin = symbolPins[i] || {};
+                if (isFloorplanTargetDef(pin, pin.dir || 'input', pin.type || '')) return true;
+            }
+            if (symbolPins.length) return false;
+        }
+
+        var pins = NS.getChipPins(graph, body);
+        for (var j = 0; j < pins.length; j++) {
+            if (isFloorplanTargetPin(graph, pins[j])) return true;
+        }
+
+        var defPins = getLogicalPinsFromDefinition(graph, body);
+        for (var k = 0; k < defPins.length; k++) {
+            var defPin = defPins[k] || {};
+            if (isFloorplanTargetDef(defPin, defPin.dir || 'input', defPin.type || '')) return true;
+        }
+        return false;
     }
 
     function markDataSourceAsFloorplan(graph, body, def, runtimeOpt, ctx) {
@@ -181,6 +286,8 @@
         var bodyStyle = body.getStyle() || '';
         bodyStyle = mxUtils.setStyle(bodyStyle, 'floorplan', '1');
         bodyStyle = mxUtils.setStyle(bodyStyle, 'perimeter', 'floorplanAnyPoint');
+        bodyStyle = mxUtils.setStyle(bodyStyle, 'dftsIP_category', String(NS.CATEGORY.DATASOURCE));
+        if (def && def.dftsType) bodyStyle = mxUtils.setStyle(bodyStyle, 'dftsIP_type', String(def.dftsType));
         model.setStyle(body, bodyStyle);
 
         if (isSymbolBody(body)) {
@@ -226,6 +333,15 @@
         var x = bg.x + pg.x * bg.width + ox;
         var y = bg.y + pg.y * bg.height + oy;
 
+        if (pin.__dftsSymbolChild && pin.__dftsSymbolKind === 'port') {
+            var cx = x + (pg.width || 0) / 2;
+            var cy = y + (pg.height || 0) / 2;
+            if (side === 'west') return new mxPoint(bg.x, cy);
+            if (side === 'east') return new mxPoint(bg.x + bg.width, cy);
+            if (side === 'north') return new mxPoint(cx, bg.y);
+            return new mxPoint(cx, bg.y + bg.height);
+        }
+
         if (side === 'west') return new mxPoint(x, y + pg.height / 2);
         if (side === 'east') return new mxPoint(x + pg.width, y + pg.height / 2);
         if (side === 'north') return new mxPoint(x + pg.width / 2, y);
@@ -248,6 +364,26 @@
         graph.getModel().setStyle(edge, style);
     }
 
+    function attachFloorplanLineBodyPointAnchor(graph, edge, body, point, anchorSide) {
+        if (!graph || !edge || !body || !point || !body.geometry) return;
+        anchorSide = anchorSide || 'source';
+
+        var bg = body.geometry;
+        var rx = bg.width ? ((point.x - bg.x) / bg.width) : 0.5;
+        var ry = bg.height ? ((point.y - bg.y) / bg.height) : 0.5;
+        rx = Math.max(0, Math.min(1, rx));
+        ry = Math.max(0, Math.min(1, ry));
+
+        var style = edge.getStyle() || '';
+        var bodyId = body.getId ? body.getId() : body.id;
+        style = mxUtils.setStyle(style, 'dftFloorplanAnchor_' + anchorSide, '1');
+        style = mxUtils.setStyle(style, 'dftFloorplanAnchor_' + anchorSide + '_bodyId', String(bodyId));
+        style = mxUtils.setStyle(style, 'dftFloorplanAnchor_' + anchorSide + '_pinKey', '');
+        style = mxUtils.setStyle(style, 'dftFloorplanAnchor_' + anchorSide + '_rx', String(rx));
+        style = mxUtils.setStyle(style, 'dftFloorplanAnchor_' + anchorSide + '_ry', String(ry));
+        graph.getModel().setStyle(edge, style);
+    }
+
 
     function detachFloorplanLineAnchor(graph, edge, anchorSide) {
         if (!graph || !edge) return;
@@ -256,6 +392,8 @@
         style = mxUtils.setStyle(style, 'dftFloorplanAnchor_' + anchorSide, '0');
         style = mxUtils.setStyle(style, 'dftFloorplanAnchor_' + anchorSide + '_bodyId', '');
         style = mxUtils.setStyle(style, 'dftFloorplanAnchor_' + anchorSide + '_pinKey', '');
+        style = mxUtils.setStyle(style, 'dftFloorplanAnchor_' + anchorSide + '_rx', '');
+        style = mxUtils.setStyle(style, 'dftFloorplanAnchor_' + anchorSide + '_ry', '');
         graph.getModel().setStyle(edge, style);
     }
 
@@ -285,6 +423,27 @@
         return findPinByKey(graph, body, pinKey);
     }
 
+    function getAnchorBodyPointForEdgeSide(graph, edge, anchorSide) {
+        if (!edge) return null;
+        var styleObj = graph.getCellStyle(edge);
+        if (String(mxUtils.getValue(styleObj, 'dftFloorplanAnchor_' + anchorSide, '0')) !== '1') return null;
+
+        var styleMap = styleMapToObject(edge.getStyle() || '');
+        var bodyId = styleMap['dftFloorplanAnchor_' + anchorSide + '_bodyId'];
+        var pinKey = styleMap['dftFloorplanAnchor_' + anchorSide + '_pinKey'];
+        var rx = parseFloat(styleMap['dftFloorplanAnchor_' + anchorSide + '_rx']);
+        var ry = parseFloat(styleMap['dftFloorplanAnchor_' + anchorSide + '_ry']);
+        if (!bodyId || pinKey) return null;
+
+        var body = graph.getModel().getCell(bodyId);
+        if (!body || !body.geometry) return null;
+        if (isNaN(rx) || isNaN(ry)) return null;
+        return new mxPoint(
+            body.geometry.x + body.geometry.width * rx,
+            body.geometry.y + body.geometry.height * ry
+        );
+    }
+
     function collectEdges(graph, parent, out) {
         var model = graph.getModel();
         if (!parent) return;
@@ -307,7 +466,9 @@
 
         var sourcePin = getAnchorPinForEdgeSide(graph, edge, 'source');
         var targetPin = getAnchorPinForEdgeSide(graph, edge, 'target');
-        if (!sourcePin && !targetPin) return;
+        var sourceBodyPoint = getAnchorBodyPointForEdgeSide(graph, edge, 'source');
+        var targetBodyPoint = getAnchorBodyPointForEdgeSide(graph, edge, 'target');
+        if (!sourcePin && !targetPin && !sourceBodyPoint && !targetBodyPoint) return;
 
         var geo = graph.getCellGeometry(edge);
         if (!geo) return;
@@ -318,11 +479,15 @@
         if (sourcePin) {
             var spt = getPinExitPoint(graph, sourcePin);
             if (spt) nextGeo.sourcePoint = spt;
+        } else if (sourceBodyPoint) {
+            nextGeo.sourcePoint = sourceBodyPoint;
         }
 
         if (targetPin) {
             var tpt = getPinExitPoint(graph, targetPin);
             if (tpt) nextGeo.targetPoint = tpt;
+        } else if (targetBodyPoint) {
+            nextGeo.targetPoint = targetBodyPoint;
         }
 
         graph.getModel().setGeometry(edge, nextGeo);
@@ -358,6 +523,86 @@
         return String(mxUtils.getValue(style, 'dftsIP_floorplanStart', '0')) === '1';
     }
 
+    function getFloorplanStartPinsForBody(graph, body) {
+        if (!graph || !body) return [];
+        if (isSymbolBody(body)) {
+            var symbolPins = getSymbolPinModels(body);
+            var symbolOut = [];
+            for (var s = 0; s < symbolPins.length; s++) {
+                var pinModel = symbolPins[s] || {};
+                if (!isFloorplanStartDef(pinModel, pinModel.dir || 'input', pinModel.type || '')) continue;
+                var port = getSymbolPortByKey(body, pinModel.key);
+                if (port) symbolOut.push(port);
+            }
+            return symbolOut;
+        }
+
+        var pins = NS.getChipPins(graph, body);
+        var out = [];
+        for (var i = 0; i < pins.length; i++) {
+            if (isFloorplanStartPin(graph, pins[i])) out.push(pins[i]);
+        }
+        return out;
+    }
+
+    function getBodyConnectionPoints() {
+        return [
+            new mxPoint(0, 0), new mxPoint(0.25, 0), new mxPoint(0.5, 0), new mxPoint(0.75, 0), new mxPoint(1, 0),
+            new mxPoint(0, 0.25), new mxPoint(0, 0.5), new mxPoint(0, 0.75),
+            new mxPoint(1, 0.25), new mxPoint(1, 0.5), new mxPoint(1, 0.75),
+            new mxPoint(0, 1), new mxPoint(0.25, 1), new mxPoint(0.5, 1), new mxPoint(0.75, 1), new mxPoint(1, 1)
+        ];
+    }
+
+    function getAbsolutePointOnBody(body, relPt) {
+        if (!body || !body.geometry || !relPt) return null;
+        return new mxPoint(
+            body.geometry.x + body.geometry.width * relPt.x,
+            body.geometry.y + body.geometry.height * relPt.y
+        );
+    }
+
+    function getAllDataSourceBodies(graph) {
+        var bodies = NS.getAllChipBodies ? NS.getAllChipBodies(graph) : [];
+        var out = [];
+        for (var i = 0; i < bodies.length; i++) {
+            if (isDataSourceBody(graph, bodies[i])) out.push(bodies[i]);
+        }
+        return out;
+    }
+
+    function findNearestFloorplanStartPin(graph, body, pt, threshold) {
+        if (!graph || !body || !pt) return null;
+        var maxDist = Math.max(4, Number(threshold) || 18);
+        var pins = getFloorplanStartPinsForBody(graph, body);
+        var best = null;
+        var bestDist = Infinity;
+
+        for (var i = 0; i < pins.length; i++) {
+            var pin = pins[i];
+            var pinPt = getPinExitPoint(graph, pin);
+            if (!pinPt) continue;
+            var dx = pinPt.x - pt.x;
+            var dy = pinPt.y - pt.y;
+            var dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist <= maxDist && dist < bestDist) {
+                best = pin;
+                bestDist = dist;
+            }
+        }
+
+        if (!best) return null;
+        return {
+            pin: best,
+            point: getPinExitPoint(graph, best),
+            distance: bestDist
+        };
+    }
+
+    function isFloorplanStartBody(graph, body) {
+        return isDataSourceBody(graph, body) && bodyHasLogicalFloorplanStart(graph, body);
+    }
+
 
     function isFloorplanTargetPin(graph, pin) {
         if (!pin) return false;
@@ -372,12 +617,84 @@
 
     function getFloorplanTargetPinsForBody(graph, body) {
         if (!graph || !body) return [];
-        var pins = isSymbolBody(body) ? getSymbolPorts(body) : NS.getChipPins(graph, body);
+        if (isSymbolBody(body)) {
+            var symbolPins = getSymbolPinModels(body);
+            var symbolOut = [];
+            for (var s = 0; s < symbolPins.length; s++) {
+                var pinModel = symbolPins[s] || {};
+                if (!isFloorplanTargetDef(pinModel, pinModel.dir || 'input', pinModel.type || '')) continue;
+                var port = getSymbolPortByKey(body, pinModel.key);
+                if (port) symbolOut.push(port);
+            }
+            return symbolOut;
+        }
+
+        var pins = NS.getChipPins(graph, body);
         var out = [];
         for (var i = 0; i < pins.length; i++) {
             if (isFloorplanTargetPin(graph, pins[i])) out.push(pins[i]);
         }
         return out;
+    }
+
+    function findNearestGlobalFloorplanTargetPin(graph, pt, threshold) {
+        if (!graph || !pt) return null;
+        var maxDist = Math.max(4, Number(threshold) || 18);
+        var bodies = getAllDataSourceBodies(graph);
+        var best = null;
+        var bestDist = Infinity;
+
+        for (var i = 0; i < bodies.length; i++) {
+            var pins = getFloorplanTargetPinsForBody(graph, bodies[i]);
+            for (var j = 0; j < pins.length; j++) {
+                var pin = pins[j];
+                var pinPt = getPinExitPoint(graph, pin);
+                if (!pinPt) continue;
+                var dx = pinPt.x - pt.x;
+                var dy = pinPt.y - pt.y;
+                var dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist <= maxDist && dist < bestDist) {
+                    best = pin;
+                    bestDist = dist;
+                }
+            }
+        }
+
+        if (!best) return null;
+        return {
+            pin: best,
+            point: getPinExitPoint(graph, best),
+            distance: bestDist
+        };
+    }
+
+    function findNearestGlobalFloorplanTargetBodyPoint(graph, pt, threshold) {
+        if (!graph || !pt) return null;
+        var maxDist = Math.max(4, Number(threshold) || 18);
+        var bodies = getAllDataSourceBodies(graph);
+        var best = null;
+        var bestDist = Infinity;
+
+        for (var i = 0; i < bodies.length; i++) {
+            var body = bodies[i];
+            if (!bodyHasLogicalFloorplanTarget(graph, body)) continue;
+            var points = getBodyConnectionPoints();
+            for (var j = 0; j < points.length; j++) {
+                var absPt = getAbsolutePointOnBody(body, points[j]);
+                if (!absPt) continue;
+                var dx = absPt.x - pt.x;
+                var dy = absPt.y - pt.y;
+                var dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist <= maxDist && dist < bestDist) {
+                    best = { body: body, point: absPt, relPoint: points[j] };
+                    bestDist = dist;
+                }
+            }
+        }
+
+        if (!best) return null;
+        best.distance = bestDist;
+        return best;
     }
 
     function findNearestFloorplanTargetPin(graph, body, pt, threshold) {
@@ -408,6 +725,28 @@
         };
     }
 
+    function buildDataSourceConnectionConstraints(graph, body) {
+        if (!graph || !body || !isDataSourceBody(graph, body)) return null;
+
+        var canStart = bodyHasLogicalFloorplanStart(graph, body);
+        var canTarget = bodyHasLogicalFloorplanTarget(graph, body);
+        var points = getBodyConnectionPoints();
+        var out = [];
+        for (var i = 0; i < points.length; i++) {
+            var relPt = points[i];
+            var c = new mxConnectionConstraint(new mxPoint(relPt.x, relPt.y), false);
+            out.push(c);
+        }
+
+        debugLog('constraints', body.id || (body.getId && body.getId()), out.map(function (c) {
+            return {
+                x: c.point && c.point.x,
+                y: c.point && c.point.y
+            };
+        }));
+        return out.length ? out : null;
+    }
+
     function startFloorplanLineFromPin(realUi, graph, pin) {
         var lineNS = getLineNS();
         if (!lineNS || typeof realUi.startFloorplanLineFromPoint !== 'function') {
@@ -419,6 +758,7 @@
 
         var pt = getPinExitPoint(graph, pin);
         if (!pt) return null;
+        debugLog('startFromPin', pin && (pin.id || pin.getId && pin.getId()), pt.x, pt.y);
 
         var body = pin.parent || null;
         return realUi.startFloorplanLineFromPoint(pt, {
@@ -451,6 +791,79 @@
         });
     }
 
+    function startFloorplanLineFromBody(realUi, graph, body, startPt) {
+        var lineNS = getLineNS();
+        if (!lineNS || typeof realUi.startFloorplanLineFromPoint !== 'function') {
+            if (typeof mxUtils !== 'undefined' && mxUtils.alert) {
+                mxUtils.alert('请先加载 dft_floorplan_line.js，再使用 Data Source 的 body 连接点绘制 Floorplan Line。');
+            }
+            return null;
+        }
+        if (!body || !startPt) return null;
+
+        var pt = startPt;
+        if (!pt) return null;
+        debugLog('startFromBody', body.id || (body.getId && body.getId()), pt.x, pt.y);
+
+        return realUi.startFloorplanLineFromPoint(pt, {
+            commitOnMouseUp: true,
+            autoFinishOnMouseUp: true,
+            decorateEdge: function (edge, g) {
+                attachFloorplanLineBodyPointAnchor(g, edge, body, pt, 'source');
+                detachFloorplanLineAnchor(g, edge, 'target');
+            },
+            snapPoint: function (basePt) {
+                var hit = findNearestGlobalFloorplanTargetBodyPoint(graph, basePt, 24);
+                debugLog('snapTarget', basePt && basePt.x, basePt && basePt.y, hit ? {
+                    body: hit.body && (hit.body.id || (hit.body.getId && hit.body.getId())),
+                    x: hit.point && hit.point.x,
+                    y: hit.point && hit.point.y,
+                    distance: hit.distance
+                } : null);
+                if (!hit || !hit.point) return null;
+                return {
+                    point: hit.point,
+                    meta: {
+                        kind: 'floorplanTargetPin',
+                        pin: hit.pin,
+                        body: body,
+                        distance: hit.distance
+                    }
+                };
+            },
+            afterCommitPoint: function (ctx) {
+                var edge = ctx && ctx.tool ? ctx.tool.edge : null;
+                if (!edge) return;
+                if (ctx.snap && ctx.snap.body && ctx.snap.point) attachFloorplanLineBodyPointAnchor(graph, edge, ctx.snap.body, ctx.snap.point, 'target');
+                else detachFloorplanLineAnchor(graph, edge, 'target');
+                syncAnchoredFloorplanLine(graph, edge);
+            }
+        });
+    }
+
+    function startFloorplanLineFromConstraint(realUi, graph, body, constraint) {
+        if (!body || !constraint) return false;
+        debugLog('startFromConstraint', body && (body.id || body.getId && body.getId()), {
+            x: constraint.point && constraint.point.x,
+            y: constraint.point && constraint.point.y
+        });
+        if (!bodyHasLogicalFloorplanStart(graph, body)) return false;
+        if (!constraint.point) return false;
+        var pt = getAbsolutePointOnBody(body, constraint.point);
+        if (!pt) return false;
+        return !!startFloorplanLineFromBody(realUi, graph, body, pt);
+    }
+
+    function getMouseGraphPoint(me, cell) {
+        var pt = me && me.getGraphX && me.getGraphY ? new mxPoint(me.getGraphX(), me.getGraphY()) : null;
+        if (pt) return pt;
+        if (me && typeof me.getX === 'function' && typeof me.getY === 'function') {
+            return new mxPoint(me.getX(), me.getY());
+        }
+        var geo = cell && cell.geometry ? cell.geometry : null;
+        return geo ? new mxPoint(geo.x, geo.y + geo.height / 2) : null;
+    }
+
     function installDataSourceFloorplanBridge(ui) {
         var realUi = normalizeUi(ui);
         var graph = realUi && realUi.editor ? realUi.editor.graph : null;
@@ -467,36 +880,126 @@
             graph.connectionHandler._dftsDataSourceFloorplanStartPatched = true;
 
             var ch = graph.connectionHandler;
+            var oldMouseDown = ch.mouseDown;
             var oldStart = ch.start;
+            var oldConnect = ch.connect;
+            var oldInsertEdge = ch.insertEdge;
 
-            ch.start = function (state, x, y, edgeState) {
-                var cell = state && state.cell ? state.cell : null;
-
+            function tryStartFloorplanFromCell(me, cell) {
+                var body = resolveDataSourceBody(graph, cell);
+                debugLog('tryStartFloorplanFromCell', cell && (cell.id || (cell.getId && cell.getId())), {
+                    resolvedBody: body && (body.id || (body.getId && body.getId())),
+                    isStartPin: isFloorplanStartPin(graph, cell),
+                    isStartBody: isFloorplanStartBody(graph, body),
+                    graphX: me && me.getGraphX ? me.getGraphX() : null,
+                    graphY: me && me.getGraphY ? me.getGraphY() : null
+                });
                 if (isFloorplanStartPin(graph, cell)) {
-                    // 从绿色连接点开始拖时，直接切到自定义 floorplan tool
                     startFloorplanLineFromPin(realUi, graph, cell);
+                    return true;
+                }
 
-                    // 清掉默认 connectionHandler 状态，避免黑色预览线
+                if (body && isFloorplanStartBody(graph, body)) {
+                    var cur = ch.constraintHandler ? ch.constraintHandler.currentConstraint : null;
+                    debugLog('currentConstraint', cur ? {
+                        x: cur.point && cur.point.x,
+                        y: cur.point && cur.point.y
+                    } : null);
+                    if (!cur) return false;
+                    return startFloorplanLineFromConstraint(realUi, graph, body, cur);
+                }
+
+                return false;
+            }
+
+            ch.mouseDown = function (sender, me) {
+                var evt = me && me.getEvent ? me.getEvent() : null;
+                var state = me && me.getState ? me.getState() : null;
+                var cell = state && state.cell ? state.cell : (me && me.getCell ? me.getCell() : null);
+                debugLog('mouseDown', {
+                    cell: cell && (cell.id || (cell.getId && cell.getId())),
+                    graphX: me && me.getGraphX ? me.getGraphX() : null,
+                    graphY: me && me.getGraphY ? me.getGraphY() : null,
+                    hasState: !!state
+                });
+
+                if (evt && mxEvent.isLeftMouseButton(evt) && tryStartFloorplanFromCell(me, cell)) {
+                    this.__dftsSuppressNextInsertEdge = true;
                     try {
                         this.reset();
                     } catch (e) { }
+                    if (me && typeof me.consume === 'function') me.consume();
+                    mxEvent.consume(evt);
+                    return;
+                }
 
+                return oldMouseDown.apply(this, arguments);
+            };
+
+            ch.start = function (state, x, y, edgeState) {
+                var cell = state && state.cell ? state.cell : null;
+                var body = resolveDataSourceBody(graph, cell);
+                debugLog('connectionStart', {
+                    cell: cell && (cell.id || (cell.getId && cell.getId())),
+                    resolvedBody: body && (body.id || (body.getId && body.getId())),
+                    x: x,
+                    y: y
+                });
+                if (cell && (isFloorplanStartPin(graph, cell) || (body && isFloorplanStartBody(graph, body)))) {
+                    this.__dftsSuppressNextInsertEdge = true;
+                    if (isFloorplanStartPin(graph, cell)) {
+                        startFloorplanLineFromPin(realUi, graph, cell);
+                    } else {
+                        var cur = this.constraintHandler ? this.constraintHandler.currentConstraint : null;
+                        if (!startFloorplanLineFromConstraint(realUi, graph, body, cur)) {
+                            this.__dftsSuppressNextInsertEdge = false;
+                            return oldStart.apply(this, arguments);
+                        }
+                    }
+                    try {
+                        this.reset();
+                    } catch (e) { }
                     return;
                 }
 
                 return oldStart.apply(this, arguments);
+            };
+
+            ch.connect = function (source, target, evt, dropTarget) {
+                if (this.__dftsSuppressNextInsertEdge) {
+                    this.__dftsSuppressNextInsertEdge = false;
+                    if (evt) mxEvent.consume(evt);
+                    return null;
+                }
+                return oldConnect.apply(this, arguments);
+            };
+
+            ch.insertEdge = function (parent, id, value, source, target, style) {
+                if (this.__dftsSuppressNextInsertEdge) {
+                    this.__dftsSuppressNextInsertEdge = false;
+                    return null;
+                }
+                return oldInsertEdge.apply(this, arguments);
             };
         }
 
         if (realUi.actions && !realUi._dftsDataSourceActionsInstalled) {
             realUi._dftsDataSourceActionsInstalled = true;
             realUi.actions.addAction('startSelectedDataSourceFloorplanLine', function () {
-                var pin = graph.getSelectionCell();
-                if (!isFloorplanStartPin(graph, pin)) {
-                    if (typeof mxUtils !== 'undefined' && mxUtils.alert) mxUtils.alert('请先选中一个支持 Floorplan Line 的 Data Source data_in pin。');
+                var cell = graph.getSelectionCell();
+                if (isFloorplanStartPin(graph, cell)) {
+                    startFloorplanLineFromPin(realUi, graph, cell);
                     return;
                 }
-                startFloorplanLineFromPin(realUi, graph, pin);
+                if (isFloorplanStartBody(graph, cell)) {
+                    var geo = cell.geometry;
+                    var fallbackPt = geo ? new mxPoint(geo.x, geo.y + geo.height / 2) : null;
+                    var hit = fallbackPt ? findNearestFloorplanStartPin(graph, cell, fallbackPt, Math.max(24, geo.width || 0, geo.height || 0)) : null;
+                    if (hit && hit.point) startFloorplanLineFromBody(realUi, graph, cell, hit.point);
+                    else if (typeof mxUtils !== 'undefined' && mxUtils.alert) mxUtils.alert('当前 Data Source body 上没有可用的 Floorplan Line 起始连接点。');
+                    return;
+                }
+                if (typeof mxUtils !== 'undefined' && mxUtils.alert) mxUtils.alert('请先选中一个支持 Floorplan Line 的 Data Source pin 或 body。');
             });
         }
 
@@ -533,75 +1036,114 @@
         }
     });
 
-    registerDataSource({
-        key: 'PatternDataSource',
-        dftsType: 'pattern_data_source',
-        defaultLabel: 'PatternDataSource',
-        instanceBaseName: 'PatternDataSource',
-        configKey: 'data_source_common',
-        w: 320,
-        h: 120,
-        rounded: 8,
-        strokeWidth: 1,
-        bodyFont: 20,
-        pinFont: 16,
-        pinsFactory: staticPins({
-            east: [
-                { name: 'pattern_data_out', type: 'data_out', dir: 'output', pinKey: 'pattern_data_out', busWidth: 8, isBus: true, floorplanLineTarget: true },
-                { name: 'pattern_valid', type: 'status_out', dir: 'output', pinKey: 'pattern_valid' }
-            ]
-        })
-    });
+    // registerDataSource({
+    //     key: 'PatternDataSource',
+    //     dftsType: 'pattern_data_source',
+    //     defaultLabel: 'PatternDataSource',
+    //     instanceBaseName: 'PatternDataSource',
+    //     configKey: 'data_source_common',
+    //     w: 320,
+    //     h: 120,
+    //     rounded: 8,
+    //     strokeWidth: 1,
+    //     bodyFont: 20,
+    //     pinFont: 16,
+    //     pinsFactory: staticPins({
+    //         east: [
+    //             { name: 'pattern_data_out', type: 'data_out', dir: 'output', pinKey: 'pattern_data_out', busWidth: 8, isBus: true, floorplanLineTarget: true },
+    //             { name: 'pattern_valid', type: 'status_out', dir: 'output', pinKey: 'pattern_valid' }
+    //         ]
+    //     })
+    // });
 
     registerDataSource({
         key: 'SSNPadSource',
         dftsType: 'ssn_data_source',
-        defaultLabel: 'SSNPadSource',
-        instanceBaseName: 'SSNPadSource',
+        defaultLabel: 'PadSource',
+        instanceBaseName: 'PadSource',
         configKey: 'data_source_common',
-        w: 320,
-        h: 120,
+        useDefSize: true,
+        w: 140, h: 120,
         rounded: 8,
         strokeWidth: 1,
         bodyFont: 20,
         pinFont: 16,
         pinsFactory: staticPins({
-            west: [
-                { name: 'ssn_bus_clock', type: 'data_out', dir: 'input', pinKey: 'ssn_bus_clock' }
-            ],
             east: [
                 { name: 'ssn_data_out', type: 'data_out', dir: 'output', pinKey: 'ssn_data_out', busWidth: 8, isBus: true, floorplanLineTarget: true },
-                { name: 'ssn_data_in', type: 'data_in', dir: 'input', pinKey: 'ssn_data_in' }
+                { name: 'ssn_data_in', type: 'data_in', dir: 'input', pinKey: 'ssn_data_in' },
+                { name: 'ssn_bus_clock', type: 'data_out', dir: 'input', pinKey: 'ssn_bus_clock' }
             ]
         })
     });
-
     registerDataSource({
-        key: 'ExternalDataSource',
-        dftsType: 'external_data_source',
-        defaultLabel: 'ExternalDataSource',
-        instanceBaseName: 'ExternalDataSource',
+        key: 'TapSource',
+        dftsType: 'bscan_data_source',
+        defaultLabel: 'TapSource',
+        instanceBaseName: 'TapSource',
         configKey: 'data_source_common',
-        w: 320,
-        h: 120,
+        useDefSize: true,
+        w: 140, h: 120,
+        rounded: 8,
+        strokeWidth: 1,
+        bodyFont: 20,
+        pinFont: 16,
+        pinsFactory: staticPins({
+            east: [
+                { name: 'bscan_data_out', type: 'data_out', dir: 'output', pinKey: 'bscan_data_out', busWidth: 8, isBus: true, floorplanLineTarget: true },
+                { name: 'bscan_data_in', type: 'data_in', dir: 'input', pinKey: 'bscan_data_in' },
+                { name: 'bscan_bus_clock', type: 'data_out', dir: 'input', pinKey: 'bscan_bus_clock' }
+            ]
+        })
+    });
+    registerDataSource({
+        key: 'BISRCSource',
+        dftsType: 'bisrc_data_source',
+        defaultLabel: 'BISRCSource',
+        instanceBaseName: 'BISRCSource',
+        configKey: 'data_source_common',
+        useDefSize: true,
+        w: 140, h: 120,
         rounded: 8,
         strokeWidth: 1,
         bodyFont: 20,
         pinFont: 16,
         pinsFactory: staticPins({
             west: [
-                { name: 'enable', type: 'enable_in', dir: 'input', pinKey: 'enable' }
             ],
             east: [
-                { name: 'data_out', type: 'data_out', dir: 'output', pinKey: 'data_out', busWidth: 16, isBus: true, floorplanLineTarget: true },
-                { name: 'status', type: 'status_out', dir: 'output', pinKey: 'status' }
+                { name: 'bisrc_data_out', type: 'data_out', dir: 'output', pinKey: 'bisrc_data_out', busWidth: 8, isBus: true, floorplanLineTarget: true },
+                { name: 'bisrc_data_in', type: 'data_in', dir: 'input', pinKey: 'bisrc_data_in' },
+                { name: 'bisrc_bus_clock', type: 'data_out', dir: 'input', pinKey: 'bisrc_bus_clock' }
             ]
         })
     });
+    // registerDataSource({
+    //     key: 'ExternalDataSource',
+    //     dftsType: 'external_data_source',
+    //     defaultLabel: 'ExternalDataSource',
+    //     instanceBaseName: 'ExternalDataSource',
+    //     configKey: 'data_source_common',
+    //     w: 320,
+    //     h: 120,
+    //     rounded: 8,
+    //     strokeWidth: 1,
+    //     bodyFont: 20,
+    //     pinFont: 16,
+    //     pinsFactory: staticPins({
+    //         west: [
+    //             { name: 'enable', type: 'enable_in', dir: 'input', pinKey: 'enable' }
+    //         ],
+    //         east: [
+    //             { name: 'data_out', type: 'data_out', dir: 'output', pinKey: 'data_out', busWidth: 16, isBus: true, floorplanLineTarget: true },
+    //             { name: 'status', type: 'status_out', dir: 'output', pinKey: 'status' }
+    //         ]
+    //     })
+    // });
 
-    global.buildPatternDataSource = NS.makeCreateFn('PatternDataSource');
+    // global.buildPatternDataSource = NS.makeCreateFn('PatternDataSource');
     global.buildSSNDataSource = NS.makeCreateFn('SSNPadSource');
-    global.buildExternalDataSource = NS.makeCreateFn('ExternalDataSource');
+    // global.buildExternalDataSource = NS.makeCreateFn('ExternalDataSource');
 
     NS.getPinExitPoint = getPinExitPoint;
     NS.attachFloorplanLineAnchor = attachFloorplanLineAnchor;
@@ -609,6 +1151,7 @@
     NS.syncAnchoredFloorplanLine = syncAnchoredFloorplanLine;
     NS.syncAnchoredFloorplanLinesForBody = syncAnchoredFloorplanLinesForBody;
     NS.installDataSourceFloorplanBridge = installDataSourceFloorplanBridge;
+    NS.getDataSourceConnectionConstraints = buildDataSourceConnectionConstraints;
 
     NS.installDataSourceIp = function (ui) {
         var realUi = normalizeUi(ui);
@@ -617,6 +1160,7 @@
         NS.installInstanceFollow(ui);
         NS.installConfigAction(ui);
         installDataSourceFloorplanBridge(ui);
+        if (typeof NS.installIpEdgeConfig === 'function') NS.installIpEdgeConfig(ui);
     };
 
 })(this);
