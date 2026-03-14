@@ -22,6 +22,14 @@
     return segs === 'floorplan' || /(^|\/)floorplan$/.test(segs);
   }
 
+  function getProjectStorageRoot(ui) {
+    var dbRoot = ui && ui._projectDbDirPath ? String(ui._projectDbDirPath) : '';
+    if (dbRoot) return dbRoot.replace(/\\/g, '/').replace(/\/+/g, '/');
+    var root = ui && (ui._projectRootPath || ui._projectYamlDir) ? String(ui._projectRootPath || ui._projectYamlDir) : '';
+    root = root.replace(/\\/g, '/').replace(/\/+/g, '/');
+    return root ? joinPath(root, 'db') : '';
+  }
+
   function joinPath() {
     if (typeof global._joinPath === 'function') {
       try { return global._joinPath.apply(global, arguments); } catch (e) {}
@@ -196,7 +204,7 @@
     }
 
     if (!ui) throw new Error('UI not ready');
-    var root = ui._projectRootPath || ui._projectYamlDir;
+    var root = getProjectStorageRoot(ui);
     if (!root) throw new Error('Please save project first.');
 
     if (isFloorplanRef(designRef)) {
