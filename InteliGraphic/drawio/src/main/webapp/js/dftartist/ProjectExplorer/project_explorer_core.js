@@ -2171,7 +2171,7 @@
     var state = getState(ui);
     var row = createEl('div', 'phase2-node');
     row.style.paddingLeft = (6 + (config.depth || 0) * 16) + 'px';
-    if (config.key && state.selectedKey === config.key) row.className += ' selected';
+    if (config.key && (state.selectedKey === config.key || (ui && ui._activeWorkspaceKey === config.key))) row.className += ' selected';
     if (config.activePage) row.className += ' active-page';
     if (config.dim) row.className += ' dim';
 

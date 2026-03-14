@@ -125,6 +125,7 @@ function _syncLayersDialogForPage(ui, designRef) {
 }
 
 function _activateDrawingWorkspace(ui) {
+    try { if (ui) ui._activeWorkspaceKey = null; } catch (_) { }
     var shell = ui && ui._phase1 && ui._phase1.workspaceShell ? ui._phase1.workspaceShell : document;
     var body = ui && ui._phase1 && ui._phase1.workspaceBody
         ? ui._phase1.workspaceBody
@@ -155,6 +156,7 @@ function _activateDrawingWorkspace(ui) {
             if (typeof graph.sizeDidChange === 'function') graph.sizeDidChange();
         }
         if (typeof ui.refresh === 'function') ui.refresh();
+        if (ui && typeof ui.refreshProjectExplorer === 'function') ui.refreshProjectExplorer();
         if (window && typeof window.dispatchEvent === 'function' && typeof Event === 'function') {
             window.dispatchEvent(new Event('resize'));
         }

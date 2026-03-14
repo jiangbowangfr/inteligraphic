@@ -118,6 +118,7 @@
   }
 
   function activateDrawingWorkspace(ui) {
+    try { if (ui) ui._activeWorkspaceKey = null; } catch (_) { }
     var shell = ui && ui._phase1 && ui._phase1.workspaceShell ? ui._phase1.workspaceShell : document;
     var body = ui && ui._phase1 && ui._phase1.workspaceBody
       ? ui._phase1.workspaceBody
@@ -148,6 +149,7 @@
         if (typeof graph.sizeDidChange === 'function') graph.sizeDidChange();
       }
       if (typeof ui.refresh === 'function') ui.refresh();
+      if (ui && typeof ui.refreshProjectExplorer === 'function') ui.refreshProjectExplorer();
       if (global.window && typeof global.window.dispatchEvent === 'function' && typeof global.Event === 'function') {
         global.window.dispatchEvent(new global.Event('resize'));
       }

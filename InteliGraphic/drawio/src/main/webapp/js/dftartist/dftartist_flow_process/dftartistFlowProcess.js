@@ -242,22 +242,32 @@
         });
     }
 
-    function setActiveWorkspaceTab(tabstrip, body, key) {
+    function setActiveWorkspaceTab(tabstrip, body, key, ui) {
         if (!tabstrip || !body) return false;
         var activeCustom = false;
+        var activeCustomKey = null;
         Array.prototype.forEach.call(tabstrip.querySelectorAll('.phase1-tab[data-key]'), function (tab) {
             var active = tab.getAttribute('data-key') === key;
             tab.classList.toggle('active', active);
-            if (active && tab.getAttribute('data-dft-workspace-custom') === '1') activeCustom = true;
+            if (active && tab.getAttribute('data-dft-workspace-custom') === '1') {
+                activeCustom = true;
+                activeCustomKey = tab.getAttribute('data-key');
+            }
         });
         Array.prototype.forEach.call(body.querySelectorAll('.phase1-workspace-embed-panel[data-key]'), function (panel) {
             panel.classList.toggle('active', panel.getAttribute('data-key') === key);
         });
         setDefaultWorkspaceVisible(body, !activeCustom);
+        try {
+            if (ui) {
+                ui._activeWorkspaceKey = activeCustom ? activeCustomKey : null;
+                if (typeof ui.refreshProjectExplorer === 'function') ui.refreshProjectExplorer();
+            }
+        } catch (_) { }
         return true;
     }
 
-    function ensureWorkspaceDefaultTabBinding(tabstrip, body) {
+    function ensureWorkspaceDefaultTabBinding(tabstrip, body, ui) {
         if (!tabstrip || tabstrip.getAttribute('data-dft-workspace-bound') === '1') return;
         tabstrip.setAttribute('data-dft-workspace-bound', '1');
         tabstrip.addEventListener('click', function (evt) {
@@ -265,10 +275,10 @@
             if (!tab) return;
             if (evt.target && evt.target.classList && evt.target.classList.contains('phase1-tab-close')) return;
             if (tab.getAttribute('data-dft-workspace-custom') === '1') {
-                setActiveWorkspaceTab(tabstrip, body, tab.getAttribute('data-key'));
+                setActiveWorkspaceTab(tabstrip, body, tab.getAttribute('data-key'), ui);
                 return;
             }
-            setActiveWorkspaceTab(tabstrip, body, tab.getAttribute('data-key'));
+            setActiveWorkspaceTab(tabstrip, body, tab.getAttribute('data-key'), ui);
         });
     }
 
@@ -283,10 +293,11 @@
 
     function openWorkspaceEmbedTab(opts) {
         opts = opts || {};
+        var ui = opts.ui || null;
         var host = resolveWorkspaceHost(opts.ui);
         if (!host || !opts.key || typeof opts.render !== 'function') return false;
         ensureWorkspaceEmbedStyles();
-        ensureWorkspaceDefaultTabBinding(host.tabstrip, host.body);
+        ensureWorkspaceDefaultTabBinding(host.tabstrip, host.body, ui);
 
         var tabstrip = host.tabstrip;
         var body = host.body;
@@ -319,7 +330,13 @@
                     if (panel && typeof panel._dftUnmount === 'function') panel._dftUnmount();
                     if (panel && panel.parentNode) panel.parentNode.removeChild(panel);
                     if (tab && tab.parentNode) tab.parentNode.removeChild(tab);
-                    setActiveWorkspaceTab(tabstrip, body, nextKey);
+                    try {
+                        if (ui) {
+                            ui._activeWorkspaceKey = nextKey === 'design' ? null : nextKey;
+                            if (typeof ui.refreshProjectExplorer === 'function') ui.refreshProjectExplorer();
+                        }
+                    } catch (_) { }
+                    setActiveWorkspaceTab(tabstrip, body, nextKey, ui);
                 });
                 tab.appendChild(close);
             }
@@ -344,7 +361,13 @@
             panel.setAttribute('data-dft-rendered', '1');
         }
 
-        setActiveWorkspaceTab(tabstrip, body, key);
+        setActiveWorkspaceTab(tabstrip, body, key, ui);
+        try {
+            if (ui) {
+                ui._activeWorkspaceKey = key;
+                if (typeof ui.refreshProjectExplorer === 'function') ui.refreshProjectExplorer();
+            }
+        } catch (_) { }
         return true;
     }
 
