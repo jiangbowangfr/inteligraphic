@@ -147,6 +147,73 @@
     try { return graph.getChildEdges(parent) || []; } catch (e) { return []; }
   };
 
+  function getLayerRootCell(graph) {
+    if (!graph || !graph.getModel || !graph.getDefaultParent) return null;
+    try {
+      var model = graph.getModel();
+      var parent = graph.getDefaultParent();
+      return model && parent ? model.getParent(parent) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  Shared.getLayerRoot = function getLayerRoot(ui) {
+    return getLayerRootCell(Shared.graphOf(ui));
+  };
+
+  Shared.getTopLevelLayers = function getTopLevelLayers(ui) {
+    var graph = Shared.graphOf(ui);
+    if (!graph || !graph.getModel) return [];
+    var model = graph.getModel();
+    var layerRoot = getLayerRootCell(graph);
+    if (!layerRoot) {
+      var fallback = Shared.getDefaultParent(ui);
+      return fallback ? [fallback] : [];
+    }
+    var out = [];
+    try {
+      var count = model.getChildCount(layerRoot);
+      for (var i = 0; i < count; i++) {
+        var child = model.getChildAt(layerRoot, i);
+        if (child) out.push(child);
+      }
+    } catch (e) {}
+    return out.length ? out : (Shared.getDefaultParent(ui) ? [Shared.getDefaultParent(ui)] : []);
+  };
+
+  Shared.getLayerName = function getLayerName(layerCell) {
+    return trim(Shared.labelOf(layerCell));
+  };
+
+  Shared.findOwningTopLayer = function findOwningTopLayer(graph, cell) {
+    if (!graph || !cell || !graph.getModel) return null;
+    var model = graph.getModel();
+    var layerRoot = getLayerRootCell(graph);
+    if (!layerRoot) return null;
+    var cur = cell;
+    while (cur) {
+      var parent = null;
+      try { parent = model.getParent(cur); } catch (e) { parent = null; }
+      if (!parent) return null;
+      if (parent === layerRoot) return cur;
+      cur = parent;
+    }
+    return null;
+  };
+
+  Shared.getLayerVertices = function getLayerVertices(ui, layerCell) {
+    var graph = Shared.graphOf(ui);
+    if (!graph || !layerCell || !graph.getChildVertices) return [];
+    try { return graph.getChildVertices(layerCell) || []; } catch (e) { return []; }
+  };
+
+  Shared.getLayerEdges = function getLayerEdges(ui, layerCell) {
+    var graph = Shared.graphOf(ui);
+    if (!graph || !layerCell || !graph.getChildEdges) return [];
+    try { return graph.getChildEdges(layerCell) || []; } catch (e) { return []; }
+  };
+
   Shared.labelOf = function labelOf(cell) {
     if (!cell) return '';
     if (cell.value == null) return '';

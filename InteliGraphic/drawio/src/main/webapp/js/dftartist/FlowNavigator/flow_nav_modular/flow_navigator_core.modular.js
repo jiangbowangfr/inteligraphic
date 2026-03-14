@@ -121,9 +121,9 @@
     var analysis = Analysis.analyzeDataflow(ui);
     Shared.ensureState(ui).lastCheck = analysis;
     var level = analysis.errorCount ? 'error' : (analysis.warningCount ? 'warning' : 'success');
-    Shared.logDock(ui, 'Dataflow check: ' + analysis.modules.length + ' module(s), ' + analysis.dataSources.length + ' data source(s), ' + analysis.interfacePlan.markers.length + ' marker(s), ' + analysis.interfacePlan.pairs.length + ' pair(s).', level);
+    Shared.logDock(ui, 'Dataflow check: ' + analysis.modules.length + ' module(s), ' + analysis.dataSources.length + ' data source(s).', level);
     for (var i = 0; i < analysis.issues.length; i++) Shared.logDock(ui, analysis.issues[i].text, analysis.issues[i].level || 'warning');
-    Shared.setReports(ui, [{ title: 'Dataflow Check', items: { modules: analysis.modules.length, dataSources: analysis.dataSources.length, plannedMarkers: analysis.interfacePlan.markers.length, pairs: analysis.interfacePlan.pairs.length, warnings: analysis.warningCount, errors: analysis.errorCount } }]);
+    Shared.setReports(ui, [{ title: 'Dataflow Check', items: { modules: analysis.modules.length, dataSources: analysis.dataSources.length, warnings: analysis.warningCount, errors: analysis.errorCount } }]);
     Shared.setJobs(ui, [{ name: 'dataflow_check', status: level, detail: analysis.issues.length + ' issue(s)', progress: 100 }]);
     return analysis;
   }

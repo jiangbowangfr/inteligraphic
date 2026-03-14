@@ -19,31 +19,60 @@
 
   function getDataflowRuleConfig() {
     var cfg = Mod.dataflowRuleConfig || {};
-    var pairs = Array.isArray(cfg.loopPinPairs) && cfg.loopPinPairs.length ? cfg.loopPinPairs : [
-      { startTypes: ['data_out'], returnTypes: ['data_in'], label: 'data_out -> data_in' },
-      { startTypes: ['data_in'], returnTypes: ['data_out'], label: 'data_in -> data_out' }
-    ];
-    var normalizedPairs = [];
-    for (var i = 0; i < pairs.length; i++) {
-      var pair = pairs[i] || {};
-      var startTypes = normalizeTypeList(pair.startTypes);
-      var returnTypes = normalizeTypeList(pair.returnTypes);
-      if (!startTypes.length || !returnTypes.length) continue;
-      normalizedPairs.push({
-        startTypes: startTypes,
-        returnTypes: returnTypes,
-        label: Shared.trim(pair.label || (startTypes.join('/') + ' -> ' + returnTypes.join('/')))
-      });
+    var layerRules = cfg.layerRules || {};
+    function normalizeRule(name, fallback) {
+      var rule = layerRules[name] || {};
+      var allowedKinds = normalizeTypeList(rule.allowedKinds && rule.allowedKinds.length ? rule.allowedKinds : fallback.allowedKinds);
+      return {
+        name: name,
+        allowedKinds: allowedKinds.length ? allowedKinds : fallback.allowedKinds,
+        minSources: Math.max(0, Number(rule.minSources == null ? fallback.minSources : rule.minSources)),
+        maxSources: Math.max(0, Number(rule.maxSources == null ? fallback.maxSources : rule.maxSources)),
+        requireSameSource: rule.requireSameSource == null ? !!fallback.requireSameSource : !!rule.requireSameSource
+      };
     }
-    if (!normalizedPairs.length) normalizedPairs.push({ startTypes: ['data_out'], returnTypes: ['data_in'], label: 'data_out -> data_in' });
+    var normalizedLayerRules = {
+      ssn: normalizeRule('ssn', { allowedKinds: ['padsource'], minSources: 1, maxSources: 2, requireSameSource: false }),
+      bscan: normalizeRule('bscan', { allowedKinds: ['tap'], minSources: 1, maxSources: 1, requireSameSource: true }),
+      ijtag: normalizeRule('ijtag', { allowedKinds: ['tap'], minSources: 1, maxSources: 1, requireSameSource: true }),
+      bisr: normalizeRule('bisr', { allowedKinds: ['bisrcsource'], minSources: 1, maxSources: 1, requireSameSource: true })
+    };
     return {
       endpointTolerance: Math.max(6, Number(cfg.endpointTolerance || 18)),
       moduleHitPadding: Math.max(0, Number(cfg.moduleHitPadding || 0)),
-      requireSameDataSourceForLoop: cfg.requireSameDataSourceForLoop !== false,
-      loopPinPairs: normalizedPairs,
       interiorEpsilon: Math.max(0.01, Number(cfg.interiorEpsilon || 0.5)),
-      markerTangentGap: Math.max(8, Number(cfg.markerTangentGap || 18))
+      markerTangentGap: Math.max(8, Number(cfg.markerTangentGap || 18)),
+      layerRules: normalizedLayerRules
     };
+  }
+
+  function normalizeLayerName(name) {
+    return Shared.trim(name).toLowerCase();
+  }
+
+  function getLayerRule(ctx, layerName) {
+    layerName = normalizeLayerName(layerName);
+    return (ctx && ctx.config && ctx.config.layerRules && ctx.config.layerRules[layerName]) || null;
+  }
+
+  function dataSourceKindLabel(kind) {
+    if (kind === 'padsource') return 'PadSource';
+    if (kind === 'tap') return 'TapSource';
+    if (kind === 'bisrcsource') return 'BISRCSource';
+    return 'UnknownSource';
+  }
+
+  function detectDataSourceKind(graph, cell) {
+    if (!cell) return 'unknown';
+    var sym = Shared.getSymbolModel(cell) || {};
+    var typeName = Shared.trim(Shared.getCellStyleValue(graph, cell, 'dftsIP_type', '')) || Shared.trim(sym.dftsType || '');
+    var defKey = Shared.trim(Shared.getCellStyleValue(graph, cell, 'dftsIP_defKey', ''));
+    var title = Shared.trim(sym.title || Shared.displayNameOfCell(graph, cell) || Shared.labelOf(cell));
+    var hint = (typeName + '|' + defKey + '|' + title).toLowerCase();
+    if (/padsource|ssnpadsource/.test(hint)) return 'padsource';
+    if (/tapsource|\btap\b/.test(hint)) return 'tap';
+    if (/bisrcsource|bisrsource|bisrc/.test(hint)) return 'bisrcsource';
+    return 'unknown';
   }
 
   function isLikelyInterface(cell, graph) {
@@ -76,6 +105,15 @@
   function isLikelySource(cell, graph) {
     if (isDataSourceBody(graph, cell)) return true;
     return /padsource|source/.test(Shared.displayNameOfCell(graph, cell).toLowerCase());
+  }
+
+  function describeDataSource(graph, cell, layerName) {
+    return {
+      cell: cell,
+      layerName: normalizeLayerName(layerName),
+      kind: detectDataSourceKind(graph, cell),
+      name: Shared.displayNameOfCell(graph, cell) || Shared.labelOf(cell) || ('DATASOURCE_' + String(cell && cell.id || ''))
+    };
   }
 
   function isLikelyBlock(cell, graph) {
@@ -152,71 +190,39 @@
     return points;
   }
 
-  function matchPointToPins(point, pins, tolerance, graph) {
-    var out = [];
-    if (!point) return out;
-    for (var i = 0; i < pins.length; i++) {
-      var pin = pins[i];
-      if (!pin.exit) continue;
-      var dist = Shared.pointDistance(point, pin.exit);
-      if (dist > tolerance) continue;
-      out.push({
-        body: pin.body,
-        bodyName: Shared.displayNameOfCell(graph, pin.body) || Shared.trim(Shared.labelOf(pin.body)),
-        pin: pin.cell,
-        pinKey: pin.key,
-        pinName: pin.name,
-        pinType: Shared.trim(pin.type).toLowerCase(),
-        distance: dist
-      });
-    }
-    out.sort(function (a, b) { return a.distance - b.distance; });
-    return out;
-  }
-
-  function filterMatchesByTypes(matches, types) {
-    var out = [];
-    types = normalizeTypeList(types);
-    for (var i = 0; i < matches.length; i++) if (types.indexOf(matches[i].pinType) >= 0) out.push(matches[i]);
-    return out;
-  }
-
-  function pickCompatibleEndpointPair(startMatches, returnMatches, requireSameDataSourceForLoop) {
-    for (var i = 0; i < startMatches.length; i++) {
-      for (var j = 0; j < returnMatches.length; j++) {
-        var sm = startMatches[i], rm = returnMatches[j];
-        if (!requireSameDataSourceForLoop || sm.body === rm.body) return { start: sm, back: rm };
-      }
-    }
-    return null;
-  }
-
   function edgeAnchorMeta(edge) {
     var styleText = edge && edge.style ? String(edge.style) : '';
     return {
       sourceBodyId: Shared.trim(Shared.styleValue(styleText, 'dftFloorplanAnchor_source_bodyId', '')),
-      sourcePinKey: Shared.trim(Shared.styleValue(styleText, 'dftFloorplanAnchor_source_pinKey', '')),
       sinkBodyId: Shared.trim(Shared.styleValue(styleText, 'dftFloorplanAnchor_sink_bodyId', '')),
+      sourcePinKey: Shared.trim(Shared.styleValue(styleText, 'dftFloorplanAnchor_source_pinKey', '')),
       sinkPinKey: Shared.trim(Shared.styleValue(styleText, 'dftFloorplanAnchor_sink_pinKey', ''))
     };
   }
 
-  function findPinMatchByAnchor(pins, bodyId, pinKey) {
-    if (!bodyId || !pinKey) return [];
+  function pointDistanceToRect(point, rect) {
+    if (!point || !rect) return Infinity;
+    var dx = 0;
+    if (point.x < rect.left) dx = rect.left - point.x;
+    else if (point.x > rect.right) dx = point.x - rect.right;
+    var dy = 0;
+    if (point.y < rect.top) dy = rect.top - point.y;
+    else if (point.y > rect.bottom) dy = point.y - rect.bottom;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  function findDataSourceMatchByAnchor(dataSources, bodyId, graph) {
+    if (!bodyId) return [];
     var out = [];
-    pinKey = Shared.trim(pinKey);
-    for (var i = 0; i < pins.length; i++) {
-      var pin = pins[i];
-      if (!pin || !pin.body || !pin.body.id) continue;
-      if (String(pin.body.id) !== String(bodyId)) continue;
-      if (Shared.trim(pin.key) !== pinKey) continue;
+    for (var i = 0; i < dataSources.length; i++) {
+      var ds = dataSources[i];
+      var body = ds && ds.cell;
+      if (!body || body.id == null) continue;
+      if (String(body.id) !== String(bodyId)) continue;
       out.push({
-        body: pin.body,
-        bodyName: Shared.displayNameOfCell(null, pin.body) || Shared.trim(Shared.labelOf(pin.body)),
-        pin: pin.cell,
-        pinKey: pin.key,
-        pinName: pin.name,
-        pinType: Shared.trim(pin.type).toLowerCase(),
+        body: body,
+        bodyName: Shared.displayNameOfCell(graph, body) || Shared.trim(Shared.labelOf(body)),
+        kind: ds.kind,
         distance: 0,
         anchored: true
       });
@@ -232,7 +238,7 @@
       var arr = lists[i];
       for (var j = 0; j < arr.length; j++) {
         var item = arr[j];
-        var key = [item.body && item.body.id, item.pinKey, item.pinType].join('|');
+        var key = [item.body && item.body.id, item.kind || ''].join('|');
         if (seen[key]) continue;
         seen[key] = true;
         out.push(item);
@@ -242,58 +248,100 @@
     return out;
   }
 
+  function matchPointToDataSources(point, dataSources, tolerance, graph) {
+    var out = [];
+    if (!point) return out;
+    tolerance = Math.max(0, Number(tolerance || 0));
+    for (var i = 0; i < dataSources.length; i++) {
+      var ds = dataSources[i] || {};
+      var body = ds.cell;
+      var rect = Shared.rectOfCell(body);
+      if (!body || !rect) continue;
+      var dist = pointDistanceToRect(point, rect);
+      if (dist > tolerance) continue;
+      out.push({
+        body: body,
+        bodyName: Shared.displayNameOfCell(graph, body) || Shared.trim(Shared.labelOf(body)),
+        kind: ds.kind,
+        distance: dist
+      });
+    }
+    out.sort(function (a, b) { return Number(a.distance || 0) - Number(b.distance || 0); });
+    return out;
+  }
+
+  function pickBestEndpointPair(headMatches, tailMatches, layerRule) {
+    if (!headMatches.length || !tailMatches.length) return null;
+    var i, j;
+    var filteredHead = headMatches;
+    var filteredTail = tailMatches;
+    if (layerRule && layerRule.allowedKinds && layerRule.allowedKinds.length) {
+      filteredHead = [];
+      filteredTail = [];
+      for (i = 0; i < headMatches.length; i++) {
+        if (layerRule.allowedKinds.indexOf(headMatches[i].kind) >= 0) filteredHead.push(headMatches[i]);
+      }
+      for (j = 0; j < tailMatches.length; j++) {
+        if (layerRule.allowedKinds.indexOf(tailMatches[j].kind) >= 0) filteredTail.push(tailMatches[j]);
+      }
+    }
+    if (!filteredHead.length || !filteredTail.length) return null;
+    for (i = 0; i < filteredHead.length; i++) {
+      for (j = 0; j < filteredTail.length; j++) {
+        var head = filteredHead[i];
+        var tail = filteredTail[j];
+        var sameBody = head.body && tail.body && String(head.body.id) === String(tail.body.id);
+        if (layerRule && layerRule.requireSameSource && !sameBody) continue;
+        return { start: head, back: tail, sameBody: sameBody };
+      }
+    }
+    return null;
+  }
+
   function analyzeFloorplanLine(edge, ctx, index) {
     var points = getEdgePolyline(ctx.graph, edge);
     var head = points.length ? points[0] : null;
     var tail = points.length ? points[points.length - 1] : null;
     var anchors = edgeAnchorMeta(edge);
+    var layerName = normalizeLayerName(ctx.lineLayerNameByEdgeId[String(edge && edge.id || '')] || '');
+    var layerRule = getLayerRule(ctx, layerName);
+    var layerDataSources = ctx.dataSourceByLayer[layerName] || [];
     var endpointMatches = {
-      head: mergeEndpointMatches(findPinMatchByAnchor(ctx.dataSourcePins, anchors.sourceBodyId, anchors.sourcePinKey), matchPointToPins(head, ctx.dataSourcePins, ctx.config.endpointTolerance, ctx.graph)),
-      tail: mergeEndpointMatches(findPinMatchByAnchor(ctx.dataSourcePins, anchors.sinkBodyId, anchors.sinkPinKey), matchPointToPins(tail, ctx.dataSourcePins, ctx.config.endpointTolerance, ctx.graph))
+      head: mergeEndpointMatches(findDataSourceMatchByAnchor(layerDataSources, anchors.sourceBodyId, ctx.graph), matchPointToDataSources(head, layerDataSources, ctx.config.endpointTolerance, ctx.graph)),
+      tail: mergeEndpointMatches(findDataSourceMatchByAnchor(layerDataSources, anchors.sinkBodyId, ctx.graph), matchPointToDataSources(tail, layerDataSources, ctx.config.endpointTolerance, ctx.graph))
     };
-    if (!endpointMatches.tail.length && anchors.sourceBodyId && anchors.sourcePinKey) {
-      endpointMatches.tail = matchPointToPins(tail, ctx.dataSourcePins, Math.max(ctx.config.endpointTolerance, 32), ctx.graph);
+    var crossLayerAnchor = false;
+    if (anchors.sourceBodyId && ctx.dataSourceByBodyId[anchors.sourceBodyId] && ctx.dataSourceByBodyId[anchors.sourceBodyId].layerName !== layerName) crossLayerAnchor = true;
+    if (anchors.sinkBodyId && ctx.dataSourceByBodyId[anchors.sinkBodyId] && ctx.dataSourceByBodyId[anchors.sinkBodyId].layerName !== layerName) crossLayerAnchor = true;
+    var pairMatch = pickBestEndpointPair(endpointMatches.head, endpointMatches.tail, layerRule);
+    var validationErrors = [];
+    if (!layerRule) validationErrors.push('Layer "' + (layerName || '?') + '" does not have a dataflow rule.');
+    if (crossLayerAnchor) validationErrors.push('Line references a datasource from a different layer.');
+    if (!endpointMatches.head.length || !endpointMatches.tail.length) validationErrors.push('Both endpoints must attach to datasource bodies in the same layer.');
+    if (layerRule && !pairMatch && endpointMatches.head.length && endpointMatches.tail.length) {
+      validationErrors.push('Line endpoints do not satisfy the layer datasource rule.');
     }
-    if (!endpointMatches.head.length && anchors.sinkBodyId && anchors.sinkPinKey) {
-      endpointMatches.head = matchPointToPins(head, ctx.dataSourcePins, Math.max(ctx.config.endpointTolerance, 32), ctx.graph);
+    if (pairMatch && layerRule && !pairMatch.sameBody && layerRule.requireSameSource) {
+      validationErrors.push('Line must start and end on the same datasource for this layer.');
     }
-    var loopMatch = null;
-    for (var i = 0; i < ctx.config.loopPinPairs.length; i++) {
-      var pair = ctx.config.loopPinPairs[i];
-      var headStart = filterMatchesByTypes(endpointMatches.head, pair.startTypes);
-      var tailReturn = filterMatchesByTypes(endpointMatches.tail, pair.returnTypes);
-      var direct = pickCompatibleEndpointPair(headStart, tailReturn, ctx.config.requireSameDataSourceForLoop);
-      if (direct) {
-        loopMatch = { pair: pair, orientation: 'head-start-tail-return', start: direct.start, back: direct.back };
-        break;
-      }
-      var tailStart = filterMatchesByTypes(endpointMatches.tail, pair.startTypes);
-      var headReturn = filterMatchesByTypes(endpointMatches.head, pair.returnTypes);
-      var reverse = pickCompatibleEndpointPair(tailStart, headReturn, ctx.config.requireSameDataSourceForLoop);
-      if (reverse) {
-        loopMatch = { pair: pair, orientation: 'tail-start-head-return', start: reverse.start, back: reverse.back };
-        break;
-      }
-    }
-    var allStartTypes = [];
-    var allReturnTypes = [];
-    for (var p = 0; p < ctx.config.loopPinPairs.length; p++) {
-      var cfg = ctx.config.loopPinPairs[p];
-      for (var s = 0; s < cfg.startTypes.length; s++) if (allStartTypes.indexOf(cfg.startTypes[s]) < 0) allStartTypes.push(cfg.startTypes[s]);
-      for (var r = 0; r < cfg.returnTypes.length; r++) if (allReturnTypes.indexOf(cfg.returnTypes[r]) < 0) allReturnTypes.push(cfg.returnTypes[r]);
-    }
-    var touchesStartPin = !!(filterMatchesByTypes(endpointMatches.head, allStartTypes).length || filterMatchesByTypes(endpointMatches.tail, allStartTypes).length);
-    var touchesReturnPin = !!(filterMatchesByTypes(endpointMatches.head, allReturnTypes).length || filterMatchesByTypes(endpointMatches.tail, allReturnTypes).length);
+    var loopMatch = pairMatch ? {
+      orientation: 'head-start-tail-return',
+      start: pairMatch.start,
+      back: pairMatch.back
+    } : null;
     return {
       edge: edge,
       index: index,
+      layerName: layerName,
+      layerRule: layerRule,
       points: points,
       endpointMatches: endpointMatches,
       touchesDataSource: !!(endpointMatches.head.length || endpointMatches.tail.length),
-      touchesStartPin: touchesStartPin,
-      touchesReturnPin: touchesReturnPin,
+      touchesStartPin: !!endpointMatches.head.length,
+      touchesReturnPin: !!endpointMatches.tail.length,
       validLoop: !!loopMatch,
-      loopMatch: loopMatch
+      loopMatch: loopMatch,
+      validationErrors: validationErrors
     };
   }
 
@@ -770,7 +818,12 @@
 
   function buildInterfacePlan(ctx) {
     var validLines = [];
-    for (var i = 0; i < ctx.lineAnalyses.length; i++) if (ctx.lineAnalyses[i].validLoop) validLines.push(ctx.lineAnalyses[i]);
+    for (var i = 0; i < ctx.lineAnalyses.length; i++) {
+      var line = ctx.lineAnalyses[i];
+      if (!line.validLoop) continue;
+      if (line.layerName && line.layerName !== 'ssn') continue;
+      validLines.push(line);
+    }
     var issues = [];
     var chains = [];
     var markers = [];
@@ -823,40 +876,103 @@
   }
 
   function buildDataflowContext(ui) {
-
     var graph = Shared.graphOf(ui);
-    var vertices = Shared.getChildVertices(ui);
-    var edges = Shared.getChildEdges(ui);
+    var layers = Shared.getTopLevelLayers(ui);
+    var vertices = [];
+    var edges = [];
     var modules = [];
     var dataSources = [];
+    var dataSourceInfos = [];
+    var dataSourceByBodyId = {};
+    var dataSourceByLayer = {};
     var interfaces = [];
     var floorplanLines = [];
+    var lineLayerNameByEdgeId = {};
     var i;
-    for (i = 0; i < vertices.length; i++) {
-      var cell = vertices[i];
-      if (isDataSourceBody(graph, cell)) dataSources.push(cell);
-      else if (isLikelyInterface(cell, graph)) interfaces.push(cell);
-      else if (isLikelyBlock(cell, graph)) modules.push(cell);
+
+    function pushUnique(list, cell, seenMap) {
+      if (!cell || cell.id == null) return;
+      var key = String(cell.id);
+      if (seenMap[key]) return;
+      seenMap[key] = true;
+      list.push(cell);
     }
-    for (i = 0; i < edges.length; i++) {
-      if (isFloorplanLine(graph, edges[i]) && hasMeaningfulPolyline(graph, edges[i])) floorplanLines.push(edges[i]);
+
+    var seenVertices = {};
+    var seenEdges = {};
+    var seenModules = {};
+    var seenSources = {};
+    var seenInterfaces = {};
+
+    for (i = 0; i < layers.length; i++) {
+      var layerCell = layers[i];
+      var layerName = normalizeLayerName(Shared.getLayerName(layerCell));
+      var layerVertices = Shared.getLayerVertices(ui, layerCell);
+      var layerEdges = Shared.getLayerEdges(ui, layerCell);
+      for (var v = 0; v < layerVertices.length; v++) {
+        var cell = layerVertices[v];
+        pushUnique(vertices, cell, seenVertices);
+        if (isDataSourceBody(graph, cell)) {
+          pushUnique(dataSources, cell, seenSources);
+          var info = describeDataSource(graph, cell, layerName);
+          dataSourceInfos.push(info);
+          dataSourceByBodyId[String(cell.id)] = info;
+          if (!dataSourceByLayer[layerName]) dataSourceByLayer[layerName] = [];
+          dataSourceByLayer[layerName].push(info);
+          continue;
+        }
+        if (isLikelyInterface(cell, graph)) {
+          pushUnique(interfaces, cell, seenInterfaces);
+          continue;
+        }
+        if (isLikelyBlock(cell, graph)) {
+          pushUnique(modules, cell, seenModules);
+        }
+      }
+      for (var e = 0; e < layerEdges.length; e++) {
+        var edge = layerEdges[e];
+        pushUnique(edges, edge, seenEdges);
+        if (isFloorplanLine(graph, edge) && hasMeaningfulPolyline(graph, edge)) {
+          floorplanLines.push(edge);
+          lineLayerNameByEdgeId[String(edge.id)] = layerName;
+        }
+      }
     }
+
+    for (i = 0; i < dataSourceInfos.length; i++) {
+      var dsInfo = dataSourceInfos[i];
+      if (!dataSourceByLayer[dsInfo.layerName]) dataSourceByLayer[dsInfo.layerName] = [];
+    }
+
+    var config = getDataflowRuleConfig();
+    var configRules = config.layerRules || {};
+    for (var knownLayer in configRules) {
+      if (!Object.prototype.hasOwnProperty.call(configRules, knownLayer)) continue;
+      if (!dataSourceByLayer[knownLayer]) dataSourceByLayer[knownLayer] = [];
+    }
+
     var dataSourcePins = [];
     for (i = 0; i < dataSources.length; i++) {
       var pins = collectBodyPins(graph, dataSources[i]);
       for (var p = 0; p < pins.length; p++) dataSourcePins.push(pins[p]);
     }
+
     var ctx = {
       ui: ui,
       graph: graph,
+      layers: layers,
       vertices: vertices,
       edges: edges,
       modules: modules,
       dataSources: dataSources,
+      dataSourceInfos: dataSourceInfos,
+      dataSourceByBodyId: dataSourceByBodyId,
+      dataSourceByLayer: dataSourceByLayer,
       interfaces: interfaces,
       floorplanLines: floorplanLines,
+      lineLayerNameByEdgeId: lineLayerNameByEdgeId,
       dataSourcePins: dataSourcePins,
-      config: getDataflowRuleConfig()
+      config: config
     };
     ctx.lineAnalyses = [];
     for (i = 0; i < floorplanLines.length; i++) ctx.lineAnalyses.push(analyzeFloorplanLine(floorplanLines[i], ctx, i));
@@ -866,6 +982,7 @@
       var rect = Shared.rectOfCell(moduleCell);
       var visited = false;
       for (var l = 0; l < ctx.lineAnalyses.length; l++) {
+        if (!ctx.lineAnalyses[l].validLoop) continue;
         var pts = orderedPointsForLine(ctx.lineAnalyses[l]);
         for (var k = 0; k < pts.length; k++) {
           if (Shared.pointInRect(pts[k], Shared.expandRect(rect, ctx.config.moduleHitPadding), 0)) { visited = true; break; }
@@ -892,24 +1009,67 @@
       issues.push(item);
     }
     if (!ctx.modules.length) issue('warning', 'No floorplan modules detected on the current page.', { ruleKey: 'modules-present' });
-    if (!ctx.dataSources.length) issue('error', 'No data source detected on the current floorplan page.', { ruleKey: 'datasource-present' });
+    if (!ctx.dataSources.length) issue('warning', 'No data source detected on the current floorplan page.', { ruleKey: 'datasource-present' });
     if (!ctx.floorplanLines.length) issue('warning', 'No floorplan lines detected on the current page.', { ruleKey: 'floorplan-lines-present' });
+    var layerRules = ctx.config.layerRules || {};
+    for (var layerName in layerRules) {
+      if (!Object.prototype.hasOwnProperty.call(layerRules, layerName)) continue;
+      var rule = layerRules[layerName];
+      var items = ctx.dataSourceByLayer[layerName] || [];
+      var allowedCount = 0;
+      for (var d = 0; d < items.length; d++) {
+        if (rule.allowedKinds.indexOf(items[d].kind) >= 0) {
+          allowedCount++;
+          continue;
+        }
+        issue('error',
+          'Layer "' + layerName + '" only allows ' + dataSourceKindLabel(rule.allowedKinds[0]) +
+          ', but found "' + (items[d].name || 'unknown') + '" (' + dataSourceKindLabel(items[d].kind) + ').',
+          { ruleKey: 'datasource-layer-type', datasourceId: items[d].cell && items[d].cell.id });
+      }
+      if (allowedCount < rule.minSources || allowedCount > rule.maxSources) {
+        var expected = rule.minSources === rule.maxSources
+          ? String(rule.minSources)
+          : String(rule.minSources) + '~' + String(rule.maxSources);
+        issue(allowedCount === 0 ? 'warning' : 'error',
+          'Layer "' + layerName + '" requires ' + expected + ' ' + dataSourceKindLabel(rule.allowedKinds[0]) +
+          ' datasource(s), but found ' + String(allowedCount) + '.',
+          { ruleKey: 'datasource-layer-count', layerName: layerName });
+      }
+      var layerLineCount = 0;
+      for (var ll = 0; ll < ctx.lineAnalyses.length; ll++) {
+        if (ctx.lineAnalyses[ll].layerName === layerName) layerLineCount++;
+      }
+      if (items.length > 0 && !layerLineCount) {
+        issue('warning',
+          'Layer "' + layerName + '" contains datasource(s) but no floorplan line.',
+          { ruleKey: 'datasource-layer-no-line', layerName: layerName });
+      }
+    }
     var validLoops = 0;
     for (var i = 0; i < ctx.lineAnalyses.length; i++) {
       var line = ctx.lineAnalyses[i];
-      var lineName = 'Floorplan line #' + (line.index + 1);
-      if (line.validLoop) { validLoops++; continue; }
+      var lineName = 'Floorplan line #' + (line.index + 1) + (line.layerName ? ' [' + line.layerName + ']' : '');
+      if (line.validLoop) {
+        validLoops++;
+        continue;
+      }
       if (!line.touchesDataSource) {
-        issue('warning', lineName + ' is not attached to a data source endpoint.', { ruleKey: 'datasource-loop', edgeId: line.edge && line.edge.id });
+        issue('error', lineName + ' is not attached to datasource endpoints.', { ruleKey: 'datasource-loop', edgeId: line.edge && line.edge.id });
+      } else if (line.validationErrors && line.validationErrors.length) {
+        for (var ve = 0; ve < line.validationErrors.length; ve++) {
+          issue('error', lineName + ': ' + line.validationErrors[ve], { ruleKey: 'datasource-loop', edgeId: line.edge && line.edge.id });
+        }
       } else {
-        issue('error', lineName + ' touches data source endpoints but does not form a valid data source out->in loop.', { ruleKey: 'datasource-loop', edgeId: line.edge && line.edge.id });
+        issue('error', lineName + ' does not satisfy the layer datasource rule.', { ruleKey: 'datasource-loop', edgeId: line.edge && line.edge.id });
       }
     }
-    if (ctx.floorplanLines.length && !validLoops) issue('error', 'No floorplan line forms a complete data source in/out loop.', { ruleKey: 'datasource-loop' });
+    if (ctx.floorplanLines.length && !validLoops) {
+      issue('error', 'No floorplan line satisfies datasource rules.', { ruleKey: 'datasource-loop' });
+    }
     for (i = 0; i < ctx.moduleCoverage.length; i++) {
       if (!ctx.moduleCoverage[i].visited) issue('warning', 'Module "' + ctx.moduleCoverage[i].name + '" is not covered by any floorplan dataflow line.', { ruleKey: 'module-coverage', moduleId: ctx.moduleCoverage[i].module && ctx.moduleCoverage[i].module.id });
     }
-    for (i = 0; i < ctx.interfacePlan.issues.length; i++) issues.push(ctx.interfacePlan.issues[i]);
     return issues;
   }
 
