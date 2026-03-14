@@ -38,6 +38,27 @@ function _getViewStateStore(ui) {
     return ui._dftPageViewState;
 }
 
+function _persistentViewStateKey(key) {
+    return key ? ('dft:pageView:' + String(key)) : '';
+}
+
+function _writePersistentViewState(key, state) {
+    if (!key || !state || !window.localStorage) return;
+    try {
+        window.localStorage.setItem(_persistentViewStateKey(key), JSON.stringify(state));
+    } catch (_) { }
+}
+
+function _readPersistentViewState(key) {
+    if (!key || !window.localStorage) return null;
+    try {
+        const raw = window.localStorage.getItem(_persistentViewStateKey(key));
+        return raw ? JSON.parse(raw) : null;
+    } catch (_) {
+        return null;
+    }
+}
+
 function _makeViewStateKey(designRef, pageName, absPath) {
     const abs = String(absPath || '').trim();
     if (abs) return 'abs:' + abs;
@@ -59,6 +80,7 @@ function _captureViewState(ui, key) {
         scrollLeft: Number(container.scrollLeft || 0),
         scrollTop: Number(container.scrollTop || 0)
     };
+    _writePersistentViewState(key, store[key]);
 }
 
 function _captureActiveViewState(ui) {
@@ -74,7 +96,11 @@ function _restoreViewState(ui, key) {
     const container = graph.container;
     const view = graph.view;
     const store = _getViewStateStore(ui);
-    const state = store && store[key];
+    let state = store && store[key];
+    if (!state) {
+        state = _readPersistentViewState(key);
+        if (state && store) store[key] = state;
+    }
     if (!container || !view || !state) return false;
     try {
         if (view.translate) {
