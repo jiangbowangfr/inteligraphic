@@ -104,6 +104,55 @@
         ].join('');
     }
 
+    function buildStatusEmbedHtml(ctx) {
+        ctx = ctx || {};
+        var title = escapeAttr(ctx.title || 'DFT_Design_Spec');
+        var subtitle = escapeAttr(ctx.subtitle || '');
+        return [
+            '<!DOCTYPE html>',
+            '<html>',
+            '<head>',
+            '<meta charset="utf-8" />',
+            '<meta name="viewport" content="width=device-width, initial-scale=1" />',
+            '<title>' + title + '</title>',
+            '<link rel="stylesheet" href="' + escapeAttr(DIST + '/style.css') + '" />',
+            '<link rel="stylesheet" href="' + escapeAttr(DIST + '/dft-analysis.iife.css') + '" />',
+            '<style>',
+            'html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#f8fafc;}',
+            'body{font-family:Inter,Arial,Helvetica,sans-serif;}',
+            '.dft-status-embed-banner{display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid #e5e7eb;background:#fff;color:#334155;font-size:12px;}',
+            '.dft-status-embed-banner strong{font-size:13px;color:#0f172a;}',
+            '.dft-status-embed-root{height:calc(100% - 39px);overflow:auto;padding:16px;}',
+            '</style>',
+            '</head>',
+            '<body>',
+            '<div class="dft-status-embed-banner"><strong>' + title + '</strong>' + (subtitle ? ('<span>' + subtitle + '</span>') : '') + '</div>',
+            '<div class="dft-status-embed-root"></div>',
+            '<script src="' + escapeAttr(DIST + '/dft-analysis.iife.js') + '"></script>',
+            '<script>',
+            '(function(){',
+            '  function openPanel(){',
+            '    try {',
+            '      if (window.DFTAnalysis && typeof window.DFTAnalysis.mount === "function") {',
+            '        window.DFTAnalysis.mount(document.querySelector(".dft-status-embed-root"), { title: ' + JSON.stringify(ctx.title || 'DFT_Design_Spec') + ', subtitle: ' + JSON.stringify(ctx.subtitle || '') + ' });',
+            '      } else if (window.DFTAnalysis && typeof window.DFTAnalysis.open === "function") {',
+            '        window.DFTAnalysis.open();',
+            '      } else {',
+            '        console.warn("[dft-analysis-embed] DFTAnalysis is not ready");',
+            '      }',
+            '    } catch (err) {',
+            '      console.error("[dft-analysis-embed] open failed", err);',
+            '    }',
+            '  }',
+            '  if (document.readyState === "complete") openPanel();',
+            '  else window.addEventListener("load", openPanel, { once: true });',
+            '})();',
+            '</script>',
+            '</body>',
+            '</html>'
+        ].join('');
+    }
+
     function mountLoadPanel(panel, ctx) {
         if (!panel) return false;
         panel.innerHTML = '';
@@ -130,6 +179,37 @@
             try {
                 if (window.DFTLoad && typeof window.DFTLoad.unmount === 'function') {
                     window.DFTLoad.unmount(mountNode);
+                }
+            } catch (_) { }
+        };
+        return true;
+    }
+
+    function mountStatusPanel(panel, ctx) {
+        if (!panel) return false;
+        panel.innerHTML = '';
+        var mountNode = document.createElement('div');
+        mountNode.className = 'phase1-workspace-embed';
+        panel.appendChild(mountNode);
+        ensureCss(DIST + '/style.css');
+        ensureScript(DIST + '/dft-analysis.iife.js', function () {
+            try {
+                if (window.DFTAnalysis && typeof window.DFTAnalysis.mount === 'function') {
+                    window.DFTAnalysis.mount(mountNode, ctx || {});
+                } else if (window.DFTAnalysis && typeof window.DFTAnalysis.open === 'function') {
+                    console.warn('[dft-analysis-panel] mount not available, fallback to open()');
+                    window.DFTAnalysis.open();
+                } else {
+                    console.warn('[dft-analysis-panel] DFTAnalysis not ready');
+                }
+            } catch (err) {
+                console.error('[dft-analysis-panel] mount failed', err);
+            }
+        });
+        panel._dftUnmount = function () {
+            try {
+                if (window.DFTAnalysis && typeof window.DFTAnalysis.unmount === 'function') {
+                    window.DFTAnalysis.unmount(mountNode);
                 }
             } catch (_) { }
         };
@@ -323,4 +403,6 @@
     window.dftArtistOpenWorkspaceEmbedTab = openWorkspaceEmbedTab;
     window.dftArtistSetFrameHtml = setFrameHtml;
     window.dftArtistMountLoadPanel = mountLoadPanel;
+    window.dftArtistBuildStatusEmbedHtml = buildStatusEmbedHtml;
+    window.dftArtistMountStatusPanel = mountStatusPanel;
 })();

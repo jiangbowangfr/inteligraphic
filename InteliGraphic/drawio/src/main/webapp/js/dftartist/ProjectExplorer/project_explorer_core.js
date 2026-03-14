@@ -2064,6 +2064,40 @@
     showTextDialog(ui, 'Flow: ' + designRef.name, content);
   }
 
+  function openDesignSpec(ui) {
+    if (!ui) return;
+    try {
+      if (global.DFTPageSessionManager && typeof global.DFTPageSessionManager.captureActiveViewState === 'function') {
+        global.DFTPageSessionManager.captureActiveViewState(ui);
+      }
+    } catch (captureErr) {}
+    if (typeof global.dftArtistOpenWorkspaceEmbedTab === 'function' && typeof global.dftArtistMountStatusPanel === 'function') {
+      global.dftArtistOpenWorkspaceEmbedTab({
+        ui: ui,
+        key: 'project:dft_design_spec',
+        label: 'DFT_Design_Spec',
+        title: 'DFT_Design_Spec',
+        closable: true,
+        render: function (panel) {
+          global.dftArtistMountStatusPanel(panel, {
+            title: 'DFT_Design_Spec',
+            subtitle: ensureModel(ui).name || 'project'
+          });
+        }
+      });
+      return;
+    }
+    if (typeof global.dftArtistAnalysis === 'function') {
+      global.dftArtistAnalysis();
+      return;
+    }
+    if (global.DFTAnalysis && typeof global.DFTAnalysis.open === 'function') {
+      global.DFTAnalysis.open();
+      return;
+    }
+    showTextDialog(ui, 'DFT_Design_Spec', 'DFT_Design_Spec is unavailable.');
+  }
+
   function designMatchesQuery(design, query) {
     if (!query) return true;
     if (contains(design.name, query) || (!isIpconfigDesign(design) && contains(design.env_file, query)) || contains(isFloorplanDesign(design) ? 'floorplan-container' : design.__kind, query)) return true;
@@ -2334,11 +2368,23 @@
 
   function renderSources(ui, panel) {
     var model = ensureModel(ui);
-    var query = getState(ui).searchText;
+    var state = getState(ui);
+    var query = state.searchText;
     panel.appendChild(createEl('div', 'phase2-section-title', 'Project'));
     renderProjectSummary(panel, model, ui);
     if (!isProjectReady(ui)) return;
     var rendered = false;
+    if (!query || contains('dft_design_spec', query) || contains('design spec', query)) {
+      panel.appendChild(createNode(ui, {
+        key: 'project:dft_design_spec',
+        depth: 0,
+        icon: '▣',
+        label: 'dft_design_spec',
+        onClick: function () { state.selectedKey = 'project:dft_design_spec'; openDesignSpec(ui); },
+        menuItems: [{ label: 'Open', handler: function () { openDesignSpec(ui); } }]
+      }));
+      rendered = true;
+    }
     for (var i = 0; i < model.designs.length; i++) rendered = renderDesignBranch(ui, panel, model.designs[i], 0, query) || rendered;
     if (!rendered) renderEmpty(panel, 'No source items match "' + query + '".');
   }
