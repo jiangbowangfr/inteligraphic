@@ -14,6 +14,14 @@
     return text(name).replace(/[\\/:*?"<>|]+/g, '_').trim() || 'page';
   }
 
+  function isFloorplanRef(designRef) {
+    if (!designRef) return false;
+    if (designRef._isFloorplan) return true;
+    if (text(designRef.name).trim().toLowerCase() === 'floorplan') return true;
+    var segs = Array.isArray(designRef._dirRel) ? designRef._dirRel.join('/').toLowerCase() : '';
+    return segs === 'floorplan' || /(^|\/)floorplan$/.test(segs);
+  }
+
   function joinPath() {
     if (typeof global._joinPath === 'function') {
       try { return global._joinPath.apply(global, arguments); } catch (e) {}
@@ -191,7 +199,7 @@
     var root = ui._projectRootPath || ui._projectYamlDir;
     if (!root) throw new Error('Please save project first.');
 
-    if (designRef && designRef._isFloorplan) {
+    if (isFloorplanRef(designRef)) {
       var floorplanDir = joinPath(root, 'floorplan');
       try { await request({ action: 'ensureDirs', path: floorplanDir }); } catch (e0) {}
       return joinPath(floorplanDir, sanitizeName(pageName) + '.dftart');

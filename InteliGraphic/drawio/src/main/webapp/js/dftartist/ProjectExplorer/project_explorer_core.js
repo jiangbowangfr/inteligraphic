@@ -797,7 +797,9 @@
     if (!pageName) throw new Error('pageName is required');
     var base = getDesignAbsDir(ui, designRef);
     if (!base) throw new Error('Please create or open a project first.');
-    if (isFloorplanDesign(designRef)) return joinPath(base, sanitizeName(pageName) + '.dftart');
+    if (isFloorplanDesign(designRef) || normalizePath(base).toLowerCase().replace(/\/$/, '').slice(-10) === '/floorplan' || normalizePath(base).toLowerCase() === 'floorplan') {
+      return joinPath(base, sanitizeName(pageName) + '.dftart');
+    }
     return joinPath(base, 'page', sanitizeName(pageName) + '.dftart');
   }
 
@@ -1664,13 +1666,13 @@
     return true;
   }
 
-  function floorplanPageName(projectName, contentKey) {
-    return sanitizeName(projectName || 'project') + '_' + contentKey.toLowerCase() + '_floorplan';
+  function floorplanPageName(projectName) {
+    return sanitizeName(projectName || 'project') + '_floorplan';
   }
 
   async function showFloorplanPageDialog(ui) {
     return showDialog(ui, 'Create Floorplan Page', 640, 360, function (body, done) {
-      body.appendChild(createEl('div', 'phase2-dlg-note', 'Choose the floorplan structure and the DFT content to generate. A page will be created for each selected content item.'));
+      body.appendChild(createEl('div', 'phase2-dlg-note', 'Choose the floorplan structure to generate. A single floorplan page will be created, and DFT content can be managed with layers inside that page.'));
 
       var grid = createEl('div', 'phase2-dlg-grid');
       body.appendChild(grid);
@@ -1706,49 +1708,13 @@
       }
       grid.appendChild(structureWrap);
 
-      grid.appendChild(createEl('div', 'phase2-dlg-label', 'Contents'));
-      var checksWrap = createEl('div', 'phase2-check-grid');
-      var contentDefs = ['SSN', 'BSCAN', 'JTAG', 'BISR', 'Other'];
-      var checkMap = {};
-
-      function syncCheckCard(card, input) {
-        card.className = input.checked ? 'phase2-check-card active' : 'phase2-check-card';
-      }
-
-      for (var j = 0; j < contentDefs.length; j++) {
-        (function (key) {
-          var ckLabel = createEl('label', 'phase2-check-card');
-          var ck = createEl('input');
-          ck.type = 'checkbox';
-          ck.onchange = function () { syncCheckCard(ckLabel, ck); };
-          checkMap[key] = ck;
-          ckLabel.appendChild(ck);
-          ckLabel.appendChild(createEl('span', null, key));
-          ckLabel.onclick = function () { setTimeout(function () { syncCheckCard(ckLabel, ck); }, 0); };
-          checksWrap.appendChild(ckLabel);
-          syncCheckCard(ckLabel, ck);
-        })(contentDefs[j]);
-      }
-      grid.appendChild(checksWrap);
-
-      var errorNode = createEl('div', 'phase2-inline-error');
-      errorNode.style.display = 'none';
-      body.appendChild(errorNode);
-
       var actions = createEl('div', 'phase2-dlg-actions');
       body.appendChild(actions);
       var cancelBtn = createEl('button', 'phase2-btn ghost', (global.mxResources && global.mxResources.get ? (global.mxResources.get('cancel') || 'Cancel') : 'Cancel'));
       var okBtn = createEl('button', 'phase2-btn primary', (global.mxResources && global.mxResources.get ? (global.mxResources.get('create') || 'Create') : 'Create'));
 
       function submit() {
-        var picked = [];
-        for (var k = 0; k < contentDefs.length; k++) if (checkMap[contentDefs[k]].checked) picked.push(contentDefs[k]);
-        if (!picked.length) {
-          errorNode.textContent = 'Select at least one floorplan content item.';
-          errorNode.style.display = '';
-          return;
-        }
-        done({ structure: selectedStructure, contents: picked });
+        done({ structure: selectedStructure });
       }
 
       cancelBtn.onclick = function () { done(null); };
@@ -1770,21 +1736,19 @@
     fp.page_meta = fp.page_meta || {};
     var created = [];
     var skipped = [];
-    for (var i = 0; i < selection.contents.length; i++) {
-      var key = selection.contents[i];
-      var pageName = floorplanPageName(model.name || 'project', key);
-      if (Array.isArray(fp.pages) && fp.pages.indexOf(pageName) >= 0) {
-        skipped.push(pageName);
-        fp.page_meta[pageName] = { structure: selection.structure, content: key, kind: 'floorplan' };
-        continue;
-      }
+    var pageName = floorplanPageName(model.name || 'project');
+    if (Array.isArray(fp.pages) && fp.pages.indexOf(pageName) >= 0) {
+      skipped.push(pageName);
+      fp.page_meta[pageName] = { structure: selection.structure, kind: 'floorplan' };
+    }
+    else {
       await addStandardPage(ui, fp, pageName);
-      fp.page_meta[pageName] = { structure: selection.structure, content: key, kind: 'floorplan' };
+      fp.page_meta[pageName] = { structure: selection.structure, kind: 'floorplan' };
       created.push(pageName);
     }
     saveProjectYaml(ui, 'createFloorplanPages');
     if (created.length && opts.openFirst !== false) await openPage(ui, fp, created[0]);
-    setStatus(ui, created.length ? ('Created floorplan page(s): ' + created.join(', ')) : 'Selected floorplan page(s) already exist.');
+    setStatus(ui, created.length ? ('Created floorplan page: ' + created[0]) : 'Floorplan page already exists.');
     NS.refresh(ui);
     return { design: fp, created: created, skipped: skipped, selection: selection };
   }
