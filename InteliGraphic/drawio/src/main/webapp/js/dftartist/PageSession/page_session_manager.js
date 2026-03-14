@@ -7,6 +7,101 @@
     return v == null ? '' : String(v);
   }
 
+  function getViewStateStore(ui) {
+    if (!ui) return null;
+    if (!ui._dftPageViewState) ui._dftPageViewState = {};
+    return ui._dftPageViewState;
+  }
+
+  function makeViewStateKey(designRef, pageName, absPath) {
+    var abs = text(absPath).trim();
+    if (abs) return 'abs:' + abs;
+    var segs = Array.isArray(designRef && designRef._dirRel) ? designRef._dirRel.join('/') : '';
+    return 'rel:' + segs + '::' + text(pageName).trim();
+  }
+
+  function captureViewState(ui, key) {
+    if (!ui || !key || !ui.editor || !ui.editor.graph) return;
+    var graph = ui.editor.graph;
+    var container = graph.container;
+    var view = graph.view;
+    if (!container || !view) return;
+    var store = getViewStateStore(ui);
+    if (!store) return;
+    store[key] = {
+      scale: Number(view.scale || 1),
+      tx: Number(view.translate ? view.translate.x : 0),
+      ty: Number(view.translate ? view.translate.y : 0),
+      scrollLeft: Number(container.scrollLeft || 0),
+      scrollTop: Number(container.scrollTop || 0)
+    };
+  }
+
+  function restoreViewState(ui, key) {
+    if (!ui || !key || !ui.editor || !ui.editor.graph) return false;
+    var graph = ui.editor.graph;
+    var container = graph.container;
+    var view = graph.view;
+    var store = getViewStateStore(ui);
+    var state = store && store[key];
+    if (!container || !view || !state) return false;
+
+    try {
+      if (typeof graph.getModel === 'function' && graph.getModel() && typeof graph.getModel().beginUpdate === 'function') {
+        graph.getModel().beginUpdate();
+        try {
+          if (view.translate) {
+            view.translate.x = Number(state.tx || 0);
+            view.translate.y = Number(state.ty || 0);
+          }
+          view.scale = Number(state.scale || 1);
+        } finally {
+          graph.getModel().endUpdate();
+        }
+      } else {
+        if (view.translate) {
+          view.translate.x = Number(state.tx || 0);
+          view.translate.y = Number(state.ty || 0);
+        }
+        view.scale = Number(state.scale || 1);
+      }
+    } catch (e) {}
+
+    try {
+      if (typeof graph.view.validate === 'function') graph.view.validate();
+      if (typeof graph.sizeDidChange === 'function') graph.sizeDidChange();
+      if (typeof graph.refresh === 'function') graph.refresh();
+      container.scrollLeft = Number(state.scrollLeft || 0);
+      container.scrollTop = Number(state.scrollTop || 0);
+    } catch (e2) {}
+
+    [0, 30, 120].forEach(function (delay) {
+      setTimeout(function () {
+        try {
+          if (view.translate) {
+            view.translate.x = Number(state.tx || 0);
+            view.translate.y = Number(state.ty || 0);
+          }
+          view.scale = Number(state.scale || 1);
+          if (typeof graph.view.validate === 'function') graph.view.validate();
+          if (typeof graph.sizeDidChange === 'function') graph.sizeDidChange();
+          container.scrollLeft = Number(state.scrollLeft || 0);
+          container.scrollTop = Number(state.scrollTop || 0);
+        } catch (e3) {}
+      }, delay);
+    });
+    return true;
+  }
+
+  function captureActiveViewState(ui) {
+    if (ui && ui._activeEnvCtx) return;
+    var ctx = getActiveContext(ui);
+    if (!ctx || !ctx.name) return;
+    var designRef = ctx.designRef || null;
+    var key = makeViewStateKey(designRef, ctx.name, ctx.abs || '');
+    captureViewState(ui, key);
+  }
+
   function sanitizeName(name) {
     if (typeof global._sanitizeFileName === 'function') {
       try { return global._sanitizeFileName(name); } catch (e) {}
@@ -20,6 +115,43 @@
     if (text(designRef.name).trim().toLowerCase() === 'floorplan') return true;
     var segs = Array.isArray(designRef._dirRel) ? designRef._dirRel.join('/').toLowerCase() : '';
     return segs === 'floorplan' || /(^|\/)floorplan$/.test(segs);
+  }
+
+  function activateDrawingWorkspace(ui) {
+    var shell = ui && ui._phase1 && ui._phase1.workspaceShell ? ui._phase1.workspaceShell : document;
+    var body = ui && ui._phase1 && ui._phase1.workspaceBody
+      ? ui._phase1.workspaceBody
+      : shell.querySelector('.phase1-workspace-body');
+    var tabstrip = shell.querySelector('.phase1-workspace-tabstrip');
+    if (!body || !tabstrip) return;
+
+    Array.prototype.forEach.call(tabstrip.querySelectorAll('.phase1-tab[data-key]'), function (tab) {
+      tab.classList.toggle('active', tab.getAttribute('data-key') === 'design');
+    });
+    Array.prototype.forEach.call(body.querySelectorAll('.phase1-workspace-embed-panel[data-key]'), function (panel) {
+      panel.classList.remove('active');
+    });
+    Array.prototype.forEach.call(body.children || [], function (child) {
+      if (!child || child.getAttribute('data-dft-workspace-panel') === '1') return;
+      if (!child.hasAttribute('data-dft-display-before-embed')) {
+        child.setAttribute('data-dft-display-before-embed', child.style.display || '');
+      }
+      child.style.display = child.getAttribute('data-dft-display-before-embed');
+    });
+
+    try {
+      var graph = ui && ui.editor ? ui.editor.graph : null;
+      if (graph && graph.container) {
+        graph.container.style.pointerEvents = 'auto';
+        graph.container.offsetWidth;
+        if (graph.view && typeof graph.view.validate === 'function') graph.view.validate();
+        if (typeof graph.sizeDidChange === 'function') graph.sizeDidChange();
+      }
+      if (typeof ui.refresh === 'function') ui.refresh();
+      if (global.window && typeof global.window.dispatchEvent === 'function' && typeof global.Event === 'function') {
+        global.window.dispatchEvent(new global.Event('resize'));
+      }
+    } catch (e) {}
   }
 
   function syncLayersDialogForPage(ui, designRef) {
@@ -131,10 +263,12 @@
 
     ui._activeProjectPageCtx = {
       name: pageName,
-      segs: segs
+      segs: segs,
+      designRef: designRef || null
     };
 
     if (absPath) ui._activeProjectPageCtx.abs = absPath;
+    if (designRef) ui._activeProjectPageCtx.designKey = (Array.isArray(segs) ? segs.join('/') : '');
     return ui._activeProjectPageCtx;
   }
 
@@ -325,6 +459,7 @@
 
     ensureWorkspaceReady(ui);
     ensureHelpersBound(ui);
+    captureActiveViewState(ui);
 
     if (!opts.skipSave) {
       await saveActivePage(ui, {
@@ -337,6 +472,7 @@
     ensurePageTab(ui, pageName);
 
     var abs = await resolvePageFileAbs(ui, designRef, pageName);
+    try { ui._activeEnvCtx = null; } catch (envErr) {}
     setActiveContext(ui, designRef, pageName, abs || null);
 
     var exists = await pageExists(abs);
@@ -359,6 +495,8 @@
       if (typeof ui.refreshProjectExplorer === 'function') ui.refreshProjectExplorer();
     } catch (e2) {}
 
+    activateDrawingWorkspace(ui);
+    restoreViewState(ui, makeViewStateKey(designRef, pageName, abs || ''));
     syncLayersDialogForPage(ui, designRef);
 
     return {
@@ -412,6 +550,7 @@
   NS.readPageXml = readPageXml;
   NS.getActiveContext = getActiveContext;
   NS.getActivePageName = getActivePageName;
+  NS.captureActiveViewState = captureActiveViewState;
   NS.setActiveContext = setActiveContext;
   NS.saveActivePage = saveActivePage;
   NS.openPage = openPage;

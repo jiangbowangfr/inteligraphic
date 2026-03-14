@@ -32,6 +32,80 @@ function _getProjectStorageRoot(ui) {
     return cleanRoot ? _joinPath(cleanRoot, 'db') : '';
 }
 
+function _getViewStateStore(ui) {
+    if (!ui) return null;
+    if (!ui._dftPageViewState) ui._dftPageViewState = {};
+    return ui._dftPageViewState;
+}
+
+function _makeViewStateKey(designRef, pageName, absPath) {
+    const abs = String(absPath || '').trim();
+    if (abs) return 'abs:' + abs;
+    const segs = Array.isArray(designRef && designRef._dirRel) ? designRef._dirRel.join('/') : '';
+    return 'rel:' + segs + '::' + String(pageName || '').trim();
+}
+
+function _captureViewState(ui, key) {
+    if (!ui || !key || !ui.editor || !ui.editor.graph) return;
+    const graph = ui.editor.graph;
+    const container = graph.container;
+    const view = graph.view;
+    const store = _getViewStateStore(ui);
+    if (!container || !view || !store) return;
+    store[key] = {
+        scale: Number(view.scale || 1),
+        tx: Number(view.translate ? view.translate.x : 0),
+        ty: Number(view.translate ? view.translate.y : 0),
+        scrollLeft: Number(container.scrollLeft || 0),
+        scrollTop: Number(container.scrollTop || 0)
+    };
+}
+
+function _captureActiveViewState(ui) {
+    if (ui && ui._activeEnvCtx) return;
+    const ctx = ui && ui._activeProjectPageCtx;
+    if (!ctx || !ctx.name) return;
+    _captureViewState(ui, _makeViewStateKey(ctx.designRef || null, ctx.name, ctx.abs || ''));
+}
+
+function _restoreViewState(ui, key) {
+    if (!ui || !key || !ui.editor || !ui.editor.graph) return false;
+    const graph = ui.editor.graph;
+    const container = graph.container;
+    const view = graph.view;
+    const store = _getViewStateStore(ui);
+    const state = store && store[key];
+    if (!container || !view || !state) return false;
+    try {
+        if (view.translate) {
+            view.translate.x = Number(state.tx || 0);
+            view.translate.y = Number(state.ty || 0);
+        }
+        view.scale = Number(state.scale || 1);
+        if (typeof graph.view.validate === 'function') graph.view.validate();
+        if (typeof graph.sizeDidChange === 'function') graph.sizeDidChange();
+        if (typeof graph.refresh === 'function') graph.refresh();
+        container.scrollLeft = Number(state.scrollLeft || 0);
+        container.scrollTop = Number(state.scrollTop || 0);
+    } catch (_) { }
+    [0, 30, 120].forEach(function (delay) {
+        setTimeout(function () {
+            try {
+                if (view.translate) {
+                    view.translate.x = Number(state.tx || 0);
+                    view.translate.y = Number(state.ty || 0);
+                }
+                view.scale = Number(state.scale || 1);
+                if (typeof graph.view.validate === 'function') graph.view.validate();
+                if (typeof graph.sizeDidChange === 'function') graph.sizeDidChange();
+                container.scrollLeft = Number(state.scrollLeft || 0);
+                container.scrollTop = Number(state.scrollTop || 0);
+            } catch (_) { }
+        }, delay);
+    });
+    return true;
+}
+
 function _isFloorplanDesignRef(designRef) {
     if (!designRef) return false;
     if (designRef._isFloorplan) return true;
@@ -50,6 +124,43 @@ function _syncLayersDialogForPage(ui, designRef) {
     }, 0);
 }
 
+function _activateDrawingWorkspace(ui) {
+    var shell = ui && ui._phase1 && ui._phase1.workspaceShell ? ui._phase1.workspaceShell : document;
+    var body = ui && ui._phase1 && ui._phase1.workspaceBody
+        ? ui._phase1.workspaceBody
+        : shell.querySelector('.phase1-workspace-body');
+    var tabstrip = shell.querySelector('.phase1-workspace-tabstrip');
+    if (!body || !tabstrip) return;
+
+    Array.prototype.forEach.call(tabstrip.querySelectorAll('.phase1-tab[data-key]'), function (tab) {
+        tab.classList.toggle('active', tab.getAttribute('data-key') === 'design');
+    });
+    Array.prototype.forEach.call(body.querySelectorAll('.phase1-workspace-embed-panel[data-key]'), function (panel) {
+        panel.classList.remove('active');
+    });
+    Array.prototype.forEach.call(body.children || [], function (child) {
+        if (!child || child.getAttribute('data-dft-workspace-panel') === '1') return;
+        if (!child.hasAttribute('data-dft-display-before-embed')) {
+            child.setAttribute('data-dft-display-before-embed', child.style.display || '');
+        }
+        child.style.display = child.getAttribute('data-dft-display-before-embed');
+    });
+
+    try {
+        var graph = ui && ui.editor ? ui.editor.graph : null;
+        if (graph && graph.container) {
+            graph.container.style.pointerEvents = 'auto';
+            graph.container.offsetWidth;
+            if (graph.view && typeof graph.view.validate === 'function') graph.view.validate();
+            if (typeof graph.sizeDidChange === 'function') graph.sizeDidChange();
+        }
+        if (typeof ui.refresh === 'function') ui.refresh();
+        if (window && typeof window.dispatchEvent === 'function' && typeof Event === 'function') {
+            window.dispatchEvent(new Event('resize'));
+        }
+    } catch (_) { }
+}
+
 function _pageDirPath(ui, designRef) {
     const root = _getProjectStorageRoot(ui);
     const segs = (designRef && designRef._dirRel) ||
@@ -61,6 +172,7 @@ function _setActivePageCtx(ui, designRef, name, absOpt) {
     ui._activeProjectPageCtx = {
         name,
         segs: (designRef._dirRel && designRef._dirRel.slice()) || [_sanitizeFileName(designRef.name || 'design')],
+        designRef: designRef || null,
         ...(absOpt ? { abs: absOpt } : {})
     };
 }
@@ -68,6 +180,7 @@ function _setActivePageCtx(ui, designRef, name, absOpt) {
 //“选中并加载”的工具，供删除/重命名后跳页用
 async function _selectAndLoadPage(ui, designRef, pageName) {
     if (!pageName) return;
+    _captureActiveViewState(ui);
     // 1) 确保有页签
     let pg = (ui.pages || []).find(p => (p.getName?.() || p.name) === pageName);
     if (!pg && typeof ui.duplicatePage === 'function') {
@@ -86,6 +199,7 @@ async function _selectAndLoadPage(ui, designRef, pageName) {
 
     // 2) 读取并加载
     const abs = await _resolvePageFileAbs(ui, designRef, pageName);
+    try { ui._activeEnvCtx = null; } catch (_) { }
     _setActivePageCtx(ui, designRef, pageName, abs);
 
     let exists = true;
@@ -94,6 +208,8 @@ async function _selectAndLoadPage(ui, designRef, pageName) {
 
     const xml = await requestSync({ action: 'readFile', filename: abs, encoding: 'utf-8' });
     await _loadPageXmlToCurrent(ui, xml);
+    _activateDrawingWorkspace(ui);
+    _restoreViewState(ui, _makeViewStateKey(designRef, pageName, abs));
     _syncLayersDialogForPage(ui, designRef);
 
     // 3) 同步页签标题（防复制默认名）
