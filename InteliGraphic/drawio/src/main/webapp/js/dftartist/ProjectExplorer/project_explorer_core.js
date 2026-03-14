@@ -1322,12 +1322,7 @@
   }
 
   function getAddDesignParent(ui) {
-    var state = getState(ui);
-    var selectedKey = text(state.selectedKey || '');
-    var model = ensureModel(ui);
-    if (!selectedKey || selectedKey === 'project:root') return null;
-    var found = findOwningDesignBySelectedKey(model.designs, selectedKey);
-    return found && !isFloorplanDesign(found) && !isIpconfigDesign(found) ? found : null;
+    return null;
   }
 
   function collectCopyableDesigns(list, out, prefix) {
