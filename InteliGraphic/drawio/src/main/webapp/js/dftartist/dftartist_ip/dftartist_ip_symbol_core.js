@@ -17,8 +17,8 @@
         pinStub: 26,
         labelGap: 8,
         instanceGap: 10,
-        minBodyWidth: 120,
-        minBodyHeight: 56,
+        minBodyWidth: 40,
+        minBodyHeight: 20,
         minScale: 0.25,
         maxScale: 3
     };
@@ -27,6 +27,21 @@
     function trim(v) { return toStr(v).replace(/^\s+|\s+$/g, ''); }
     function clone(v) { return v ? JSON.parse(JSON.stringify(v)) : v; }
     function clamp(v, a, b) { v = Number(v); if (isNaN(v)) v = a; return Math.max(a, Math.min(b, v)); }
+    function gridSize(graph) {
+        var size = Number(graph && graph.gridSize);
+        if (!isFinite(size) || size <= 0) size = 10;
+        return Math.max(1, Math.round(size));
+    }
+    function regularMinSize(graph) {
+        var g = gridSize(graph);
+        return { minW: g * 4, minH: g * 2 };
+    }
+    function snapValue(graph, value) {
+        var n = Number(value);
+        if (!isFinite(n)) n = 0;
+        var g = gridSize(graph);
+        return Math.round(n / g) * g;
+    }
     function encodeModel(model) {
         try { return encodeURIComponent(JSON.stringify(model || {})); } catch (e) { return ''; }
     }
@@ -130,6 +145,8 @@
             version: '3',
             title: trim(model.title || model.label || model.moduleName || 'IP'),
             instanceName: trim(model.instanceName || ''),
+            showInstance: model.showInstance !== false,
+            lockBodyLabel: !!model.lockBodyLabel,
             dftsType: trim(model.dftsType || ''),
             category: trim(model.category || ''),
             rounded: Number(model.rounded || 0),
@@ -165,23 +182,99 @@
     }
     function getModel(body) {
         if (!body) return null;
-        if (body.__dftsSymbolModel) return body.__dftsSymbolModel;
+        if (body.__dftsSymbolModel) {
+            body.__dftsSymbolModel = recoverModelFromBody(body, body.__dftsSymbolModel);
+            syncEncodedModelStyle(body, body.__dftsSymbolModel);
+            return body.__dftsSymbolModel;
+        }
         var encoded = readStyleValue(body.style || '', 'dftsIP_symbolModel');
-        if (!encoded) return null;
+        if (!encoded) {
+            if (readStyleValue(body.style || '', 'dftsIP_symbol') !== '1') return null;
+            body.__dftsSymbolModel = recoverModelFromBody(body, {});
+            syncEncodedModelStyle(body, body.__dftsSymbolModel);
+            return body.__dftsSymbolModel;
+        }
         var parsed = decodeModel(encoded);
-        if (parsed) body.__dftsSymbolModel = parsed;
-        return parsed;
+        if (parsed) {
+            body.__dftsSymbolModel = recoverModelFromBody(body, parsed);
+            syncEncodedModelStyle(body, body.__dftsSymbolModel);
+            return body.__dftsSymbolModel;
+        }
+        return null;
     }
     function setModel(body, model) {
         if (!body) return null;
-        body.__dftsSymbolModel = normalizeModel(model);
+        body.__dftsSymbolModel = recoverModelFromBody(body, normalizeModel(model));
+        syncEncodedModelStyle(body, body.__dftsSymbolModel);
         return body.__dftsSymbolModel;
     }
 
-    function groupVisiblePins(model) {
+    function readManagedChildText(body, kind) {
+        var children = body && body.children;
+        if (!children || !children.length) return '';
+        for (var i = 0; i < children.length; i++) {
+            var child = children[i];
+            if (!child) continue;
+            if (child.__dftsSymbolKind !== kind) continue;
+            var value = trim(child.value);
+            if (value) return value;
+        }
+        return '';
+    }
+
+    function syncEncodedModelStyle(body, model) {
+        if (!body || !model) return;
+        var style = toStr(body.style || '');
+        var encoded = encodeModel(model);
+        if (typeof mxUtils !== 'undefined' && mxUtils.setStyle) {
+            style = mxUtils.setStyle(style, 'dftsIP_symbolModel', encoded);
+            style = mxUtils.setStyle(style, 'dftsIP_lockBodyLabel', model.lockBodyLabel ? '1' : '0');
+        }
+        body.style = style;
+    }
+
+    function recoverModelFromBody(body, model) {
+        var normalized = normalizeModel(model);
+        if (!body) return normalized;
+
+        var titleText = readManagedChildText(body, 'title');
+        var instanceText = readManagedChildText(body, 'instance');
+
+        if ((!trim(normalized.title) || trim(normalized.title) === 'IP') && titleText) {
+            normalized.title = titleText;
+        }
+
+        if (!trim(normalized.instanceName) && instanceText) {
+            normalized.instanceName = instanceText;
+        }
+
+        var styleRotation = normalizeRotation(readStyleValue(body.style || '', 'rotation'));
+        var orientRotation = normalizeRotation(readStyleValue(body.style || '', 'dftsIP_orient'));
+        var currentRotation = normalizeRotation(normalized.transform && normalized.transform.rotation);
+        var resolvedRotation = styleRotation || orientRotation || currentRotation;
+
+        if (!normalized.transform) normalized.transform = {};
+        normalized.transform.rotation = resolvedRotation;
+
+        return normalized;
+    }
+
+    function normalizeRotation(rotation) {
+        rotation = Number(rotation) || 0;
+        rotation = rotation % 360;
+        if (rotation < 0) rotation += 360;
+        return rotation;
+    }
+
+    function titleTextRotation(model, verticalTitle) {
+        var bodyRotation = normalizeRotation(model && model.transform && model.transform.rotation);
+        return normalizeRotation(bodyRotation + (verticalTitle ? 90 : 0));
+    }
+
+    function groupPins(model, includeHidden) {
         var grouped = { west: [], east: [], north: [], south: [] };
         (model.pins || []).forEach(function (pin) {
-            if (pin.visible === false) return;
+            if (!includeHidden && pin.visible === false) return;
             grouped[normalizeSide(pin.side)].push(pin);
         });
         ['west', 'east', 'north', 'south'].forEach(function (side) {
@@ -196,22 +289,25 @@
 
     function computeNaturalMetrics(model) {
         model = normalizeModel(model);
-        var grouped = groupVisiblePins(model);
+        var grouped = groupPins(model, true);
+        var visibleGrouped = groupPins(model, false);
         var l = model.layout;
-        var rows = Math.max(grouped.west.length, grouped.east.length, 1);
+        var sizingGrouped = hasVisiblePins(model) ? visibleGrouped : { west: [], east: [], north: [], south: [] };
+        var rows = Math.max(sizingGrouped.west.length, sizingGrouped.east.length, 1);
 
         var maxWestLabel = 0, maxEastLabel = 0, maxNorthLabel = 0, maxSouthLabel = 0;
         if (!model.hidePinLabels) {
-            grouped.west.forEach(function (p) { maxWestLabel = Math.max(maxWestLabel, estimateTextWidth(pinText(p), l.fontSize)); });
-            grouped.east.forEach(function (p) { maxEastLabel = Math.max(maxEastLabel, estimateTextWidth(pinText(p), l.fontSize)); });
+            visibleGrouped.west.forEach(function (p) { maxWestLabel = Math.max(maxWestLabel, estimateTextWidth(pinText(p), l.fontSize)); });
+            visibleGrouped.east.forEach(function (p) { maxEastLabel = Math.max(maxEastLabel, estimateTextWidth(pinText(p), l.fontSize)); });
         }
-        grouped.north.forEach(function (p) { maxNorthLabel = Math.max(maxNorthLabel, estimateTextWidth(pinText(p), l.fontSize)); });
-        grouped.south.forEach(function (p) { maxSouthLabel = Math.max(maxSouthLabel, estimateTextWidth(pinText(p), l.fontSize)); });
+        visibleGrouped.north.forEach(function (p) { maxNorthLabel = Math.max(maxNorthLabel, estimateTextWidth(pinText(p), l.fontSize)); });
+        visibleGrouped.south.forEach(function (p) { maxSouthLabel = Math.max(maxSouthLabel, estimateTextWidth(pinText(p), l.fontSize)); });
 
         var titleW = estimateTextWidth(model.title, l.titleFontSize);
         var titleH = Math.ceil(l.titleFontSize * 1.2);
-        var leftTextW = (!model.hidePinLabels && grouped.west.length) ? maxWestLabel : 0;
-        var rightTextW = (!model.hidePinLabels && grouped.east.length) ? maxEastLabel : 0;
+        var instanceH = model.showInstance !== false && model.instanceName ? Math.ceil(l.instanceFontSize * 1.2) : 0;
+        var leftTextW = (!model.hidePinLabels && visibleGrouped.west.length) ? maxWestLabel : 0;
+        var rightTextW = (!model.hidePinLabels && visibleGrouped.east.length) ? maxEastLabel : 0;
         var leftColW = leftTextW > 0 ? (l.labelGap + leftTextW + 4) : 0;
         var rightColW = rightTextW > 0 ? (l.labelGap + rightTextW + 4) : 0;
         var centerMinW = Math.max(56, Math.min(titleW + l.titlePadding * 2, Math.max(56, Math.ceil(titleW * 0.62))));
@@ -219,10 +315,10 @@
         var naturalW = Math.max(
             l.minBodyWidth,
             l.bodyPaddingX * 2 + leftColW + centerMinW + rightColW,
-            92 + Math.max(grouped.north.length, grouped.south.length) * Math.max(20, Math.ceil(l.fontSize * 0.82))
+            92 + Math.max(sizingGrouped.north.length, sizingGrouped.south.length) * Math.max(20, Math.ceil(l.fontSize * 0.82))
         );
 
-        var rowH = Math.max(titleH + l.titlePadding * 2, rows * l.pinRowPitch);
+        var rowH = Math.max(titleH + l.titlePadding * 2 + (instanceH > 0 ? (l.instanceGap + instanceH) : 0), rows * l.pinRowPitch);
         var naturalH = Math.max(
             l.minBodyHeight,
             l.bodyPaddingY * 2 + rowH
@@ -230,6 +326,7 @@
 
         return {
             grouped: grouped,
+            visibleGrouped: visibleGrouped,
             naturalW: Math.ceil(naturalW),
             naturalH: Math.ceil(naturalH),
             maxWestLabel: maxWestLabel,
@@ -264,11 +361,11 @@
 
         var maxWestLabel = 0, maxEastLabel = 0;
         if (!model.hidePinLabels) {
-            metrics.grouped.west.forEach(function (p) { maxWestLabel = Math.max(maxWestLabel, estimateTextWidth(pinText(p), fontSize)); });
-            metrics.grouped.east.forEach(function (p) { maxEastLabel = Math.max(maxEastLabel, estimateTextWidth(pinText(p), fontSize)); });
+            metrics.visibleGrouped.west.forEach(function (p) { maxWestLabel = Math.max(maxWestLabel, estimateTextWidth(pinText(p), fontSize)); });
+            metrics.visibleGrouped.east.forEach(function (p) { maxEastLabel = Math.max(maxEastLabel, estimateTextWidth(pinText(p), fontSize)); });
         }
-        var leftTextW = (!model.hidePinLabels && metrics.grouped.west.length) ? maxWestLabel : 0;
-        var rightTextW = (!model.hidePinLabels && metrics.grouped.east.length) ? maxEastLabel : 0;
+        var leftTextW = (!model.hidePinLabels && metrics.visibleGrouped.west.length) ? maxWestLabel : 0;
+        var rightTextW = (!model.hidePinLabels && metrics.visibleGrouped.east.length) ? maxEastLabel : 0;
         var leftColW = leftTextW > 0 ? (labelGap + leftTextW + 2) : 0;
         var rightColW = rightTextW > 0 ? (labelGap + rightTextW + 2) : 0;
 
@@ -296,14 +393,27 @@
         var horizMaxByH = Math.max(1, Math.floor((Math.max(8, availH) - 4) / 1.2));
         var horizFont = Math.max(1, Math.min(titleFontSize, horizMaxByW, horizMaxByH));
         var vertMaxByH = Math.max(1, Math.floor((Math.max(8, availH) - 4) / Math.max(titleChars * 0.58, 1)));
-        var vertMaxByW = Math.max(1, Math.floor((Math.max(8, centerW) - 4) / 1.2));
+        var vertMaxByW = Math.max(1, Math.floor((Math.max(8, centerW) - 2) / 1.02));
         var vertFont = Math.max(1, Math.min(titleFontSize, vertMaxByH, vertMaxByW));
-        var verticalTitle = (horizFont < Math.max(3, Math.floor(titleFontSize * 0.55)) && vertFont >= horizFont) || (bodyH2 > bodyW2 * 1.18 && centerW < Math.max(40, bodyW2 * 0.42));
-        var titleFontSizeEff = verticalTitle ? vertFont : horizFont;
+        var verticalTitle = bodyH2 > bodyW2 * 1.16;
+        if (model.showInstance !== false && model.instanceName) verticalTitle = false;
+        var verticalMinFont = Math.max(12, Math.floor(Math.max(14, centerW) * 1.02));
+        var verticalTitleCap = Math.max(titleFontSize, Number(l.titleFontSize) || titleFontSize);
+        var titleFontSizeEff = verticalTitle ? Math.min(verticalTitleCap, vertMaxByH, Math.max(vertFont, verticalMinFont)) : horizFont;
         var titleTextW = estimateTextWidth(model.title, titleFontSizeEff);
         var titleTextH = Math.ceil(titleFontSizeEff * 1.2);
         var titleBoxW = verticalTitle ? Math.max(8, Math.min(centerW, Math.ceil(titleTextH * 1.15))) : Math.max(8, Math.min(centerW, titleTextW + 6));
         var titleBoxH = verticalTitle ? Math.max(8, Math.min(availH, titleTextW + 4)) : Math.max(8, Math.min(availH, Math.ceil(titleTextH * 1.15)));
+        var instanceBoxH = model.showInstance !== false && model.instanceName ? Math.max(10, Math.ceil(instanceFontSize * 1.2)) : 0;
+        var titleStackTop = Math.round((bodyH2 - (titleBoxH + (instanceBoxH > 0 ? instanceGap + instanceBoxH : 0))) / 2);
+        if (model.showInstance !== false && model.instanceName) {
+            var availInstanceW = Math.max(12, bodyW2 - bodyPaddingX * 2 - 4);
+            var instanceChars = Math.max(1, trim(model.instanceName).length);
+            var maxInstanceFontByW = Math.max(4, Math.floor(availInstanceW / Math.max(instanceChars * 0.58, 1)));
+            instanceFontSize = Math.max(4, Math.min(instanceFontSize, maxInstanceFontByW));
+            instanceBoxH = Math.max(10, Math.ceil(instanceFontSize * 1.2));
+            titleStackTop = Math.round((bodyH2 - (titleBoxH + instanceGap + instanceBoxH)) / 2);
+        }
 
         var centerLeftX = bodyPaddingX + leftColW;
         var centerRightX = bodyW2 - bodyPaddingX - rightColW;
@@ -347,7 +457,8 @@
             titleBoxW: titleBoxW,
             titleBoxH: titleBoxH,
             instanceFontSize: instanceFontSize,
-            instanceH: model.instanceName ? Math.ceil(instanceFontSize * 1.2) : 0,
+            instanceH: instanceBoxH,
+            titleStackTop: titleStackTop,
             verticalTitle: verticalTitle,
             pinPos: pinPos,
             leftTextW: leftTextW,
@@ -362,27 +473,51 @@
 
     function computeBodyMinSize(graph, body) {
         var model = getModel(body);
-        if (!model) return { minW: 36, minH: 24 };
+        if (!model) {
+            var fallbackMin = regularMinSize(graph);
+            return { minW: fallbackMin.minW, minH: fallbackMin.minH };
+        }
         var layout = computeLayout(model);
-        return { minW: layout.minW, minH: layout.minH };
+        var baseMin = regularMinSize(graph);
+        return {
+            minW: Math.max(baseMin.minW, snapValue(graph, layout.minW)),
+            minH: Math.max(baseMin.minH, snapValue(graph, layout.minH))
+        };
+    }
+
+    function hasVisiblePins(model) {
+        var pins = (model && model.pins) || [];
+        for (var i = 0; i < pins.length; i++) {
+            if (pins[i] && pins[i].visible !== false) return true;
+        }
+        return false;
+    }
+
+    function useNativeBodyConnectionPoints(model) {
+        return !hasVisiblePins(model);
     }
 
     function bodyStyle(model, extra) {
         var encodedModel = encodeModel(model);
+        var nativeBodyConnect = useNativeBodyConnectionPoints(model);
         var parts = [
             'dftsIP_chipBody=1',
             'dftsIP_symbol=1',
             'shape=' + (model.bodyShape || 'rectangle'),
             'html=1',
             'whiteSpace=wrap',
-            'connectable=0',
+            'connectable=' + (nativeBodyConnect ? '1' : '0'),
             'noLabel=1',
             'rounded=' + (model.rounded || 0),
             'strokeWidth=' + (model.strokeWidth != null ? model.strokeWidth : 1),
             'dftsIP_type=' + (model.dftsType || ''),
+            'dftsIP_lockBodyLabel=' + (model.lockBodyLabel ? '1' : '0'),
             'dftsIP_orient=' + (model.transform && model.transform.rotation || 0),
             'dftsIP_symbolModel=' + encodedModel
         ];
+        if (nativeBodyConnect) {
+            parts.push('outlineConnect=1');
+        }
         if (model.bodyExtraStyle) parts.push(model.bodyExtraStyle);
         if (extra) parts.push(extra);
         return parts.join(';') + ';';
@@ -579,25 +714,131 @@
         for (var j = 0; j < drop.length; j++) m.remove(drop[j]);
     }
 
+    function getAllSymbolBodies(graph) {
+        var out = [];
+        if (!graph || !graph.getModel) return out;
+        var model = graph.getModel();
+        var seen = {};
+
+        function walk(cell) {
+            if (!cell) return;
+            if (isSymbolBody(cell)) {
+                var id = cell.id || mxObjectIdentity.get(cell);
+                if (!seen[id]) {
+                    seen[id] = true;
+                    out.push(cell);
+                }
+            }
+            var count = model.getChildCount(cell);
+            for (var i = 0; i < count; i++) walk(model.getChildAt(cell, i));
+        }
+
+        walk(model.getRoot());
+        return out;
+    }
+
     function allocateInstanceName(graph, base) {
         base = trim(base || 'ip').replace(/\n/g, ' ').replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'ip';
         var maxIdx = 0;
-        var bodies = (NS.getAllChipBodies && graph) ? NS.getAllChipBodies(graph) : [];
+        var bodies = getAllSymbolBodies(graph);
         var re = new RegExp('^' + escRe(base) + '_inst_(\\d+)$', 'i');
         for (var i = 0; i < bodies.length; i++) {
             var b = bodies[i];
             var name = '';
-            if (isSymbolBody(b)) {
-                var sm = getModel(b);
-                name = sm && sm.instanceName || '';
-            } else if (NS.findInstanceLabelCell) {
-                var inst = NS.findInstanceLabelCell(graph, b);
-                name = inst && inst.value || '';
-            }
+            var sm = getModel(b);
+            name = sm && sm.instanceName || '';
             var m = re.exec(trim(name));
             if (m) maxIdx = Math.max(maxIdx, parseInt(m[1], 10) || 0);
         }
         return base + '_inst_' + (maxIdx + 1);
+    }
+
+    function hasDuplicateInstanceName(graph, body, name) {
+        name = trim(name);
+        if (!name) return false;
+        var bodies = getAllSymbolBodies(graph);
+        for (var i = 0; i < bodies.length; i++) {
+            var other = bodies[i];
+            if (!other || other === body) continue;
+            var sm = getModel(other);
+            var otherName = sm && trim(sm.instanceName || '');
+            if (otherName === name) return true;
+        }
+        return false;
+    }
+
+    function inferInstanceBaseName(body, model) {
+        var preferred = trim(model && model.instanceName || '');
+        var m = /^(.*)_inst_(\d+)$/i.exec(preferred);
+        if (m && trim(m[1])) return trim(m[1]);
+        return trim(model && model.title || readStyleValue(body && body.style || '', 'dftsIP_type') || 'ip');
+    }
+
+    function ensureUniqueBodyInstanceName(graph, body) {
+        if (!graph || !body || !isSymbolBody(body)) return false;
+        var model = getModel(body);
+        if (!model) return false;
+        var current = trim(model.instanceName || '');
+        if (!current) return false;
+        if (!hasDuplicateInstanceName(graph, body, current)) return false;
+
+        var next = allocateInstanceName(graph, inferInstanceBaseName(body, model));
+        if (!next || next === current) return false;
+
+        var updated = clone(model) || {};
+        updated.instanceName = next;
+        setModel(body, updated);
+        relayout(graph, body);
+        return true;
+    }
+
+    function uniqueSymbolBodiesFromCells(graph, cells) {
+        var out = [];
+        var seen = {};
+        var model = graph && graph.getModel ? graph.getModel() : null;
+
+        function pushBody(cell) {
+            if (!cell) return;
+            var body = isSymbolBody(cell) ? cell : null;
+            if (!body && model && model.getParent) {
+                var parent = model.getParent(cell);
+                if (isSymbolBody(parent)) body = parent;
+            }
+            if (!body) return;
+            var id = body.id || mxObjectIdentity.get(body);
+            if (seen[id]) return;
+            seen[id] = true;
+            out.push(body);
+        }
+
+        for (var i = 0; i < (cells || []).length; i++) pushBody(cells[i]);
+        return out;
+    }
+
+    function ensureUniqueInstanceNamesForCells(graph, cells) {
+        var bodies = uniqueSymbolBodiesFromCells(graph, cells);
+        for (var i = 0; i < bodies.length; i++) {
+            ensureUniqueBodyInstanceName(graph, bodies[i]);
+        }
+        return bodies;
+    }
+
+    function scheduleEnsureUniqueInstanceNamesForCells(graph, cells, reason) {
+        var bodies = uniqueSymbolBodiesFromCells(graph, cells);
+        if (!bodies.length || typeof global.setTimeout !== 'function') return;
+        var ids = [];
+        for (var i = 0; i < bodies.length; i++) ids.push(bodies[i].id || mxObjectIdentity.get(bodies[i]));
+        global.setTimeout(function () {
+            try {
+                var model = graph && graph.getModel ? graph.getModel() : null;
+                var liveBodies = [];
+                for (var j = 0; j < ids.length; j++) {
+                    var body = model && model.getCell ? model.getCell(ids[j]) : null;
+                    if (isSymbolBody(body)) liveBodies.push(body);
+                }
+                ensureUniqueInstanceNamesForCells(graph, liveBodies);
+            } catch (e) { }
+        }, 0);
     }
 
 
@@ -807,18 +1048,19 @@
                 'dftsIP_symbolScale=' + layout.scale,
                 'rotation=' + (model.transform && model.transform.rotation || 0)
             ].join(';')));
+            body.connectable = useNativeBodyConnectionPoints(model);
             if (toStr(body.value) !== '') m.setValue(body, '');
 
             var valid = {};
 
-            var titleCell = ensureChild(graph, body, 'title', '', textStyle(layout.titleFontSize, 'center', true, layout.verticalTitle ? 90 : 0, 'visible'), model.title);
+            var titleCell = ensureChild(graph, body, 'title', '', textStyle(layout.titleFontSize, 'center', true, titleTextRotation(model, layout.verticalTitle), 'visible'), model.title);
             titleCell.connectable = false;
             titleCell.visible = !!model.title;
             valid['title:'] = true;
             var titleShiftX = getLogicGateTitleShiftX(model, layout);
             var titleGeo = new mxGeometry(
                 Math.round(layout.centerLeftX + (layout.centerW - layout.titleBoxW) / 2 + titleShiftX),
-                Math.round((layout.bodyH - layout.titleBoxH) / 2),
+                layout.titleStackTop,
                 Math.max(12, layout.titleBoxW),
                 Math.max(12, layout.titleBoxH)
             );
@@ -827,9 +1069,14 @@
 
             var instanceCell = ensureChild(graph, body, 'instance', '', textStyle(layout.instanceFontSize, 'center', false, 0, 'visible'), model.instanceName || '');
             instanceCell.connectable = false;
-            instanceCell.visible = !!model.instanceName;
+            instanceCell.visible = model.showInstance !== false && !!model.instanceName;
             valid['instance:'] = true;
-            var instanceGeo = new mxGeometry(0, layout.bodyH + layout.instanceGap, layout.bodyW, Math.max(10, layout.instanceH || Math.ceil(layout.instanceFontSize * 1.2)));
+            var instanceGeo = new mxGeometry(
+                layout.bodyPaddingX,
+                layout.titleStackTop + layout.titleBoxH + layout.instanceGap,
+                Math.max(12, layout.bodyW - layout.bodyPaddingX * 2),
+                Math.max(10, layout.instanceH || Math.ceil(layout.instanceFontSize * 1.2))
+            );
             instanceGeo.relative = false;
             m.setGeometry(instanceCell, instanceGeo);
 
@@ -854,7 +1101,7 @@
                 valid['stub:' + pin.key] = true;
                 valid['port:' + pin.key] = true;
                 valid['label:' + pin.key] = true;
-                if (!shown) return;
+                if (!pos) return;
 
                 var sg = new mxGeometry(); sg.relative = false;
                 var pg = new mxGeometry(); pg.relative = false;
@@ -955,6 +1202,7 @@
 
     function buildModelFromDefinition(graph, def, runtimeOpt) {
         runtimeOpt = runtimeOpt || {};
+        var baseMin = regularMinSize(graph);
         var title = trim(runtimeOpt.resolvedBodyLabel || runtimeOpt.label || def.defaultLabel || def.key || 'IP');
         var instanceName = trim(runtimeOpt.instanceName || '');
         var instancePolicy = def.instancePolicy || (NS.POLICY && NS.POLICY.INSTANCE_REQUIRED) || 'required';
@@ -973,8 +1221,8 @@
                 fontSize: runtimeOpt.pinFont || def.pinFont || DEFAULTS.fontSize,
                 titleFontSize: runtimeOpt.bodyFont || def.bodyFont || DEFAULTS.titleFontSize,
                 instanceFontSize: Math.max(8, Math.round((runtimeOpt.pinFont || def.pinFont || DEFAULTS.fontSize) * 0.9)),
-                minBodyWidth: Math.max(DEFAULTS.minBodyWidth, Number((runtimeOpt.symbolMinW || 0)) || 0),
-                minBodyHeight: Math.max(DEFAULTS.minBodyHeight, Number((runtimeOpt.symbolMinH || 0)) || 0)
+                minBodyWidth: Math.max(baseMin.minW, Number((runtimeOpt.symbolMinW || 0)) || 0),
+                minBodyHeight: Math.max(baseMin.minH, Number((runtimeOpt.symbolMinH || 0)) || 0)
             },
             pins: extractPinsFromDefinition(def, Object.assign({}, runtimeOpt, { resolvedBodyLabel: title }))
         });
@@ -1003,6 +1251,12 @@
             model = normalizeModel(mergedInput);
         }
 
+        if (runtimeOpt.defaultHidePins !== false && model.category !== 'logic_gate' && model.bodyShape !== 'dftsLogicGate' && Array.isArray(model.pins)) {
+            model.pins.forEach(function (pin) {
+                pin.visible = false;
+            });
+        }
+
         return model;
     }
 
@@ -1012,10 +1266,21 @@
 
         var model = buildModelFromDefinition(graph, def, runtimeOpt);
         var natural = computeNaturalMetrics(model);
+        var baseMin = regularMinSize(graph);
         var defW = Number(def && def.w || 0) || 0;
         var defH = Number(def && def.h || 0) || 0;
-        var w = runtimeOpt.w != null ? Math.max(36, Number(runtimeOpt.w) || natural.naturalW) : Math.max(36, Math.ceil(natural.naturalW * 0.92), defW > 0 ? Math.min(defW, Math.ceil(natural.naturalW * 1.05)) : 0);
-        var h = runtimeOpt.h != null ? Math.max(24, Number(runtimeOpt.h) || natural.naturalH) : Math.max(24, Math.ceil(natural.naturalH * 0.92), defH > 0 ? Math.min(defH, Math.ceil(natural.naturalH * 1.05)) : 0);
+        var useDefSize = !!(def && def.useDefSize);
+        var desiredW = runtimeOpt.w != null
+            ? (Number(runtimeOpt.w) || natural.naturalW)
+            : (useDefSize && defW > 0 ? defW : natural.naturalW);
+        var desiredH = runtimeOpt.h != null
+            ? (Number(runtimeOpt.h) || natural.naturalH)
+            : (useDefSize && defH > 0 ? defH : natural.naturalH);
+        var minSize = computeLayout(model, desiredW, desiredH);
+        var w = Math.max(baseMin.minW, desiredW, minSize.minW);
+        var h = Math.max(baseMin.minH, desiredH, minSize.minH);
+        w = Math.max(gridSize(graph), snapValue(graph, w));
+        h = Math.max(gridSize(graph), snapValue(graph, h));
 
         var body = new mxCell(
             '',
@@ -1150,6 +1415,42 @@
                 if (isSymbolBody(cells[i])) relayout(graph, cells[i]);
             }
         });
+
+        graph.addListener(mxEvent.CELLS_ADDED, function (sender, evt) {
+            var cells = evt.getProperty('cells') || [];
+            try {
+                if (typeof NS.snapChipBodiesForCells === 'function') NS.snapChipBodiesForCells(graph, cells);
+            } catch (e) { }
+            ensureUniqueInstanceNamesForCells(graph, cells);
+            scheduleEnsureUniqueInstanceNamesForCells(graph, cells, 'cellsAdded');
+        });
+
+        if (!graph.__dftsSymbolImportCellsPatched && typeof graph.importCells === 'function') {
+            graph.__dftsSymbolImportCellsPatched = true;
+            var baseImportCells = graph.importCells;
+            graph.importCells = function () {
+                var ret = baseImportCells.apply(this, arguments);
+                try {
+                    if (typeof NS.snapChipBodiesForCells === 'function') NS.snapChipBodiesForCells(graph, ret || []);
+                    ensureUniqueInstanceNamesForCells(graph, ret || []);
+                    scheduleEnsureUniqueInstanceNamesForCells(graph, ret || [], 'importCells');
+                } catch (e) { }
+                return ret;
+            };
+        }
+
+        if (!graph.__dftsSymbolDuplicateCellsPatched && typeof graph.duplicateCells === 'function') {
+            graph.__dftsSymbolDuplicateCellsPatched = true;
+            var baseDuplicateCells = graph.duplicateCells;
+            graph.duplicateCells = function () {
+                var ret = baseDuplicateCells.apply(this, arguments);
+                try {
+                    ensureUniqueInstanceNamesForCells(graph, ret || []);
+                    scheduleEnsureUniqueInstanceNamesForCells(graph, ret || [], 'duplicateCells');
+                } catch (e) { }
+                return ret;
+            };
+        }
 
         if (graph.connectionHandler && !graph.__dftsSymbolPortEdgePatchInstalled) {
             graph.__dftsSymbolPortEdgePatchInstalled = true;

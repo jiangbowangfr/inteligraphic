@@ -1,0 +1,17 @@
+import "./edt/entry";
+import "./occ/entry";
+import "./ssn_bus_frequency_divider/entry";
+import "./ssn_bus_frequency_multiplier/entry";
+import "./ssn_fifo/entry";
+import "./ssn_multiplexer/entry";
+import "./ssn_output_pipeline/entry";
+import "./ssn_pipeline/entry";
+import "./ssn_receiver1x_pipeline/entry";
+import "./ssn_scanhost/entry";
+import "./third_party_ip/entry";
+import "./interface/entry";
+import "./logic_gates/entry";
+import "./data_source/entry";
+import "./floorplan_module/entry";
+import "./in_system_test/entry";
+import "./memory_bisr/entry";

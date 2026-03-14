@@ -15,7 +15,8 @@
     '.phase2-project-search,.dftctx-search{height:28px !important;font-size:12px !important;}' +
     '.phase2-project-btn,.dftctx-btn,.dftctx-iconbtn{height:28px !important;min-width:28px !important;font-size:12px !important;}' +
     '.phase2-project-tab,.dftctx-tab{font-size:12px !important;}' +
-    '.phase2-node,.dftctx-ip-item{min-height:32px !important;}' +
+    '.phase2-node{min-height:32px !important;}' +
+    '.dftctx-ip-item{min-height:26px !important;}' +
     '.phase2-section-title,.dftctx-hint,.dftctx-ip-preview-desc,.dftctx-ip-tooltip-desc{font-size:11px !important;}' +
     '.phase2-project-host,.dftctx-root{font-size:12px !important;}' +
     '';

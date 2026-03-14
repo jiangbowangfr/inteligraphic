@@ -1,0 +1,30 @@
+{
+  "name": "dftspec-plugin",
+  "version": "1.0.0",
+  "main": "index.js",
+"scripts": {
+    "dev": "vite",
+    "build:drawio:edt": "APP=edt vite build -c vite.drawio.config.ts",
+    "build": "vite build -c vite.drawio.config.ts"
+},
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@ant-design/cssinjs": "^1.24.0",
+    "@ant-design/icons": "^6.1.0",
+    "antd": "^5.27.4",
+    "dayjs": "^1.11.18",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.0.4",
+    "fast-glob": "^3.3.3",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.9"
+  }
+}

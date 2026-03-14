@@ -14,6 +14,22 @@
     return text(name).replace(/[\\/:*?"<>|]+/g, '_').trim() || 'page';
   }
 
+  function isFloorplanRef(designRef) {
+    if (!designRef) return false;
+    if (designRef._isFloorplan) return true;
+    if (text(designRef.name).trim().toLowerCase() === 'floorplan') return true;
+    var segs = Array.isArray(designRef._dirRel) ? designRef._dirRel.join('/').toLowerCase() : '';
+    return segs === 'floorplan' || /(^|\/)floorplan$/.test(segs);
+  }
+
+  function getProjectStorageRoot(ui) {
+    var dbRoot = ui && ui._projectDbDirPath ? String(ui._projectDbDirPath) : '';
+    if (dbRoot) return dbRoot.replace(/\\/g, '/').replace(/\/+/g, '/');
+    var root = ui && (ui._projectRootPath || ui._projectYamlDir) ? String(ui._projectRootPath || ui._projectYamlDir) : '';
+    root = root.replace(/\\/g, '/').replace(/\/+/g, '/');
+    return root ? joinPath(root, 'db') : '';
+  }
+
   function joinPath() {
     if (typeof global._joinPath === 'function') {
       try { return global._joinPath.apply(global, arguments); } catch (e) {}
@@ -188,10 +204,10 @@
     }
 
     if (!ui) throw new Error('UI not ready');
-    var root = ui._projectRootPath || ui._projectYamlDir;
+    var root = getProjectStorageRoot(ui);
     if (!root) throw new Error('Please save project first.');
 
-    if (designRef && designRef._isFloorplan) {
+    if (isFloorplanRef(designRef)) {
       var floorplanDir = joinPath(root, 'floorplan');
       try { await request({ action: 'ensureDirs', path: floorplanDir }); } catch (e0) {}
       return joinPath(floorplanDir, sanitizeName(pageName) + '.dftart');

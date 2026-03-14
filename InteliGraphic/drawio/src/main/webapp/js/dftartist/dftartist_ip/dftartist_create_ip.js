@@ -55,7 +55,8 @@
         defaultLabel: 'EDT',
         instanceBaseName: 'EDT',
         configKey: 'edt',
-        w: 380, h: 80,
+        useDefSize: true,
+        w: 140, h: 120,
         rounded: 0, strokeWidth: 1,
         bodyFont: 20, pinFont: 16,
         pinsFactory: staticPins({
@@ -70,7 +71,8 @@
         defaultLabel: 'OCC',
         instanceBaseName: 'OCC',
         configKey: 'occ',
-        w: 380, h: 80,
+        useDefSize: true,
+        w: 140, h: 120,
         rounded: 0, strokeWidth: 1,
         bodyFont: 20, pinFont: 16,
         pinsFactory: staticPins({
@@ -85,7 +87,8 @@
         defaultLabel: 'TAP',
         instanceBaseName: 'TAP',
         configKey: 'functional_generic',
-        w: 180, h: 250,
+        useDefSize: true,
+        w: 140, h: 120,
         rounded: 0, strokeWidth: 1,
         bodyFont: 20, pinFont: 16,
         pinsFactory: staticPins({
@@ -108,7 +111,8 @@
         defaultLabel: 'TDRI',
         instanceBaseName: 'TDRI',
         configKey: 'functional_generic',
-        w: 300, h: 80,
+        useDefSize: true,
+        w: 140, h: 120,
         rounded: 0, strokeWidth: 1,
         bodyFont: 20, pinFont: 16,
         pinsFactory: staticPins({
@@ -123,7 +127,8 @@
         defaultLabel: 'STAP',
         instanceBaseName: 'STAP',
         configKey: 'functional_generic',
-        w: 300, h: 80,
+        useDefSize: true,
+        w: 140, h: 120,
         rounded: 0, strokeWidth: 1,
         bodyFont: 20, pinFont: 16,
         pinsFactory: staticPins({
@@ -135,10 +140,12 @@
     registerFunctional({
         key: 'MemoryBisrController',
         dftsType: 'memorybisrcontroller',
-        defaultLabel: 'MemoryBisr\nController',
-        instanceBaseName: 'MemoryBisrController',
+        defaultLabel: 'MBISRC',
+        instanceBaseName: 'MBISRC',
         configKey: 'functional_generic',
-        w: 350, h: 80,
+        useDefSize: true,
+        w: 140, h: 120,
+        symbolMinW: 180, symbolMinH: 100,
         rounded: 0, strokeWidth: 1,
         bodyFont: 20, pinFont: 16,
         pinsFactory: staticPins({
@@ -156,10 +163,12 @@
     registerFunctional({
         key: 'InSystemTestController',
         dftsType: 'istcontroller',
-        defaultLabel: 'InSystemTest\nController',
-        instanceBaseName: 'InSystemTestController',
+        defaultLabel: 'ISTC',
+        instanceBaseName: 'ISTC',
         configKey: 'functional_generic',
-        w: 350, h: 80,
+        useDefSize: true,
+        w: 140, h: 120,
+        symbolMinW: 180, symbolMinH: 100,
         rounded: 0, strokeWidth: 1,
         bodyFont: 20, pinFont: 16,
         pinsFactory: staticPins({})
@@ -168,10 +177,11 @@
     registerFunctional({
         key: 'SSNFifo',
         dftsType: 'ssn_fifo',
-        defaultLabel: 'SSN\nFIFO',
+        defaultLabel: 'SSN_FIFO',
         instanceBaseName: 'SSNFifo',
         configKey: 'functional_generic',
-        w: 300, h: 80,
+        useDefSize: true,
+        w: 140, h: 120,
         rounded: 8, strokeWidth: 1,
         bodyFont: 20, pinFont: 16,
         pinsFactory: staticPins({
@@ -189,10 +199,12 @@
     registerFunctional({
         key: 'SSNScanHost',
         dftsType: 'ssn_scanhost',
-        defaultLabel: 'SSN\nScanHost',
-        instanceBaseName: 'SSNScanHost',
+        defaultLabel: 'SSN_SSH',
+        instanceBaseName: 'SSN_SSH',
         configKey: 'functional_generic',
-        w: 500, h: 350,
+        useDefSize: true,
+        w: 190, h: 120,
+        symbolMinW: 220, symbolMinH: 140,
         rounded: 8, strokeWidth: 1,
         bodyFont: 20, pinFont: 16,
         pinsFactory: staticPins({
@@ -214,10 +226,12 @@
     registerFunctional({
         key: 'SSNPipeline',
         dftsType: 'ssn_pipeline',
-        defaultLabel: 'SSN\nPipeline',
-        instanceBaseName: 'SSNPipeline',
+        defaultLabel: 'SSN_PP',
+        instanceBaseName: 'SSN_PP',
         configKey: 'functional_generic',
-        w: 350, h: 80,
+        useDefSize: true,
+        w: 140, h: 120,
+        symbolMinW: 180, symbolMinH: 100,
         rounded: 8, strokeWidth: 1,
         bodyFont: 20, pinFont: 16,
         pinsFactory: staticPins({
@@ -232,10 +246,11 @@
     registerFunctional({
         key: 'SSNMultiplexer',
         dftsType: 'ssn_multiplexer',
-        defaultLabel: 'SSN\nMultiplexer',
-        instanceBaseName: 'SSNMultiplexer',
+        defaultLabel: 'SSN_MUX',
+        instanceBaseName: 'SSN_MUX',
         configKey: 'functional_generic',
-        w: 480, h: 80,
+        useDefSize: true,
+        w: 190, h: 120,
         rounded: 8, strokeWidth: 1,
         bodyFont: 20, pinFont: 16,
         pinsFactory: staticPins({
@@ -251,10 +266,11 @@
     registerFunctional({
         key: 'SSNOutputPipeline',
         dftsType: 'ssn_outputpipeline',
-        defaultLabel: 'SSN\nOutputPipeline',
-        instanceBaseName: 'SSNOutputPipeline',
+        defaultLabel: 'SSN_OP',
+        instanceBaseName: 'SSN_OP',
         configKey: 'functional_generic',
-        w: 400, h: 80,
+        useDefSize: true,
+        w: 140, h: 120,
         rounded: 8, strokeWidth: 1,
         bodyFont: 20, pinFont: 16,
         pinsFactory: staticPins({
@@ -269,10 +285,12 @@
     registerFunctional({
         key: 'SSNReceiver1xPipeline',
         dftsType: 'ssn_receiver1xpipeline',
-        defaultLabel: 'SSN\nReceiver1xPipeline',
-        instanceBaseName: 'SSNReceiver1xPipeline',
+        defaultLabel: 'SSN_RPPL',
+        instanceBaseName: 'SSN_RPPL',
         configKey: 'functional_generic',
-        w: 450, h: 80,
+        useDefSize: true,
+        w: 140, h: 120,
+        symbolMinW: 190, symbolMinH: 100,
         rounded: 8, strokeWidth: 1,
         bodyFont: 20, pinFont: 16,
         pinsFactory: staticPins({
@@ -287,10 +305,11 @@
     registerFunctional({
         key: 'SSNBusFrequencyDivider',
         dftsType: 'ssn_busfrequencydivider',
-        defaultLabel: 'SSN\nBusFrequencyDivider',
-        instanceBaseName: 'SSNBusFrequencyDivider',
+        defaultLabel: 'SSN_BFD',
+        instanceBaseName: 'SSN_BFD',
         configKey: 'functional_generic',
-        w: 550, h: 80,
+        useDefSize: true,
+        w: 140, h: 120,
         rounded: 8, strokeWidth: 1,
         bodyFont: 20, pinFont: 16,
         pinsFactory: staticPins({
@@ -309,10 +328,12 @@
     registerFunctional({
         key: 'SSNBusFrequencyMultiplier',
         dftsType: 'ssn_busfrequencymultiplier',
-        defaultLabel: 'SSN\nBusFrequencyMultiplier',
-        instanceBaseName: 'SSNBusFrequencyMultiplier',
+        defaultLabel: 'SSN_BFM',
+        instanceBaseName: 'SSN_BFM',
         configKey: 'functional_generic',
-        w: 450, h: 80,
+        useDefSize: true,
+        w: 140, h: 120,
+        symbolMinW: 190, symbolMinH: 100,
         rounded: 8, strokeWidth: 1,
         bodyFont: 20, pinFont: 16,
         pinsFactory: staticPins({
@@ -353,6 +374,7 @@
         NS.installEditingPolicy(ui);
         NS.installInstanceFollow(ui);
         NS.installConfigAction(ui);
+        if (typeof NS.installIpEdgeConfig === 'function') NS.installIpEdgeConfig(ui);
     };
 
 })(this);

@@ -137,6 +137,14 @@ PolygonTool.prototype.isCloseToFirst = function (pt) {
     return dist2 <= tol * tol;
 };
 
+PolygonTool.prototype.getPreviewDashPattern = function () {
+    var gridSize = Math.max(2, Math.round(this.graph.gridSize || 10));
+    var dash = Math.max(2, gridSize - 1);
+    var gap = 1;
+
+    return dash + ' ' + gap;
+};
+
 PolygonTool.prototype.createPreview = function () {
     if (this.previewCell != null) return;
 
@@ -150,7 +158,7 @@ PolygonTool.prototype.createPreview = function () {
     try {
         // Halo + 主线双层预览，避免与底图线条混在一起看不清
         var haloStyle = 'strokeColor=#ffffff;strokeWidth=5;opacity=80;endArrow=none;rounded=0;lineJoin=miter;';
-        var style = 'strokeColor=#00cc00;strokeWidth=2;dashed=1;dashPattern=10 6;endArrow=none;rounded=0;lineJoin=miter;';
+        var style = 'strokeColor=#00cc00;strokeWidth=2;dashed=1;dashPattern=' + this.getPreviewDashPattern() + ';endArrow=none;rounded=0;lineJoin=miter;';
 
         this.previewHaloCell = graph.insertEdge(
             parent,
