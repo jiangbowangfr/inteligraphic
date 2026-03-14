@@ -133,9 +133,17 @@ function _getProjectRootDirHandle(ui) {
 
 function _relPathJoin(arr) { return arr.filter(Boolean).join('/'); }
 
+function _getProjectStorageRoot(ui) {
+    const dbRoot = ui && ui._projectDbDirPath ? String(ui._projectDbDirPath) : '';
+    if (dbRoot) return dbRoot.replace(/\\/g, '/').replace(/\/+$/, '');
+    const root = ui && (ui._projectRootPath || ui._projectYamlDir) ? String(ui._projectRootPath || ui._projectYamlDir) : '';
+    const cleanRoot = root.replace(/\\/g, '/').replace(/\/+$/, '');
+    return cleanRoot ? _joinPath(cleanRoot, 'db') : '';
+}
+
 // 覆盖：路径版：确保 design 目录 / page 目录 / env.json
 async function _ensureDesignScaffold(ui, design, parentSegs) {
-    const root = ui && (ui._projectRootPath || ui._projectYamlDir);
+    const root = _getProjectStorageRoot(ui);
     if (!root) { console.warn('[Project] root path missing; skip scaffold'); return; }
 
     const segs = (parentSegs || []).concat([_sanitizeFileName(design.name || 'design')]);
@@ -160,11 +168,16 @@ async function _ensureDesignScaffold(ui, design, parentSegs) {
 }
 
 async function _createPageFileSlot(ui, design, pageName) {
-    const root = ui && (ui._projectRootPath || ui._projectYamlDir);
+    const root = _getProjectStorageRoot(ui);
     if (!root) { console.warn('[Project] root path missing; skip page slot'); return; }
+    const kind = String((design && design.__kind) || '').toLowerCase();
+    const isFloorplan =
+        !!(design && design._isFloorplan) ||
+        kind === 'floorplan-container' ||
+        String(design && design.name || '').trim().toLowerCase() === 'floorplan';
     const segs = (design._dirRel && design._dirRel.slice()) ||
         [_sanitizeFileName(design.name || 'design')];
-    const pageDir = _joinPath(root, ...segs, 'page');
+    const pageDir = isFloorplan ? _joinPath(root, ...segs) : _joinPath(root, ...segs, 'page');
     const abs = _joinPath(pageDir, _sanitizeFileName(pageName) + '.dftart');
 
     try { await requestSync({ action: 'ensureDirs', path: pageDir }); } catch (_) { }

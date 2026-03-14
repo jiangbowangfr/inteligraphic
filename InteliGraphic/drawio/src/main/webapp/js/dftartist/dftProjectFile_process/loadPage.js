@@ -1,7 +1,15 @@
+function _getProjectStorageRoot(ui) {
+    const dbRoot = ui && ui._projectDbDirPath ? String(ui._projectDbDirPath) : '';
+    if (dbRoot) return dbRoot.replace(/\\/g, '/').replace(/\/+$/, '');
+    const root = ui && (ui._projectRootPath || ui._projectYamlDir) ? String(ui._projectRootPath || ui._projectYamlDir) : '';
+    const cleanRoot = root.replace(/\\/g, '/').replace(/\/+$/, '');
+    return cleanRoot ? _joinPath(cleanRoot, 'db') : '';
+}
+
 // 从指定设计的指定页加载单页文件到当前页
 async function _resolvePageFileAbs(ui, designRef, pageName) {
     if (!ui) throw new Error('UI not ready');
-    const root = ui._projectRootPath || ui._projectYamlDir;   // 打开 .dftart 后应有其一
+    const root = _getProjectStorageRoot(ui);
     if (!root) throw new Error('Please save project first.');
 
     const kind = String((designRef && designRef.__kind) || '').toLowerCase();

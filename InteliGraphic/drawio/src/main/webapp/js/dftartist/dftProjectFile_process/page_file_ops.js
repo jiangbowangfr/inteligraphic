@@ -24,11 +24,29 @@ function _dirname(p) {
     return i > 0 ? s.slice(0, i) : '';
 }
 
+function _getProjectStorageRoot(ui) {
+    const dbRoot = ui && ui._projectDbDirPath ? String(ui._projectDbDirPath) : '';
+    if (dbRoot) return dbRoot.replace(/\\/g, '/').replace(/\/+$/, '');
+    const root = ui && (ui._projectRootPath || ui._projectYamlDir) ? String(ui._projectRootPath || ui._projectYamlDir) : '';
+    const cleanRoot = root.replace(/\\/g, '/').replace(/\/+$/, '');
+    return cleanRoot ? _joinPath(cleanRoot, 'db') : '';
+}
+
+function _isFloorplanDesignRef(designRef) {
+    if (!designRef) return false;
+    if (designRef._isFloorplan) return true;
+    const kind = String(designRef.__kind || '').toLowerCase();
+    if (kind === 'floorplan-container') return true;
+    const name = String(designRef.name || '').trim().toLowerCase();
+    const dirRel = (Array.isArray(designRef._dirRel) ? designRef._dirRel.join('/') : '').trim().toLowerCase();
+    return name === 'floorplan' || dirRel === 'floorplan';
+}
+
 function _pageDirPath(ui, designRef) {
-    const root = ui && (ui._projectRootPath || ui._projectYamlDir);
+    const root = _getProjectStorageRoot(ui);
     const segs = (designRef && designRef._dirRel) ||
         [_sanitizeFileName(designRef?.name || 'design')];
-    return _joinPath(root, ...segs, 'page');
+    return _isFloorplanDesignRef(designRef) ? _joinPath(root, ...segs) : _joinPath(root, ...segs, 'page');
 }
 
 function _setActivePageCtx(ui, designRef, name, absOpt) {

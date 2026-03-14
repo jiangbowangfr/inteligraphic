@@ -10,6 +10,14 @@ function _dirname(p) {
     return i > 0 ? v.slice(0, i) : '';
 }
 
+function _getProjectStorageRoot(ui) {
+    const dbRoot = ui && ui._projectDbDirPath ? String(ui._projectDbDirPath) : '';
+    if (dbRoot) return dbRoot.replace(/\\/g, '/').replace(/\/+$/, '');
+    const root = ui && (ui._projectRootPath || ui._projectYamlDir) ? String(ui._projectRootPath || ui._projectYamlDir) : '';
+    const cleanRoot = root.replace(/\\/g, '/').replace(/\/+$/, '');
+    return cleanRoot ? _joinPath(cleanRoot, 'db') : '';
+}
+
 // 解析 mx 文档，返回 {kind:'mxfile'|'mxGraphModel'|'unknown', doc, diagrams:[{name, node}]}
 function _parseMxXml(xmlText) {
     try {
@@ -139,7 +147,7 @@ window.DftSaveProjectIndividually = async function (editorUi, opts) {
     if (!curPage) { alert('未能获取当前激活页名称'); return; }
 
     // 1) 项目根目录（保持你原逻辑）
-    let projectRoot = ui._projectRootPath;
+    let projectRoot = _getProjectStorageRoot(ui);
     if (!projectRoot) {
         const docs = await requestSync({ action: 'getDocumentsFolder' });
         const picked = await requestSync({
@@ -147,8 +155,8 @@ window.DftSaveProjectIndividually = async function (editorUi, opts) {
             defaultPath: docs, filters: [], properties: ['openDirectory', 'createDirectory']
         });
         if (!picked || !picked.length) return;
-        projectRoot = picked[0];
-        ui._projectRootPath = projectRoot;
+        projectRoot = _joinPath(picked[0], 'db');
+        ui._projectDbDirPath = projectRoot;
     }
 
     // 3) 文档 XML
