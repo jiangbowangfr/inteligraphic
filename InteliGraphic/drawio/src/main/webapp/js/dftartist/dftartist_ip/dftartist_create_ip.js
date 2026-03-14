@@ -140,8 +140,8 @@
     registerFunctional({
         key: 'MemoryBisrController',
         dftsType: 'memorybisrcontroller',
-        defaultLabel: 'MBC',
-        instanceBaseName: 'MBC',
+        defaultLabel: 'MBISRC',
+        instanceBaseName: 'MBISRC',
         configKey: 'functional_generic',
         useDefSize: true,
         w: 140, h: 120,
@@ -199,8 +199,8 @@
     registerFunctional({
         key: 'SSNScanHost',
         dftsType: 'ssn_scanhost',
-        defaultLabel: 'SSN_SCANHOST',
-        instanceBaseName: 'SSN_SCANHOST',
+        defaultLabel: 'SSN_SSH',
+        instanceBaseName: 'SSN_SSH',
         configKey: 'functional_generic',
         useDefSize: true,
         w: 190, h: 120,
@@ -246,8 +246,8 @@
     registerFunctional({
         key: 'SSNMultiplexer',
         dftsType: 'ssn_multiplexer',
-        defaultLabel: 'SSN_MULTIPLEXER',
-        instanceBaseName: 'SSN_MULTIPLEXER',
+        defaultLabel: 'SSN_MUX',
+        instanceBaseName: 'SSN_MUX',
         configKey: 'functional_generic',
         useDefSize: true,
         w: 190, h: 120,

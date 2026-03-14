@@ -1059,8 +1059,48 @@
     registerDataSource({
         key: 'SSNPadSource',
         dftsType: 'ssn_data_source',
-        defaultLabel: 'SSNPadSource',
-        instanceBaseName: 'SSNPadSource',
+        defaultLabel: 'PadSource',
+        instanceBaseName: 'PadSource',
+        configKey: 'data_source_common',
+        useDefSize: true,
+        w: 140, h: 120,
+        rounded: 8,
+        strokeWidth: 1,
+        bodyFont: 20,
+        pinFont: 16,
+        pinsFactory: staticPins({
+            east: [
+                { name: 'ssn_data_out', type: 'data_out', dir: 'output', pinKey: 'ssn_data_out', busWidth: 8, isBus: true, floorplanLineTarget: true },
+                { name: 'ssn_data_in', type: 'data_in', dir: 'input', pinKey: 'ssn_data_in' },
+                { name: 'ssn_bus_clock', type: 'data_out', dir: 'input', pinKey: 'ssn_bus_clock' }
+            ]
+        })
+    });
+    registerDataSource({
+        key: 'TapSource',
+        dftsType: 'bscan_data_source',
+        defaultLabel: 'TapSource',
+        instanceBaseName: 'TapSource',
+        configKey: 'data_source_common',
+        useDefSize: true,
+        w: 140, h: 120,
+        rounded: 8,
+        strokeWidth: 1,
+        bodyFont: 20,
+        pinFont: 16,
+        pinsFactory: staticPins({
+            east: [
+                { name: 'bscan_data_out', type: 'data_out', dir: 'output', pinKey: 'bscan_data_out', busWidth: 8, isBus: true, floorplanLineTarget: true },
+                { name: 'bscan_data_in', type: 'data_in', dir: 'input', pinKey: 'bscan_data_in' },
+                { name: 'bscan_bus_clock', type: 'data_out', dir: 'input', pinKey: 'bscan_bus_clock' }
+            ]
+        })
+    });
+    registerDataSource({
+        key: 'BISRCSource',
+        dftsType: 'bisrc_data_source',
+        defaultLabel: 'BISRCSource',
+        instanceBaseName: 'BISRCSource',
         configKey: 'data_source_common',
         useDefSize: true,
         w: 140, h: 120,
@@ -1070,15 +1110,14 @@
         pinFont: 16,
         pinsFactory: staticPins({
             west: [
-                { name: 'ssn_bus_clock', type: 'data_out', dir: 'input', pinKey: 'ssn_bus_clock' }
             ],
             east: [
-                { name: 'ssn_data_out', type: 'data_out', dir: 'output', pinKey: 'ssn_data_out', busWidth: 8, isBus: true, floorplanLineTarget: true },
-                { name: 'ssn_data_in', type: 'data_in', dir: 'input', pinKey: 'ssn_data_in' }
+                { name: 'bisrc_data_out', type: 'data_out', dir: 'output', pinKey: 'bisrc_data_out', busWidth: 8, isBus: true, floorplanLineTarget: true },
+                { name: 'bisrc_data_in', type: 'data_in', dir: 'input', pinKey: 'bisrc_data_in' },
+                { name: 'bisrc_bus_clock', type: 'data_out', dir: 'input', pinKey: 'bisrc_bus_clock' }
             ]
         })
     });
-
     // registerDataSource({
     //     key: 'ExternalDataSource',
     //     dftsType: 'external_data_source',
