@@ -696,6 +696,19 @@
     return '<mxfile host="app.diagrams.net"><diagram id="' + sanitizeName(pageName) + '" name="' + escapeHtml(pageName) + '"><mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0"><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel></diagram></mxfile>';
   }
 
+  function floorplanBlankPageXml(pageName) {
+    var layerNames = ['ssn', 'bscan', 'iftag', 'jtag', 'bisr', 'other'];
+    var root = ['<mxCell id="0"/>', '<mxCell id="1" value="base" parent="0"/>'];
+    for (var i = 0; i < layerNames.length; i++) {
+      root.push('<mxCell id="' + String(i + 2) + '" value="' + escapeHtml(layerNames[i]) + '" parent="0"/>');
+    }
+    return '<mxfile host="app.diagrams.net"><diagram id="' + sanitizeName(pageName) + '" name="' + escapeHtml(pageName) + '"><mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0"><root>' + root.join('') + '</root></mxGraphModel></diagram></mxfile>';
+  }
+
+  function initialPageXml(designRef, pageName) {
+    return isFloorplanDesign(designRef) ? floorplanBlankPageXml(pageName) : blankPageXml(pageName);
+  }
+
   async function listDir(absPath) {
     if (!absPath) return [];
     var result = await requestAny([
@@ -823,7 +836,7 @@
     var abs = resolveLocalPageFileAbs(ui, designRef, pageName);
     await ensureDirs(dirnamePath(abs));
     if (!await statExists(abs)) {
-      try { await writeTextFile(abs, blankPageXml(pageName)); } catch (e2) {}
+      try { await writeTextFile(abs, initialPageXml(designRef, pageName)); } catch (e2) {}
     }
     return abs;
   }
