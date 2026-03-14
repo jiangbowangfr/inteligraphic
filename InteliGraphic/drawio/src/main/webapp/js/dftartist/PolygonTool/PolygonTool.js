@@ -9,6 +9,8 @@ function PolygonTool(graph, ui) {
     this.active = false;
     this.previewCell = null;
     this.previewHaloCell = null;
+    this.guideVCell = null;
+    this.guideHCell = null;
     this.prevContainerCursor = null;
     this.prevCellsSelectable = null;
     this.prevCellsMovable = null;
@@ -129,12 +131,7 @@ PolygonTool.prototype.isCloseToFirst = function (pt) {
     if (this.points.length == 0) return false;
 
     var first = this.points[0];
-    var dx = pt.x - first.x;
-    var dy = pt.y - first.y;
-    var dist2 = dx * dx + dy * dy;
-
-    var tol = 20; // 像素阈值
-    return dist2 <= tol * tol;
+    return pt.x === first.x && pt.y === first.y;
 };
 
 PolygonTool.prototype.getPreviewDashPattern = function () {
@@ -179,6 +176,10 @@ PolygonTool.prototype.createPreview = function () {
             style
         );
 
+        var guideStyle = 'strokeColor=#4aa3ff;strokeWidth=1;dashed=1;dashPattern=4 4;endArrow=none;rounded=0;lineJoin=miter;';
+        this.guideVCell = graph.insertEdge(parent, null, '', null, null, guideStyle);
+        this.guideHCell = graph.insertEdge(parent, null, '', null, null, guideStyle);
+
         var geo = this.previewCell.getGeometry();
 
         // 有可能为 null，稳妥起见先判断一下
@@ -198,6 +199,8 @@ PolygonTool.prototype.createPreview = function () {
             if (this.previewHaloCell != null) {
                 model.setGeometry(this.previewHaloCell, geo.clone());
             }
+            this.updateGuideGeometry(this.guideVCell, null);
+            this.updateGuideGeometry(this.guideHCell, null);
         }
     }
     finally {
@@ -247,11 +250,87 @@ PolygonTool.prototype.updatePreview = function (mousePt) {
     finally {
         model.endUpdate();
     }
+
+    this.updateGuides(mousePt);
+};
+
+PolygonTool.prototype.findAlignedPoint = function (mousePt) {
+    if (!mousePt || !this.points || this.points.length === 0) return { vertical: null, horizontal: null };
+
+    var gridSize = Math.max(1, Math.round(this.graph.gridSize || 10));
+    var tol = Math.max(1, Math.round(gridSize / 2));
+    var vertical = null;
+    var horizontal = null;
+
+    for (var i = 0; i < this.points.length; i++) {
+        var pt = this.points[i];
+        if (vertical == null && Math.abs(mousePt.x - pt.x) <= tol) vertical = pt.x;
+        if (horizontal == null && Math.abs(mousePt.y - pt.y) <= tol) horizontal = pt.y;
+        if (vertical != null && horizontal != null) break;
+    }
+
+    return { vertical: vertical, horizontal: horizontal };
+};
+
+PolygonTool.prototype.updateGuideGeometry = function (cell, line) {
+    if (!cell) return;
+
+    var model = this.graph.getModel();
+    var geo = cell.getGeometry();
+    if (geo == null) return;
+
+    geo = geo.clone();
+
+    if (!line) {
+        geo.setTerminalPoint(new mxPoint(0, 0), true);
+        geo.setTerminalPoint(new mxPoint(0, 0), false);
+        geo.points = [];
+        model.setGeometry(cell, geo);
+        model.setVisible(cell, false);
+        return;
+    }
+
+    geo.setTerminalPoint(new mxPoint(line.x1, line.y1), true);
+    geo.setTerminalPoint(new mxPoint(line.x2, line.y2), false);
+    geo.points = [];
+    model.setGeometry(cell, geo);
+    model.setVisible(cell, true);
+};
+
+PolygonTool.prototype.updateGuides = function (mousePt) {
+    if (!this.guideVCell && !this.guideHCell) return;
+
+    var aligned = this.findAlignedPoint(mousePt);
+    var pts = this.points.slice(0);
+    if (mousePt) pts.push(mousePt);
+
+    var minX = null, minY = null, maxX = null, maxY = null;
+    for (var i = 0; i < pts.length; i++) {
+        var p = pts[i];
+        minX = minX == null ? p.x : Math.min(minX, p.x);
+        minY = minY == null ? p.y : Math.min(minY, p.y);
+        maxX = maxX == null ? p.x : Math.max(maxX, p.x);
+        maxY = maxY == null ? p.y : Math.max(maxY, p.y);
+    }
+
+    var pad = Math.max(10, Math.round((this.graph.gridSize || 10) * 2));
+    var vLine = aligned.vertical == null ? null : { x1: aligned.vertical, y1: minY - pad, x2: aligned.vertical, y2: maxY + pad };
+    var hLine = aligned.horizontal == null ? null : { x1: minX - pad, y1: aligned.horizontal, x2: maxX + pad, y2: aligned.horizontal };
+
+    var model = this.graph.getModel();
+    model.beginUpdate();
+    try {
+        this.updateGuideGeometry(this.guideVCell, vLine);
+        this.updateGuideGeometry(this.guideHCell, hLine);
+    }
+    finally {
+        model.endUpdate();
+    }
 };
 
 
 PolygonTool.prototype.destroyPreview = function () {
-    if (!this.previewCell && !this.previewHaloCell) return;
+    if (!this.previewCell && !this.previewHaloCell && !this.guideVCell && !this.guideHCell) return;
 
     var graph = this.graph;
     var model = graph.getModel();
@@ -261,9 +340,13 @@ PolygonTool.prototype.destroyPreview = function () {
         var toRemove = [];
         if (this.previewHaloCell) toRemove.push(this.previewHaloCell);
         if (this.previewCell) toRemove.push(this.previewCell);
+        if (this.guideVCell) toRemove.push(this.guideVCell);
+        if (this.guideHCell) toRemove.push(this.guideHCell);
         if (toRemove.length > 0) graph.removeCells(toRemove, false);
         this.previewHaloCell = null;
         this.previewCell = null;
+        this.guideVCell = null;
+        this.guideHCell = null;
     }
     finally {
         model.endUpdate();
