@@ -133,9 +133,17 @@ function _getProjectRootDirHandle(ui) {
 
 function _relPathJoin(arr) { return arr.filter(Boolean).join('/'); }
 
+function _getProjectStorageRoot(ui) {
+    const dbRoot = ui && ui._projectDbDirPath ? String(ui._projectDbDirPath) : '';
+    if (dbRoot) return dbRoot.replace(/\\/g, '/').replace(/\/+$/, '');
+    const root = ui && (ui._projectRootPath || ui._projectYamlDir) ? String(ui._projectRootPath || ui._projectYamlDir) : '';
+    const cleanRoot = root.replace(/\\/g, '/').replace(/\/+$/, '');
+    return cleanRoot ? _joinPath(cleanRoot, 'db') : '';
+}
+
 // 覆盖：路径版：确保 design 目录 / page 目录 / env.json
 async function _ensureDesignScaffold(ui, design, parentSegs) {
-    const root = ui && (ui._projectRootPath || ui._projectYamlDir);
+    const root = _getProjectStorageRoot(ui);
     if (!root) { console.warn('[Project] root path missing; skip scaffold'); return; }
 
     const segs = (parentSegs || []).concat([_sanitizeFileName(design.name || 'design')]);
@@ -160,16 +168,33 @@ async function _ensureDesignScaffold(ui, design, parentSegs) {
 }
 
 async function _createPageFileSlot(ui, design, pageName) {
-    const root = ui && (ui._projectRootPath || ui._projectYamlDir);
+    const root = _getProjectStorageRoot(ui);
     if (!root) { console.warn('[Project] root path missing; skip page slot'); return; }
+    const kind = String((design && design.__kind) || '').toLowerCase();
+    const isFloorplan =
+        !!(design && design._isFloorplan) ||
+        kind === 'floorplan-container' ||
+        String(design && design.name || '').trim().toLowerCase() === 'floorplan';
     const segs = (design._dirRel && design._dirRel.slice()) ||
         [_sanitizeFileName(design.name || 'design')];
-    const pageDir = _joinPath(root, ...segs, 'page');
+    const pageDir = isFloorplan ? _joinPath(root, ...segs) : _joinPath(root, ...segs, 'page');
     const abs = _joinPath(pageDir, _sanitizeFileName(pageName) + '.dftart');
 
     try { await requestSync({ action: 'ensureDirs', path: pageDir }); } catch (_) { }
-    // 给一个极简 mxGraphModel，占位即可（真内容由 DftSaveProjectIndividually 写入）
-    const placeholder = '<mxGraphModel><root/></mxGraphModel>';
+    const placeholder = isFloorplan
+        ? [
+            '<mxfile host="app.diagrams.net"><diagram id="', _sanitizeFileName(pageName), '" name="', String(pageName || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;'),
+            '"><mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0"><root>',
+            '<mxCell id="0"/>',
+            '<mxCell id="1" value="base" parent="0"/>',
+            '<mxCell id="2" value="ssn" parent="0"/>',
+            '<mxCell id="3" value="bscan" parent="0"/>',
+            '<mxCell id="4" value="ijtag" parent="0"/>',
+            '<mxCell id="6" value="bisr" parent="0"/>',
+            '<mxCell id="7" value="other" parent="0"/>',
+            '</root></mxGraphModel></diagram></mxfile>'
+        ].join('')
+        : '<mxGraphModel><root/></mxGraphModel>';
     await requestSync({ action: 'writeFile', path: abs, data: placeholder, enc: 'utf-8' });
     return abs;
 }

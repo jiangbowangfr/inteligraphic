@@ -403,7 +403,13 @@
     for (var j = 0; j < designs.length; j++) walk(designs[j], []);
   }
 
-  function getFloorplanContainer(ui, createIfMissing) {
+  function getFloorplanContainer(ui, createIfMissing, parentDesign) {
+    if (parentDesign && !isFloorplanDesign(parentDesign) && !isIpconfigDesign(parentDesign)) {
+      ensureDefaultContainerChildren(parentDesign, ui);
+      hydrateDesignDirs(ui);
+      var direct = findDirectContainer(parentDesign, 'floorplan');
+      if (direct || !createIfMissing) return direct || null;
+    }
     var model = ensureModel(ui);
     for (var i = 0; i < model.designs.length; i++) {
       if (model.designs[i] && isFloorplanDesign(model.designs[i])) return model.designs[i];
@@ -690,6 +696,19 @@
     return '<mxfile host="app.diagrams.net"><diagram id="' + sanitizeName(pageName) + '" name="' + escapeHtml(pageName) + '"><mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0"><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel></diagram></mxfile>';
   }
 
+  function floorplanBlankPageXml(pageName) {
+    var layerNames = ['base', 'ssn', 'bscan', 'iftag', 'jtag', 'bisr', 'other'];
+    var root = ['<mxCell id="0"/>', '<mxCell id="1" value="base" parent="0"/>'];
+    for (var i = 0; i < layerNames.length; i++) {
+      root.push('<mxCell id="' + String(i + 2) + '" value="' + escapeHtml(layerNames[i]) + '" parent="0"/>');
+    }
+    return '<mxfile host="app.diagrams.net"><diagram id="' + sanitizeName(pageName) + '" name="' + escapeHtml(pageName) + '"><mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0"><root>' + root.join('') + '</root></mxGraphModel></diagram></mxfile>';
+  }
+
+  function initialPageXml(designRef, pageName) {
+    return isFloorplanDesign(designRef) ? floorplanBlankPageXml(pageName) : blankPageXml(pageName);
+  }
+
   async function listDir(absPath) {
     if (!absPath) return [];
     var result = await requestAny([
@@ -817,7 +836,7 @@
     var abs = resolveLocalPageFileAbs(ui, designRef, pageName);
     await ensureDirs(dirnamePath(abs));
     if (!await statExists(abs)) {
-      try { await writeTextFile(abs, blankPageXml(pageName)); } catch (e2) {}
+      try { await writeTextFile(abs, initialPageXml(designRef, pageName)); } catch (e2) {}
     }
     return abs;
   }
@@ -1061,8 +1080,8 @@
       .catch(function () {});
   }
 
-  async function ensureFloorplanStorage(ui) {
-    var fp = getFloorplanContainer(ui, true);
+  async function ensureFloorplanStorage(ui, parentDesign) {
+    var fp = getFloorplanContainer(ui, true, parentDesign);
     var base = getDesignAbsDir(ui, fp);
     if (base) await ensureDirs(base);
     return fp;
@@ -1324,6 +1343,21 @@
       var key = getDesignKey(design);
       if (selectedKey === key || selectedKey.indexOf(key + ':') === 0) return design;
       var found = findOwningDesignBySelectedKey(design.sub_designs, selectedKey);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  function findParentDesignForChild(list, childRef) {
+    list = Array.isArray(list) ? list : [];
+    for (var i = 0; i < list.length; i++) {
+      var design = list[i];
+      if (!design) continue;
+      var kids = Array.isArray(design.sub_designs) ? design.sub_designs : [];
+      for (var j = 0; j < kids.length; j++) {
+        if (kids[j] === childRef) return design;
+      }
+      var found = findParentDesignForChild(kids, childRef);
       if (found) return found;
     }
     return null;
@@ -1737,12 +1771,24 @@
     if (!isProjectReady(ui)) throw new Error('Create or open a project first.');
     selection = selection || await showFloorplanPageDialog(ui);
     if (!selection) return { created: [], skipped: [] };
-
-    var fp = await ensureFloorplanStorage(ui);
+    var targetDesign = opts.targetDesign || null;
+    var fp = null;
+    var pageOwner = null;
+    if (targetDesign && isFloorplanDesign(targetDesign)) {
+      fp = targetDesign;
+      pageOwner = opts.parentDesign || findParentDesignForChild(model.designs, targetDesign);
+    }
+    else if (targetDesign && !isIpconfigDesign(targetDesign)) {
+      pageOwner = targetDesign;
+      fp = await ensureFloorplanStorage(ui, targetDesign);
+    }
+    else {
+      fp = await ensureFloorplanStorage(ui);
+    }
     fp.page_meta = fp.page_meta || {};
     var created = [];
     var skipped = [];
-    var pageName = floorplanPageName(model.name || 'project');
+    var pageName = floorplanPageName((pageOwner && pageOwner.name) || model.name || 'project');
     if (Array.isArray(fp.pages) && fp.pages.indexOf(pageName) >= 0) {
       skipped.push(pageName);
       fp.page_meta[pageName] = { structure: selection.structure, kind: 'floorplan' };
@@ -1756,7 +1802,7 @@
     if (created.length && opts.openFirst !== false) await openPage(ui, fp, created[0]);
     setStatus(ui, created.length ? ('Created floorplan page: ' + created[0]) : 'Floorplan page already exists.');
     NS.refresh(ui);
-    return { design: fp, created: created, skipped: skipped, selection: selection };
+    return { design: fp, owner: pageOwner, created: created, skipped: skipped, selection: selection };
   }
 
   async function openDefaultFloorplan(ui) {
@@ -2164,7 +2210,7 @@
       open: openDesign,
       onToggle: function () { toggleExpanded(ui, designKey, true); },
       onClick: function () { state.selectedKey = designKey; toggleExpanded(ui, designKey, true); },
-      primaryAction: { label: '+', title: isFloorplan ? 'Create floorplan page' : 'Add page', handler: function () { if (isFloorplan) createFloorplanPages(ui, null, { openFirst: true }); else addPage(ui, design); } },
+      primaryAction: { label: '+', title: isFloorplan ? 'Create floorplan page' : 'Add page', handler: function () { if (isFloorplan) createFloorplanPages(ui, null, { openFirst: true, targetDesign: design, parentDesign: findParentDesignForChild(ensureModel(ui).designs, design) }); else addPage(ui, design); } },
       menuItems: designMenu
     }));
 
@@ -2203,8 +2249,8 @@
         open: openPages,
         onToggle: function () { toggleExpanded(ui, pagesKey, true); },
         onClick: function () { state.selectedKey = pagesKey; toggleExpanded(ui, pagesKey, true); },
-        primaryAction: { label: '+', title: isFloorplan ? 'Create floorplan page' : 'Add page', handler: function () { if (isFloorplan) createFloorplanPages(ui, null, { openFirst: true }); else addPage(ui, design); } },
-        menuItems: [{ label: isFloorplan ? 'Create floorplan page' : 'Add page', handler: function () { if (isFloorplan) createFloorplanPages(ui, null, { openFirst: true }); else addPage(ui, design); } }]
+        primaryAction: { label: '+', title: isFloorplan ? 'Create floorplan page' : 'Add page', handler: function () { if (isFloorplan) createFloorplanPages(ui, null, { openFirst: true, targetDesign: design, parentDesign: findParentDesignForChild(ensureModel(ui).designs, design) }); else addPage(ui, design); } },
+        menuItems: [{ label: isFloorplan ? 'Create floorplan page' : 'Add page', handler: function () { if (isFloorplan) createFloorplanPages(ui, null, { openFirst: true, targetDesign: design, parentDesign: findParentDesignForChild(ensureModel(ui).designs, design) }); else addPage(ui, design); } }]
       }));
       if (openPages) {
         for (var p = 0; p < visiblePages.length; p++) {
