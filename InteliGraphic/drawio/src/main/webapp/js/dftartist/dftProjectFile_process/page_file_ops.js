@@ -42,6 +42,14 @@ function _isFloorplanDesignRef(designRef) {
     return name === 'floorplan' || dirRel === 'floorplan';
 }
 
+function _syncLayersDialogForPage(ui, designRef) {
+    if (!ui || typeof ui.showLayersDialog !== 'function') return;
+    if (!_isFloorplanDesignRef(designRef)) return;
+    setTimeout(function () {
+        try { ui.showLayersDialog(); } catch (_) { }
+    }, 0);
+}
+
 function _pageDirPath(ui, designRef) {
     const root = _getProjectStorageRoot(ui);
     const segs = (designRef && designRef._dirRel) ||
@@ -86,6 +94,7 @@ async function _selectAndLoadPage(ui, designRef, pageName) {
 
     const xml = await requestSync({ action: 'readFile', filename: abs, encoding: 'utf-8' });
     await _loadPageXmlToCurrent(ui, xml);
+    _syncLayersDialogForPage(ui, designRef);
 
     // 3) 同步页签标题（防复制默认名）
     try {

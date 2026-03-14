@@ -22,6 +22,22 @@
     return segs === 'floorplan' || /(^|\/)floorplan$/.test(segs);
   }
 
+  function syncLayersDialogForPage(ui, designRef) {
+    if (!ui) return;
+    if (!isFloorplanRef(designRef)) {
+      try {
+        if (ui.actions && ui.actions.layersWindow && ui.actions.layersWindow.window && ui.actions.layersWindow.window.isVisible()) {
+          ui.actions.layersWindow.window.setVisible(false);
+        }
+      } catch (e0) {}
+      return;
+    }
+    if (typeof ui.showLayersDialog !== 'function') return;
+    setTimeout(function () {
+      try { ui.showLayersDialog(); } catch (e) {}
+    }, 0);
+  }
+
   function getProjectStorageRoot(ui) {
     var dbRoot = ui && ui._projectDbDirPath ? String(ui._projectDbDirPath) : '';
     if (dbRoot) return dbRoot.replace(/\\/g, '/').replace(/\/+/g, '/');
@@ -228,6 +244,19 @@
       return global._loadPageXmlToCurrent(ui, xml);
     }
 
+    if (ui && ui.editor && typeof ui.editor.setGraphXml === 'function' && typeof global.mxUtils !== 'undefined') {
+      var doc = global.mxUtils.parseXml(xml);
+      var node = doc && doc.documentElement;
+      if (node && node.nodeName === 'mxfile') {
+        var models = node.getElementsByTagName('mxGraphModel');
+        node = models && models.length ? models[0] : node;
+      }
+      if (node) {
+        ui.editor.setGraphXml(node);
+        return;
+      }
+    }
+
     clearGraphPage(ui);
 
     if (ui && typeof ui.importXml === 'function') {
@@ -329,6 +358,8 @@
     try {
       if (typeof ui.refreshProjectExplorer === 'function') ui.refreshProjectExplorer();
     } catch (e2) {}
+
+    syncLayersDialogForPage(ui, designRef);
 
     return {
       pageName: pageName,

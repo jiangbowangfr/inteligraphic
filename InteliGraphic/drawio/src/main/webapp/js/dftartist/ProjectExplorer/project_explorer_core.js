@@ -697,7 +697,7 @@
   }
 
   function floorplanBlankPageXml(pageName) {
-    var layerNames = ['ssn', 'bscan', 'iftag', 'jtag', 'bisr', 'other'];
+    var layerNames = ['base', 'ssn', 'bscan', 'iftag', 'jtag', 'bisr', 'other'];
     var root = ['<mxCell id="0"/>', '<mxCell id="1" value="base" parent="0"/>'];
     for (var i = 0; i < layerNames.length; i++) {
       root.push('<mxCell id="' + String(i + 2) + '" value="' + escapeHtml(layerNames[i]) + '" parent="0"/>');

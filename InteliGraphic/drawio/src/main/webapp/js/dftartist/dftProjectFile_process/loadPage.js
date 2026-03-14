@@ -45,7 +45,20 @@ async function _resolvePageFileAbs(ui, designRef, pageName) {
 
 // 把 page 的 XML 内容加载到当前页
 async function _loadPageXmlToCurrent(ui, xml) {
-    // 清空当前页，再导入 XML（EditorUi.importXml 能处理 <mxfile>/<mxGraphModel>）
+    if (ui && ui.editor && typeof ui.editor.setGraphXml === 'function' && typeof mxUtils !== 'undefined') {
+        const doc = mxUtils.parseXml(xml);
+        let node = doc && doc.documentElement;
+        if (node && node.nodeName === 'mxfile') {
+            const models = node.getElementsByTagName('mxGraphModel');
+            node = models && models.length ? models[0] : node;
+        }
+        if (node) {
+            ui.editor.setGraphXml(node);
+            return;
+        }
+    }
+
+    // 回退：清空当前页，再导入 XML（EditorUi.importXml 能处理 <mxfile>/<mxGraphModel>）
     const graph = ui.editor.graph;
     const parent = graph.getDefaultParent();
     graph.getModel().beginUpdate();
@@ -56,7 +69,6 @@ async function _loadPageXmlToCurrent(ui, xml) {
         graph.getModel().endUpdate();
     }
 
-    // 导入
     if (typeof ui.importXml === 'function') {
         const imported = ui.importXml(xml);
         if (imported && imported.length && typeof graph.setSelectionCells === 'function') {
