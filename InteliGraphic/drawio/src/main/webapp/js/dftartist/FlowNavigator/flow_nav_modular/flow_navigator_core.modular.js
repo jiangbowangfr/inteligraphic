@@ -74,6 +74,10 @@
     var analysis = Shared.getActivePageReady(ui) ? Analysis.analyzeDataflow(ui) : {
       modules: [], dataSources: [], floorplanLines: [], interfaces: [], interfacePlan: { markers: [], pairs: [] }, issues: [], errorCount: 0, warningCount: 0, ok: false
     };
+    var designInputs = Shared.getActivePageReady(ui) && Designs && typeof Designs.collectDesignInputs === 'function'
+      ? Designs.collectDesignInputs(ui)
+      : {};
+    var generatedDesignModules = Object.keys(designInputs || {});
     var design = Shared.getCurrentDesign(ui);
     var floorplan = Shared.getFloorplanContainer(ui);
     var activePage = Shared.getActivePageName(ui);
@@ -97,7 +101,11 @@
             : { state: 'warning', text: 'No interface plan found' });
     out.generateDesigns = !Shared.getActivePageReady(ui)
       ? { state: 'blocked', text: 'Open page first' }
-      : { state: analysis.modules.length ? 'ready' : 'warning', text: analysis.modules.length ? (analysis.modules.length + ' module design(s)') : 'No modules found' };
+      : !Shared.isFloorplanPageOpen(ui)
+        ? { state: 'blocked', text: 'Open floorplan page first' }
+        : generatedDesignModules.length
+          ? { state: 'ready', text: generatedDesignModules.length + ' module design(s)' }
+          : { state: 'blocked', text: 'Generate interfaces first' };
     out.generateDftspec = !Shared.isProjectReady(ui)
       ? { state: 'blocked', text: 'No project' }
       : (st.lastDftspec
@@ -157,6 +165,16 @@
 
   async function runGenerateDesigns(ui) {
     if (!Shared.getActivePageReady(ui)) throw new Error('Open a page before generating module designs.');
+    if (!Shared.isFloorplanPageOpen(ui)) throw new Error('Open a floorplan page before generating module designs.');
+    var designInputs = Designs && typeof Designs.collectDesignInputs === 'function' ? Designs.collectDesignInputs(ui) : {};
+    var moduleCount = Object.keys(designInputs || {}).length;
+    if (!moduleCount) {
+      var message = 'Generate interfaces first before generating module designs.';
+      Shared.logDock(ui, message, 'error');
+      Shared.setReports(ui, [{ title: 'Generate Module Designs', items: { status: 'blocked', modules: 0 } }]);
+      Shared.setJobs(ui, [{ name: 'generate_module_designs', status: 'error', detail: 'no generated interfaces', progress: 100 }]);
+      throw new Error(message);
+    }
     var analysis = Analysis.analyzeDataflow(ui);
     var result = await Designs.generateTopLevelDesigns(ui, analysis, {});
     Shared.ensureState(ui).lastGeneratedDesigns = result;

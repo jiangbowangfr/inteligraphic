@@ -249,6 +249,136 @@
     } catch (e2) {}
   }
 
+  function summarizeXmlIds(xml) {
+    var summary = {
+      totalIds: 0,
+      duplicateCount: 0,
+      duplicates: [],
+      cellCount: 0
+    };
+    try {
+      if (!xml || !global.mxUtils || typeof global.mxUtils.parseXml !== 'function') return summary;
+      var doc = global.mxUtils.parseXml(String(xml));
+      var root = doc && doc.documentElement;
+      if (!root) return summary;
+      var ids = Object.create(null);
+
+      function walk(node) {
+        if (!node || node.nodeType !== 1) return;
+        if (node.nodeName === 'mxCell') summary.cellCount++;
+        var id = node.getAttribute && node.getAttribute('id');
+        if (id != null && id !== '') {
+          summary.totalIds++;
+          if (ids[id]) {
+            ids[id]++;
+          } else {
+            ids[id] = 1;
+          }
+        }
+        for (var child = node.firstChild; child != null; child = child.nextSibling) walk(child);
+      }
+
+      walk(root);
+
+      var keys = Object.keys(ids);
+      for (var i = 0; i < keys.length; i++) {
+        if (ids[keys[i]] > 1) {
+          summary.duplicateCount++;
+          if (summary.duplicates.length < 10) {
+            summary.duplicates.push({ id: keys[i], count: ids[keys[i]] });
+          }
+        }
+      }
+    } catch (e) {
+      summary.error = e && e.message ? e.message : String(e);
+    }
+    return summary;
+  }
+
+  function makeUniqueXmlId(base, used) {
+    var seed = text(base || 'cell').trim() || 'cell';
+    var candidate = seed;
+    var idx = 1;
+    while (used[candidate]) {
+      candidate = seed + '_dup' + idx;
+      idx++;
+    }
+    used[candidate] = true;
+    return candidate;
+  }
+
+  function rewriteRefsInSubtree(node, idMap) {
+    if (!node || node.nodeType !== 1 || !idMap) return;
+    var attrs = ['parent', 'source', 'target'];
+    for (var i = 0; i < attrs.length; i++) {
+      var key = attrs[i];
+      var raw = node.getAttribute && node.getAttribute(key);
+      if (raw != null && idMap[raw]) node.setAttribute(key, idMap[raw]);
+    }
+    for (var child = node.firstChild; child != null; child = child.nextSibling) {
+      rewriteRefsInSubtree(child, idMap);
+    }
+  }
+
+  function repairDuplicateIdsInXml(xml) {
+    var result = {
+      changed: false,
+      xml: String(xml || ''),
+      before: summarizeXmlIds(xml),
+      after: null,
+      rewrites: []
+    };
+    if (!result.before.duplicateCount || !global.mxUtils || typeof global.mxUtils.parseXml !== 'function' || typeof global.mxUtils.getXml !== 'function') {
+      result.after = result.before;
+      return result;
+    }
+
+    try {
+      var doc = global.mxUtils.parseXml(String(xml || ''));
+      var root = doc && doc.documentElement;
+      if (!root) {
+        result.after = result.before;
+        return result;
+      }
+
+      var used = Object.create(null);
+      (function markUsed(node) {
+        if (!node || node.nodeType !== 1) return;
+        var id = node.getAttribute && node.getAttribute('id');
+        if (id != null && id !== '' && !used[id]) used[id] = true;
+        for (var child = node.firstChild; child != null; child = child.nextSibling) markUsed(child);
+      })(root);
+
+      var seen = Object.create(null);
+      (function repair(node) {
+        if (!node || node.nodeType !== 1) return;
+        var id = node.getAttribute && node.getAttribute('id');
+        if (id != null && id !== '') {
+          if (seen[id]) {
+            var nextId = makeUniqueXmlId(id, used);
+            node.setAttribute('id', nextId);
+            var map = {};
+            map[id] = nextId;
+            rewriteRefsInSubtree(node, map);
+            result.changed = true;
+            if (result.rewrites.length < 20) result.rewrites.push({ from: id, to: nextId });
+          } else {
+            seen[id] = true;
+          }
+        }
+        for (var child = node.firstChild; child != null; child = child.nextSibling) repair(child);
+      })(root);
+
+      result.xml = global.mxUtils.getXml(root);
+      result.after = summarizeXmlIds(result.xml);
+      return result;
+    } catch (e) {
+      result.error = e && e.message ? e.message : String(e);
+      result.after = result.before;
+      return result;
+    }
+  }
+
   function isModified(ui) {
     try {
       return !!(ui && ui.editor && typeof ui.editor.isModified === 'function' && ui.editor.isModified());
@@ -334,6 +464,52 @@
     }
   }
 
+  function createBlankPageTab(ui, pageName) {
+    if (!ui || !pageName) return null;
+    if (typeof ui.createPage === 'function' && typeof ui.insertPage === 'function') {
+      try {
+        var created = ui.createPage(pageName);
+        var index0 = mxUtils.indexOf(ui.pages || [], ui.currentPage);
+        if (index0 < 0) index0 = (ui.pages && ui.pages.length) ? ui.pages.length - 1 : 0;
+        return ui.insertPage(created, index0 + 1);
+      } catch (e0) {
+        emitLog('warn', 'ui.createPage failed; falling back to manual page creation.', e0);
+      }
+    }
+    if (typeof global.DiagramPage !== 'function' || typeof ui.insertPage !== 'function') return null;
+
+    try {
+      var doc = global.mxUtils && typeof global.mxUtils.createXmlDocument === 'function'
+        ? global.mxUtils.createXmlDocument()
+        : document.implementation.createDocument('', '', null);
+      var node = doc.createElement('diagram');
+      node.setAttribute('name', pageName);
+
+      var page = new global.DiagramPage(node);
+      if (typeof page.setName === 'function') page.setName(pageName);
+      else page.name = pageName;
+
+      if (ui.currentPage && ui.currentPage.node) {
+        var srcNode = ui.currentPage.node.cloneNode(false);
+        srcNode.removeAttribute && srcNode.removeAttribute('id');
+        srcNode.setAttribute('name', pageName);
+        page.node = srcNode;
+      }
+
+      if (typeof ui.initDiagramNode === 'function') {
+        var emptyModel = new mxGraphModel();
+        ui.initDiagramNode(page, new mxCodec(global.mxUtils.createXmlDocument()).encode(emptyModel));
+      }
+
+      var index = mxUtils.indexOf(ui.pages || [], ui.currentPage);
+      if (index < 0) index = (ui.pages && ui.pages.length) ? ui.pages.length - 1 : 0;
+      return ui.insertPage(page, index + 1);
+    } catch (e) {
+      emitLog('warn', 'Failed to create blank page tab.', e);
+      return null;
+    }
+  }
+
   function ensurePageTab(ui, pageName) {
     if (!ui || !pageName) return null;
 
@@ -348,23 +524,19 @@
       }
     }
 
-    if (!page && typeof ui.duplicatePage === 'function') {
-      var src = ui.currentPage || (ui.pages && ui.pages[0]);
-      if (src) {
-        try {
-          page = ui.duplicatePage(src, pageName);
-          clearGraphPage(ui);
-        } catch (e) {
-          emitLog('warn', 'Failed to duplicate a page tab shell.', e);
-        }
+    if (!page) {
+      page = createBlankPageTab(ui, pageName);
+      if (page) {
+        emitLog('info', 'Created blank page tab shell for "' + pageName + '".');
       }
     }
 
     if (page) {
       try {
         var currentName = typeof page.getName === 'function' ? page.getName() : page.name;
-        if (currentName !== pageName && typeof ui.renamePage === 'function') {
-          ui.renamePage(page, pageName);
+        if (currentName !== pageName) {
+          if (typeof page.setName === 'function') page.setName(pageName);
+          else page.name = pageName;
         }
       } catch (e2) {}
 
@@ -402,6 +574,13 @@
   }
 
   async function loadPageXmlToCurrent(ui, xml) {
+    var xmlSummary = summarizeXmlIds(xml);
+    emitLog(
+      xmlSummary.duplicateCount ? 'warn' : 'info',
+      'Preparing to load page XML.',
+      xmlSummary
+    );
+
     if (typeof global._loadPageXmlToCurrent === 'function') {
       return global._loadPageXmlToCurrent(ui, xml);
     }
@@ -500,12 +679,39 @@
     ensurePageTab(ui, pageName);
 
     var abs = await resolvePageFileAbs(ui, designRef, pageName);
+    emitLog('info', 'Opening page.', {
+      pageName: pageName,
+      absPath: abs,
+      designName: designRef && designRef.name ? designRef.name : '',
+      source: opts.source || opts.reason || 'open-page'
+    });
     try { ui._activeEnvCtx = null; } catch (envErr) {}
     setActiveContext(ui, designRef, pageName, abs || null);
 
     var exists = await pageExists(abs);
     if (exists) {
       var xml = await readPageXml(abs);
+      var repair = repairDuplicateIdsInXml(xml);
+      if (repair.changed) {
+        emitLog('warn', 'Repaired duplicate IDs in page XML before load.', {
+          pageName: pageName,
+          absPath: abs,
+          rewrites: repair.rewrites,
+          before: repair.before,
+          after: repair.after
+        });
+        xml = repair.xml;
+        try {
+          await request({ action: 'writeFile', path: abs, data: xml, enc: 'utf-8' });
+        } catch (repairWriteErr) {
+          emitLog('warn', 'Failed to persist repaired page XML.', repairWriteErr);
+        }
+      }
+      emitLog('info', 'Read page XML from disk.', Object.assign({
+        pageName: pageName,
+        absPath: abs,
+        xmlLength: String(xml || '').length
+      }, summarizeXmlIds(xml)));
       await loadPageXmlToCurrent(ui, xml);
       emitLog('info', 'Loaded page "' + pageName + '" from disk.');
     } else {

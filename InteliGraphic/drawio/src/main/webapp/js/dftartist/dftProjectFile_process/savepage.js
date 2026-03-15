@@ -134,6 +134,35 @@ window.DftSaveProjectIndividually = async function (editorUi, opts) {
     const options = Object.assign({ silentIfUnmapped: true }, opts || {});
     const ui = editorUi || window.App?.editorUi;
     if (!ui) return alert('UI 未就绪');
+    const debugPrefix = '[save]';
+
+    function summarizeXml(xml) {
+        const out = { xmlLength: String(xml || '').length, cellCount: 0, totalIds: 0, duplicateCount: 0, duplicates: [] };
+        try {
+            if (!xml || typeof mxUtils === 'undefined' || typeof mxUtils.parseXml !== 'function') return out;
+            const doc = mxUtils.parseXml(String(xml));
+            const seen = Object.create(null);
+            (function walk(node) {
+                if (!node || node.nodeType !== 1) return;
+                if (node.nodeName === 'mxCell') out.cellCount++;
+                const id = node.getAttribute && node.getAttribute('id');
+                if (id != null && id !== '') {
+                    out.totalIds++;
+                    seen[id] = (seen[id] || 0) + 1;
+                }
+                for (let ch = node.firstChild; ch; ch = ch.nextSibling) walk(ch);
+            })(doc && doc.documentElement);
+            Object.keys(seen).forEach(function (id) {
+                if (seen[id] > 1) {
+                    out.duplicateCount++;
+                    if (out.duplicates.length < 10) out.duplicates.push({ id: id, count: seen[id] });
+                }
+            });
+        } catch (e) {
+            out.error = e && e.message ? e.message : String(e);
+        }
+        return out;
+    }
 
     // 2) 模型与当前页名
     const model = ui.projectModel || {};
@@ -160,8 +189,17 @@ window.DftSaveProjectIndividually = async function (editorUi, opts) {
     }
 
     // 3) 文档 XML
+    const getCurrentGraphXml = () => {
+        try {
+            if (ui && ui.editor && typeof ui.editor.getGraphXml === 'function' && typeof mxUtils !== 'undefined' && typeof mxUtils.getXml === 'function') {
+                return mxUtils.getXml(ui.editor.getGraphXml());
+            }
+        } catch (e) {}
+        return '';
+    };
     const getDocXml = () => (ui.getFileData ? ui.getFileData(true) : '');
-    const baseXml = getDocXml();
+    const graphXml = getCurrentGraphXml();
+    const baseXml = graphXml || getDocXml();
     if (!baseXml) { alert('获取文档 XML 失败'); return; }
 
     const { kind, doc, diagrams } = _parseMxXml(baseXml);
@@ -210,7 +248,9 @@ window.DftSaveProjectIndividually = async function (editorUi, opts) {
 
     // 5) 仅写当前页 XML
     let xmlToWrite = null;
-    if (kind === 'mxGraphModel') {
+    if (graphXml) {
+        xmlToWrite = String(graphXml).trimStart();
+    } else if (kind === 'mxGraphModel') {
         xmlToWrite = baseXml.trimStart();
     } else if (kind === 'mxfile') {
         const hit = diagrams.find(d => (d.name || '') === curPage);
@@ -220,6 +260,12 @@ window.DftSaveProjectIndividually = async function (editorUi, opts) {
     } else { alert('未识别的文档形态，已取消写入。'); return; }
 
     // 6) 写盘
+    console.log(debugPrefix, 'writing page xml', {
+        pageName: curPage,
+        targetAbs: targetAbs,
+        source: graphXml ? 'graphXml' : kind,
+        summary: summarizeXml(xmlToWrite)
+    });
     await requestSync({ action: 'writeFile', path: targetAbs, data: xmlToWrite, enc: 'utf-8' });
     ui.editor?.setStatus?.('Saved page: ' + curPage);
 

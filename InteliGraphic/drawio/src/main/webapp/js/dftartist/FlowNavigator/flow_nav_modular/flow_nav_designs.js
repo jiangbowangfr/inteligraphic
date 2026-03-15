@@ -4,6 +4,7 @@
   var Mod = global.DFTFlowNavMod = global.DFTFlowNavMod || {};
   var Shared = Mod.Shared;
   var Analysis = Mod.Analysis;
+  var Markers = Mod.Markers;
   var Designs = Mod.Designs = Mod.Designs || {};
   if (!Shared || !Analysis) throw new Error('flow_nav_shared.js and flow_nav_analysis.js must be loaded before flow_nav_designs.js');
 
@@ -26,11 +27,10 @@
     if (existing) return { design: existing, created: false };
     var root = getProjectRoot(ui);
     if (!root) throw new Error('Project root path is unavailable.');
-    var targetPath = Shared.joinPath(root, Shared.sanitizeName(name));
     if (!global.DFTProjectExplorerPhase2 || typeof global.DFTProjectExplorerPhase2.createTopLevelDesign !== 'function') {
       throw new Error('Project Explorer createTopLevelDesign helper is not available.');
     }
-    var design = await global.DFTProjectExplorerPhase2.createTopLevelDesign(ui, name, targetPath);
+    var design = await global.DFTProjectExplorerPhase2.createTopLevelDesign(ui, name, root);
     return { design: design, created: true };
   }
 
@@ -88,175 +88,335 @@
     graph.removeCells(doomed, false);
   }
 
-  function addBodyPlaceholder(ui, modulePlan) {
-    var graph = Shared.graphOf(ui);
-    var parent = Shared.getDefaultParent(ui);
-    var rect = modulePlan.rect || { x: 120, y: 60, width: 960, height: 520 };
-    var bodyX = 80, bodyY = 40, bodyW = Math.max(880, rect.width), bodyH = Math.max(480, rect.height);
-    return graph.insertVertex(parent, null, modulePlan.moduleName, bodyX, bodyY, bodyW, bodyH,
-      'rounded=0;whiteSpace=wrap;html=1;strokeColor=#111827;fillColor=#f3f4f6;fontSize=28;fontStyle=1;align=center;verticalAlign=middle;');
-  }
-
-  function bodyRectInPage(bodyCell) {
-    return Shared.rectOfCell(bodyCell) || { left: 80, top: 40, right: 960, bottom: 560, width: 880, height: 520 };
-  }
-
-  function interfaceSize(role) {
-    return role === 'host' ? { width: 132, height: 56 } : { width: 132, height: 56 };
-  }
-
-  function placeNearSide(bodyRect, markerMeta, size) {
-    var x = bodyRect.left, y = bodyRect.top;
-    var offset = markerMeta.bundleCenterOffset == null ? (markerMeta.offset == null ? 0.5 : Number(markerMeta.offset)) : Number(markerMeta.bundleCenterOffset);
-    var isHost = markerMeta.role === 'host';
-    var gap = 10;
-
-    if (markerMeta.side === 'left') {
-      x = isHost ? bodyRect.left - size.width + 8 : bodyRect.left - (size.width * 2) + 6;
-      y = bodyRect.top + offset * bodyRect.height - size.height / 2;
-    } else if (markerMeta.side === 'right') {
-      x = isHost ? bodyRect.right - 8 : bodyRect.right + gap;
-      y = bodyRect.top + offset * bodyRect.height - size.height / 2;
-    } else if (markerMeta.side === 'top') {
-      x = bodyRect.left + offset * bodyRect.width - size.width / 2;
-      y = isHost ? bodyRect.top - size.height + 8 : bodyRect.top - (size.height * 2) + 6;
-    } else {
-      x = bodyRect.left + offset * bodyRect.width - size.width / 2;
-      y = isHost ? bodyRect.bottom - 8 : bodyRect.bottom + gap;
+  function collectVertices(parent, model, out) {
+    if (!parent || !model) return;
+    var count = model.getChildCount(parent);
+    for (var i = 0; i < count; i++) {
+      var child = model.getChildAt(parent, i);
+      if (child && child.vertex) out.push(child);
+      collectVertices(child, model, out);
     }
-    return { x: x, y: y };
   }
 
-  function roleToIpKey(role) {
-    return role === 'host' ? 'SSN_HOST' : 'SSN_SLAVE';
-  }
-
-  function adapterCandidates() {
+  function collectGeneratedMarkerMeta(ui) {
+    var graph = Shared.graphOf(ui);
+    if (!graph) return [];
+    var layers = Shared.getTopLevelLayers(ui);
+    var vertices = [];
+    for (var i = 0; i < layers.length; i++) collectVertices(layers[i], graph.getModel(), vertices);
     var out = [];
-    if (global.DFTIPLibrary && typeof global.DFTIPLibrary.addIPToCurrentPage === 'function') out.push(global.DFTIPLibrary.addIPToCurrentPage);
-    if (global.DFTIPPalette && typeof global.DFTIPPalette.addIPToCurrentPage === 'function') out.push(global.DFTIPPalette.addIPToCurrentPage);
-    if (global.DftsIP && typeof global.DftsIP.addIPToCurrentPage === 'function') out.push(global.DftsIP.addIPToCurrentPage);
-    if (global.DftsIP && typeof global.DftsIP.insertIP === 'function') out.push(global.DftsIP.insertIP);
+    for (var j = 0; j < vertices.length; j++) {
+      var meta = Markers && typeof Markers.extractMarkerMeta === 'function' ? Markers.extractMarkerMeta(vertices[j]) : null;
+      if (!meta || !meta.moduleName) continue;
+      out.push({ cell: vertices[j], meta: Shared.cloneJson(meta) });
+    }
     return out;
   }
 
-  function placeholderStyle(orientation) {
-    var rotation = 0;
-    if (orientation === 'north') rotation = -90;
-    else if (orientation === 'south') rotation = 90;
-    else if (orientation === 'west') rotation = 180;
-    return 'rounded=0;whiteSpace=wrap;html=1;strokeColor=#111827;fillColor=#ffffff;fontSize=11;fontStyle=1;rotation=' + rotation + ';';
+  function groupMarkersByModule(markerEntries) {
+    var out = {};
+    for (var i = 0; i < markerEntries.length; i++) {
+      var entry = markerEntries[i];
+      var name = String(entry && entry.meta && entry.meta.moduleName || '').trim();
+      if (!name) continue;
+      if (!out[name]) out[name] = [];
+      out[name].push(entry);
+    }
+    return out;
   }
 
-  async function materializeIp(ui, spec) {
-    var graph = Shared.graphOf(ui);
-    var parent = Shared.getDefaultParent(ui);
-    var candidates = adapterCandidates();
-    for (var i = 0; i < candidates.length; i++) {
-      try {
-        var result = await candidates[i](ui, {
-          typeKey: spec.typeKey,
-          label: spec.label,
-          x: spec.x,
-          y: spec.y,
-          width: spec.width,
-          height: spec.height,
-          orientation: spec.orientation,
-          params: Shared.cloneJson(spec.params || {}),
-          metadata: Shared.cloneJson(spec.metadata || {})
-        });
-        if (result) return result;
-      } catch (e) {}
+  function sortMarkersForSide(items) {
+    items.sort(function (a, b) {
+      var av = Number(a.meta && (a.meta.bundleCenterOffset != null ? a.meta.bundleCenterOffset : a.meta.offset));
+      var bv = Number(b.meta && (b.meta.bundleCenterOffset != null ? b.meta.bundleCenterOffset : b.meta.offset));
+      if (!isFinite(av)) av = 0.5;
+      if (!isFinite(bv)) bv = 0.5;
+      if (av !== bv) return av - bv;
+      return String(a.meta && a.meta.interfaceType || '').localeCompare(String(b.meta && b.meta.interfaceType || ''));
+    });
+    return items;
+  }
+
+  function interfaceKeyFromMarker(meta) {
+    var layer = String(meta && meta.layerName || '').toLowerCase();
+    var type = String(meta && meta.interfaceType || '').toUpperCase();
+    if (layer === 'ssn') {
+      if (type === 'HI') return 'SSNHostInputInterface';
+      if (type === 'HO') return 'SSNHostOutputInterface';
+      if (type === 'SI') return 'SSNSlaveInputInterface';
+      if (type === 'SO') return 'SSNSlaveOutputInterface';
     }
-    var cell = graph.insertVertex(parent, null, spec.label, spec.x, spec.y, spec.width, spec.height, placeholderStyle(spec.orientation));
-    cell.__flowNavRealIp = { typeKey: spec.typeKey, params: spec.params, metadata: spec.metadata };
+    if (layer === 'bscan') {
+      if (type === 'HI') return 'BSCANHostInputInterface';
+      if (type === 'HO') return 'BSCANHostOutputInterface';
+      if (type === 'SI') return 'BSCANSlaveInputInterface';
+      if (type === 'SO') return 'BSCANSlaveOutputInterface';
+    }
+    if (layer === 'ijtag') {
+      if (type === 'HI') return 'IJTAGHostInputInterface';
+      if (type === 'HO') return 'IJTAGHostOutputInterface';
+      if (type === 'SI') return 'IJTAGSlaveInputInterface';
+      if (type === 'SO') return 'IJTAGSlaveOutputInterface';
+    }
+    if (layer === 'bisr') {
+      if (type === 'HI') return 'BISRHostInputInterface';
+      if (type === 'HO') return 'BISRHostOutputInterface';
+      if (type === 'SI') return 'BISRSlaveInputInterface';
+      if (type === 'SO') return 'BISRSlaveOutputInterface';
+    }
+    return '';
+  }
+
+  function createFloorplanModuleCell(graph, moduleName, width, height) {
+    if (!global.DftsFloorplan || typeof global.DftsFloorplan.createByKey !== 'function') {
+      throw new Error('DftsFloorplan.createByKey is required to build module designs.');
+    }
+    var cell = global.DftsFloorplan.createByKey(graph, 'FloorplanModule', {
+      label: moduleName,
+      w: width,
+      h: height,
+      instanceName: ''
+    });
+    cell.geometry = new mxGeometry(0, 0, width, height);
+    cell.style = mxUtils.setStyle(cell.style || '', 'fillColor', 'none');
+    cell.style = mxUtils.setStyle(cell.style || '', 'strokeColor', '#111827');
+    cell.style = mxUtils.setStyle(cell.style || '', 'strokeWidth', '2');
+    cell.style = mxUtils.setStyle(cell.style || '', 'movable', '0');
+    cell.style = mxUtils.setStyle(cell.style || '', 'resizable', '0');
+    cell.style = mxUtils.setStyle(cell.style || '', 'rotatable', '0');
+    cell.style = mxUtils.setStyle(cell.style || '', 'dftsFlowNavGeneratedModule', '1');
     return cell;
   }
 
-  async function materializeSource(ui, bodyRect, sourceSpec) {
-    var size = { width: 260, height: 120 };
-    var x = bodyRect.left + 100;
-    var y = bodyRect.top + bodyRect.height / 2 - size.height / 2;
-    return materializeIp(ui, {
-      typeKey: 'SSNPadSource',
-      label: sourceSpec.name || 'SSNPadSource',
-      x: x,
-      y: y,
-      width: size.width,
-      height: size.height,
-      orientation: 'east',
-      params: { sourceName: sourceSpec.name || 'SSNPadSource' },
-      metadata: { role: 'source', module: sourceSpec.moduleName || '' }
+  function createInterfaceCell(graph, markerMeta) {
+    if (!global.DftsIP || typeof global.DftsIP.createByKey !== 'function') {
+      throw new Error('DftsIP.createByKey is required to build interface designs.');
+    }
+    var key = interfaceKeyFromMarker(markerMeta);
+    if (!key) throw new Error('Unsupported interface marker type: ' + String(markerMeta && markerMeta.layerName || '') + '/' + String(markerMeta && markerMeta.interfaceType || ''));
+    var cell = global.DftsIP.createByKey(graph, key, {
+      label: String(markerMeta.interfaceType || ''),
+      pinLabel: markerMeta.sourceInstance || markerMeta.moduleName || '',
+      deviceLabel: markerMeta.sourceInstance || markerMeta.moduleName || '',
+      pdg: markerMeta.layerName || '',
+      busWidth: 4
     });
+    var geo = cell.geometry || new mxGeometry(0, 0, 190, 40);
+    cell.geometry = new mxGeometry(0, 0, Number(geo.width || 190), Number(geo.height || 40));
+    cell.style = mxUtils.setStyle(cell.style || '', 'movable', '0');
+    cell.style = mxUtils.setStyle(cell.style || '', 'resizable', '0');
+    cell.style = mxUtils.setStyle(cell.style || '', 'rotatable', '0');
+    cell.style = mxUtils.setStyle(cell.style || '', 'flowGeneratedDesignInterface', '1');
+    cell.style = mxUtils.setStyle(cell.style || '', 'flowModule', markerMeta.moduleName || '');
+    cell.style = mxUtils.setStyle(cell.style || '', 'flowInterfaceType', markerMeta.interfaceType || '');
+    cell.style = mxUtils.setStyle(cell.style || '', 'flowLayer', markerMeta.layerName || '');
+    cell.style = mxUtils.setStyle(cell.style || '', 'flowPair', markerMeta.pairId || '');
+    if (markerMeta.side === 'left') cell.style = mxUtils.setStyle(cell.style || '', 'rotation', '270');
+    else if (markerMeta.side === 'right') cell.style = mxUtils.setStyle(cell.style || '', 'rotation', '90');
+    else if (markerMeta.side === 'bottom') cell.style = mxUtils.setStyle(cell.style || '', 'rotation', '180');
+    else cell.style = mxUtils.setStyle(cell.style || '', 'rotation', '0');
+    cell.__flowDesignMarkerMeta = Shared.cloneJson(markerMeta);
+    return cell;
   }
 
-  async function materializeInterfaces(ui, bodyCell, modulePlan) {
-    var bodyRect = bodyRectInPage(bodyCell);
-    var created = [];
-    for (var i = 0; i < modulePlan.markers.length; i++) {
-      var marker = modulePlan.markers[i];
-      var size = interfaceSize(marker.role);
-      var pos = placeNearSide(bodyRect, marker, size);
-      var label = marker.role === 'host' ? 'SSN HOST ' + i : 'SSN SLAVE ' + i;
-      var cell = await materializeIp(ui, {
-        typeKey: roleToIpKey(marker.role),
-        label: label,
-        x: pos.x,
-        y: pos.y,
-        width: size.width,
-        height: size.height,
-        orientation: marker.orientation,
-        params: {
-          role: marker.role,
-          chainId: marker.chainId,
-          pairId: marker.pairId,
-          sourceInstance: marker.sourceInstance,
-          clockSignal: marker.clockSignal,
-          dataInSignal: marker.dataInSignal,
-          dataOutSignal: marker.dataOutSignal,
-          side: marker.side,
-          offset: marker.offset,
-          peerModule: marker.peerModule || '',
-          peerMarkerId: marker.peerMarkerId || ''
-        },
-        metadata: marker
-      });
-      created.push(cell);
+  function addCellAt(graph, parent, cell, x, y) {
+    resetCellTreeIds(cell);
+    var added = graph.addCell(cell, parent);
+    var geo0 = graph.getCellGeometry(added) || cell.geometry || new mxGeometry();
+    var geo = new mxGeometry(
+      Number(geo0.x || 0),
+      Number(geo0.y || 0),
+      Number(geo0.width || 0),
+      Number(geo0.height || 0)
+    );
+    geo.relative = !!geo0.relative;
+    geo.sourcePoint = geo0.sourcePoint ? new mxPoint(Number(geo0.sourcePoint.x || 0), Number(geo0.sourcePoint.y || 0)) : null;
+    geo.targetPoint = geo0.targetPoint ? new mxPoint(Number(geo0.targetPoint.x || 0), Number(geo0.targetPoint.y || 0)) : null;
+    if (geo0.offset) geo.offset = new mxPoint(Number(geo0.offset.x || 0), Number(geo0.offset.y || 0));
+    if (geo0.points && geo0.points.length) {
+      geo.points = [];
+      for (var i = 0; i < geo0.points.length; i++) {
+        var pt = geo0.points[i];
+        geo.points.push(new mxPoint(Number(pt && pt.x || 0), Number(pt && pt.y || 0)));
+      }
     }
-    return created;
+    geo.x = x;
+    geo.y = y;
+    graph.getModel().setGeometry(added, geo);
+    return added;
   }
 
-  async function materializeModulePage(ui, modulePlan) {
+  function resetCellTreeIds(cell) {
+    if (!cell) return;
+    cell.id = null;
+    if (cell.children && cell.children.length) {
+      for (var i = 0; i < cell.children.length; i++) resetCellTreeIds(cell.children[i]);
+    }
+  }
+
+  function pageMetrics(graph) {
+    var fmt = graph && graph.pageFormat ? graph.pageFormat : null;
+    return {
+      width: Number(fmt && fmt.width || 1100),
+      height: Number(fmt && fmt.height || 850),
+      margin: 40,
+      gap: 12
+    };
+  }
+
+  function interfaceVisualSize(cell, side) {
+    var geo = cell && cell.geometry ? cell.geometry : null;
+    var w = Number(geo && geo.width || 190);
+    var h = Number(geo && geo.height || 40);
+    if (side === 'left' || side === 'right') return { width: h, height: w };
+    return { width: w, height: h };
+  }
+
+  function countBySide(markers) {
+    var out = { left: [], right: [], top: [], bottom: [] };
+    for (var i = 0; i < markers.length; i++) {
+      var side = String(markers[i] && markers[i].meta && markers[i].meta.side || 'right').toLowerCase();
+      if (!out[side]) side = 'right';
+      out[side].push(markers[i]);
+    }
+    sortMarkersForSide(out.left);
+    sortMarkersForSide(out.right);
+    sortMarkersForSide(out.top);
+    sortMarkersForSide(out.bottom);
+    return out;
+  }
+
+  function positionInterfacesAroundBody(bodyRect, bySide, prototypes) {
+    var placements = [];
+
+    function placeSide(side, list) {
+      for (var i = 0; i < list.length; i++) {
+        var entry = list[i];
+        var cell = prototypes[entry.meta.id];
+        if (!cell) continue;
+        var size = interfaceVisualSize(cell, side);
+        var offset = Number(entry.meta.bundleCenterOffset != null ? entry.meta.bundleCenterOffset : entry.meta.offset);
+        if (!isFinite(offset)) offset = (i + 1) / (list.length + 1);
+        var x = bodyRect.x;
+        var y = bodyRect.y;
+        if (side === 'left') {
+          x = bodyRect.x - size.width - 12;
+          y = bodyRect.y + Math.round(offset * bodyRect.height - size.height / 2);
+        } else if (side === 'right') {
+          x = bodyRect.x + bodyRect.width + 12;
+          y = bodyRect.y + Math.round(offset * bodyRect.height - size.height / 2);
+        } else if (side === 'top') {
+          x = bodyRect.x + Math.round(offset * bodyRect.width - size.width / 2);
+          y = bodyRect.y - size.height - 12;
+        } else {
+          x = bodyRect.x + Math.round(offset * bodyRect.width - size.width / 2);
+          y = bodyRect.y + bodyRect.height + 12;
+        }
+        placements.push({ marker: entry, cell: cell, x: x, y: y });
+      }
+    }
+
+    placeSide('left', bySide.left);
+    placeSide('right', bySide.right);
+    placeSide('top', bySide.top);
+    placeSide('bottom', bySide.bottom);
+    return placements;
+  }
+
+  function lockChildrenStyles(graph, cells) {
+    for (var i = 0; i < cells.length; i++) {
+      var style = cells[i].style || '';
+      style = mxUtils.setStyle(style, 'movable', '0');
+      style = mxUtils.setStyle(style, 'resizable', '0');
+      style = mxUtils.setStyle(style, 'rotatable', '0');
+      graph.getModel().setStyle(cells[i], style);
+    }
+  }
+
+  function buildShellGroup(graph, moduleName, cells) {
+    if (!cells.length) return null;
+    var group = graph.groupCells(null, 0, cells);
+    if (!group) return null;
+    var style = group.style || '';
+    style = mxUtils.setStyle(style, 'fillColor', 'none');
+    style = mxUtils.setStyle(style, 'strokeColor', 'none');
+    style = mxUtils.setStyle(style, 'rounded', '0');
+    style = mxUtils.setStyle(style, 'movable', '1');
+    style = mxUtils.setStyle(style, 'resizable', '1');
+    style = mxUtils.setStyle(style, 'rotatable', '0');
+    style = mxUtils.setStyle(style, 'aspect', 'fixed');
+    style = mxUtils.setStyle(style, 'connectable', '0');
+    style = mxUtils.setStyle(style, 'flowModuleShell', '1');
+    style = mxUtils.setStyle(style, 'flowModule', moduleName || '');
+    graph.getModel().setStyle(group, style);
+    return group;
+  }
+
+  async function materializeModulePage(ui, moduleName, markerEntries) {
     clearCurrentGraph(ui);
-    var body = addBodyPlaceholder(ui, modulePlan);
-    var createdSources = [];
-    for (var i = 0; i < modulePlan.sources.length; i++) {
-      modulePlan.sources[i].moduleName = modulePlan.moduleName;
-      createdSources.push(await materializeSource(ui, bodyRectInPage(body), modulePlan.sources[i]));
+    var graph = Shared.graphOf(ui);
+    var parent = Shared.getDefaultParent(ui);
+    if (!graph || !parent) throw new Error('Graph is not ready for materialization.');
+
+    var metrics = pageMetrics(graph);
+    var bySide = countBySide(markerEntries);
+    var interfacePrototypes = {};
+    for (var i = 0; i < markerEntries.length; i++) interfacePrototypes[markerEntries[i].meta.id] = createInterfaceCell(graph, markerEntries[i].meta);
+
+    var sideBand = 64;
+    var topBand = 64;
+    var bodyRect = {
+      x: metrics.margin + sideBand,
+      y: metrics.margin + topBand,
+      width: Math.max(480, metrics.width - metrics.margin * 2 - sideBand * 2),
+      height: Math.max(320, metrics.height - metrics.margin * 2 - topBand * 2)
+    };
+
+    graph.getModel().beginUpdate();
+    try {
+      var body = addCellAt(graph, parent, createFloorplanModuleCell(graph, moduleName, bodyRect.width, bodyRect.height), bodyRect.x, bodyRect.y);
+      var placements = positionInterfacesAroundBody(bodyRect, bySide, interfacePrototypes);
+      var addedInterfaces = [];
+      for (var p = 0; p < placements.length; p++) addedInterfaces.push(addCellAt(graph, parent, placements[p].cell, placements[p].x, placements[p].y));
+      var shellChildren = [body].concat(addedInterfaces);
+      lockChildrenStyles(graph, shellChildren);
+      var shell = buildShellGroup(graph, moduleName, shellChildren);
+      return { body: body, interfaces: addedInterfaces, shell: shell };
+    } finally {
+      graph.getModel().endUpdate();
     }
-    var createdInterfaces = await materializeInterfaces(ui, body, modulePlan);
-    return { body: body, sources: createdSources, interfaces: createdInterfaces };
   }
+
+  Designs.collectGeneratedMarkerMeta = collectGeneratedMarkerMeta;
+  Designs.collectDesignInputs = function collectDesignInputs(ui) {
+    return groupMarkersByModule(collectGeneratedMarkerMeta(ui));
+  };
 
   Designs.generateTopLevelDesigns = async function generateTopLevelDesigns(ui, analysis, opts) {
     opts = opts || {};
     analysis = analysis || Analysis.analyzeDataflow(ui);
-    var planMap = analysis.interfacePlan && analysis.interfacePlan.modulePlans || {};
-    var moduleNames = Object.keys(planMap).sort();
-    if (!moduleNames.length) throw new Error('No modules available for design generation.');
+    var designInputs = Designs.collectDesignInputs(ui);
+    var moduleNames = Object.keys(designInputs).sort();
+    if (!moduleNames.length) throw new Error('No generated floorplan interfaces found. Generate interfaces first.');
     var previousCtx = captureCurrentPageCtx(ui);
     var results = [];
     try {
       for (var i = 0; i < moduleNames.length; i++) {
         var moduleName = moduleNames[i];
-        var modulePlan = planMap[moduleName];
+        var markerEntries = designInputs[moduleName];
         var ensured = await ensureTopLevelDesign(ui, moduleName);
         var design = ensured.design;
         await ensurePage(ui, design, 'main');
         await withOpenedPage(ui, design, 'main', async function () {
-          await materializeModulePage(ui, modulePlan);
+          await materializeModulePage(ui, moduleName, markerEntries);
         });
-        results.push({ module: moduleName, design: design, createdDesign: ensured.created, page: 'main', markerCount: modulePlan.markers.length, sourceCount: modulePlan.sources.length });
+        results.push({
+          module: moduleName,
+          design: design,
+          createdDesign: ensured.created,
+          page: 'main',
+          markerCount: markerEntries.length
+        });
       }
     } finally {
       await restorePageCtx(ui, previousCtx);
