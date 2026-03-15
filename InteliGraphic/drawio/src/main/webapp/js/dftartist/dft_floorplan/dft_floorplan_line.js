@@ -43,6 +43,12 @@
         return a.x === b.x && a.y === b.y;
     }
 
+    function isFloorplanLineCell(graph, cell) {
+        if (!graph || !cell || !cell.edge) return false;
+        var style = graph.getCellStyle(cell);
+        return String(mxUtils.getValue(style, 'floorplanLine', '0')) === '1';
+    }
+
     function isDegenerateLine(geo) {
         var noPoints = !geo.points || geo.points.length === 0;
         return noPoints && samePoint(geo.sourcePoint, geo.targetPoint);
@@ -50,6 +56,203 @@
 
     function getEndPointForMode(geo, mode) {
         return (mode === 'head') ? clonePoint(geo.sourcePoint) : clonePoint(geo.targetPoint);
+    }
+
+    function getPolylinePoints(geo) {
+        var out = [];
+        if (!geo) return out;
+        if (geo.sourcePoint) out.push(clonePoint(geo.sourcePoint));
+        if (geo.points && geo.points.length) {
+            for (var i = 0; i < geo.points.length; i++) {
+                if (geo.points[i]) out.push(clonePoint(geo.points[i]));
+            }
+        }
+        if (geo.targetPoint) out.push(clonePoint(geo.targetPoint));
+        return out;
+    }
+
+    function pointOnSegment(pt, a, b) {
+        if (!pt || !a || !b) return false;
+        var minX = Math.min(a.x, b.x);
+        var maxX = Math.max(a.x, b.x);
+        var minY = Math.min(a.y, b.y);
+        var maxY = Math.max(a.y, b.y);
+        if (pt.x < minX || pt.x > maxX || pt.y < minY || pt.y > maxY) return false;
+
+        var cross = (pt.x - a.x) * (b.y - a.y) - (pt.y - a.y) * (b.x - a.x);
+        return Math.abs(cross) < 0.0001;
+    }
+
+    function findVertexIndex(points, pt) {
+        if (!points || !pt) return -1;
+        for (var i = 0; i < points.length; i++) {
+            if (samePoint(points[i], pt)) return i;
+        }
+        return -1;
+    }
+
+    function findSnapPointOnLine(graph, edge, rawPt) {
+        if (!graph || !edge || !rawPt) return null;
+        var geo = graph.getCellGeometry(edge);
+        var pts = getPolylinePoints(geo);
+        if (pts.length < 2) return null;
+
+        var existingIndex = findVertexIndex(pts, rawPt);
+        if (existingIndex >= 0) {
+            return {
+                point: clonePoint(rawPt),
+                segmentIndex: Math.max(0, Math.min(existingIndex, pts.length - 2)),
+                vertexIndex: existingIndex,
+                exactVertex: true
+            };
+        }
+
+        for (var i = 0; i < pts.length - 1; i++) {
+            if (pointOnSegment(rawPt, pts[i], pts[i + 1])) {
+                return {
+                    point: clonePoint(rawPt),
+                    segmentIndex: i,
+                    vertexIndex: -1,
+                    exactVertex: false
+                };
+            }
+        }
+
+        return null;
+    }
+
+    function insertVertexIntoLineGeometry(geo, branchPt, segmentIndex) {
+        if (!geo || !branchPt) return { geometry: cloneLineGeometry(geo), vertexIndex: -1 };
+
+        var g = cloneLineGeometry(geo);
+        var pts = getPolylinePoints(g);
+        var existingIndex = findVertexIndex(pts, branchPt);
+        if (existingIndex >= 0) {
+            return { geometry: g, vertexIndex: existingIndex };
+        }
+
+        g.points = g.points || [];
+        var insertAt = Math.max(0, Math.min(g.points.length, Number(segmentIndex) || 0));
+        g.points.splice(insertAt, 0, clonePoint(branchPt));
+        return {
+            geometry: g,
+            vertexIndex: insertAt + 1
+        };
+    }
+
+    function getLineAnchorMeta(graph, edge, anchorSide) {
+        if (!graph || !edge) return null;
+        var style = graph.getCellStyle(edge);
+        if (String(mxUtils.getValue(style, 'dftFloorplanAnchor_' + anchorSide, '0')) !== '1') return null;
+        if (String(mxUtils.getValue(style, 'dftFloorplanAnchor_' + anchorSide + '_kind', '')) !== 'linePoint') return null;
+
+        var lineId = mxUtils.getValue(style, 'dftFloorplanAnchor_' + anchorSide + '_lineId', '');
+        var x = parseFloat(mxUtils.getValue(style, 'dftFloorplanAnchor_' + anchorSide + '_x', ''));
+        var y = parseFloat(mxUtils.getValue(style, 'dftFloorplanAnchor_' + anchorSide + '_y', ''));
+        if (!lineId || isNaN(x) || isNaN(y)) return null;
+
+        return {
+            lineId: String(lineId),
+            point: new mxPoint(x, y)
+        };
+    }
+
+    function attachFloorplanLinePointAnchor(graph, edge, line, point, anchorSide) {
+        if (!graph || !edge || !line || !point) return;
+        var style = edge.getStyle() || '';
+        style = mxUtils.setStyle(style, 'dftFloorplanAnchor_' + anchorSide, '1');
+        style = mxUtils.setStyle(style, 'dftFloorplanAnchor_' + anchorSide + '_kind', 'linePoint');
+        style = mxUtils.setStyle(style, 'dftFloorplanAnchor_' + anchorSide + '_lineId', String(line.getId ? line.getId() : line.id));
+        style = mxUtils.setStyle(style, 'dftFloorplanAnchor_' + anchorSide + '_x', String(point.x));
+        style = mxUtils.setStyle(style, 'dftFloorplanAnchor_' + anchorSide + '_y', String(point.y));
+        graph.getModel().setStyle(edge, style);
+    }
+
+    function detachFloorplanLinePointAnchor(graph, edge, anchorSide) {
+        if (!graph || !edge) return;
+        var style = edge.getStyle() || '';
+        style = mxUtils.setStyle(style, 'dftFloorplanAnchor_' + anchorSide, '0');
+        style = mxUtils.setStyle(style, 'dftFloorplanAnchor_' + anchorSide + '_kind', '');
+        style = mxUtils.setStyle(style, 'dftFloorplanAnchor_' + anchorSide + '_lineId', '');
+        style = mxUtils.setStyle(style, 'dftFloorplanAnchor_' + anchorSide + '_x', '');
+        style = mxUtils.setStyle(style, 'dftFloorplanAnchor_' + anchorSide + '_y', '');
+        graph.getModel().setStyle(edge, style);
+    }
+
+    function translateDeltaForPolyline(oldGeo, newGeo) {
+        var oldPts = getPolylinePoints(oldGeo);
+        var newPts = getPolylinePoints(newGeo);
+        if (oldPts.length !== newPts.length || oldPts.length === 0) return null;
+
+        var dx = newPts[0].x - oldPts[0].x;
+        var dy = newPts[0].y - oldPts[0].y;
+        for (var i = 1; i < oldPts.length; i++) {
+            if (newPts[i].x - oldPts[i].x !== dx || newPts[i].y - oldPts[i].y !== dy) return null;
+        }
+
+        return { dx: dx, dy: dy };
+    }
+
+    function resolveLineAnchorPoint(oldGeo, newGeo, oldPoint) {
+        if (!newGeo || !oldPoint) return null;
+        var newPts = getPolylinePoints(newGeo);
+        var exactIndex = findVertexIndex(newPts, oldPoint);
+        if (exactIndex >= 0) return clonePoint(newPts[exactIndex]);
+
+        var delta = translateDeltaForPolyline(oldGeo, newGeo);
+        if (delta) return new mxPoint(oldPoint.x + delta.dx, oldPoint.y + delta.dy);
+
+        return null;
+    }
+
+    function syncLineAnchoredBranches(graph, line, oldGeoOverride) {
+        if (!graph || !line) return;
+        var lineId = String(line.getId ? line.getId() : line.id);
+        var model = graph.getModel();
+        var root = model.getRoot();
+        var lineGeo = graph.getCellGeometry(line);
+        if (!lineGeo) return;
+
+        function visit(cell, out) {
+            if (!cell) return;
+            if (cell.edge) out.push(cell);
+            var count = model.getChildCount(cell);
+            for (var i = 0; i < count; i++) visit(model.getChildAt(cell, i), out);
+        }
+
+        var edges = [];
+        visit(root, edges);
+
+        model.beginUpdate();
+        try {
+            for (var i = 0; i < edges.length; i++) {
+                var edge = edges[i];
+                if (edge === line || !isFloorplanLineCell(graph, edge)) continue;
+                var dirty = false;
+                var geo = graph.getCellGeometry(edge);
+                if (!geo) continue;
+                var nextGeo = cloneLineGeometry(geo);
+
+                for (var s = 0; s < 2; s++) {
+                    var side = s === 0 ? 'source' : 'target';
+                    var meta = getLineAnchorMeta(graph, edge, side);
+                    if (!meta || meta.lineId !== lineId) continue;
+
+                    var nextPt = resolveLineAnchorPoint(oldGeoOverride || lineGeo, lineGeo, meta.point);
+                    if (!nextPt) continue;
+
+                    if (side === 'source') nextGeo.sourcePoint = clonePoint(nextPt);
+                    else nextGeo.targetPoint = clonePoint(nextPt);
+
+                    attachFloorplanLinePointAnchor(graph, edge, line, nextPt, side);
+                    dirty = true;
+                }
+
+                if (dirty) model.setGeometry(edge, nextGeo);
+            }
+        } finally {
+            model.endUpdate();
+        }
     }
 
     function toGraphPoint(graph, evt) {
@@ -323,6 +526,8 @@
             graph.getModel().setGeometry(tool.edge, cloneLineGeometry(tool.baseGeo));
         }
         tool.active = false;
+        tool.mode = 'draw';
+        tool.branchSourceEdge = null;
         if (!preserveSession) {
             tool.continueMode = 'tail';
             tool.edge = null;
@@ -347,6 +552,7 @@
 
         var tool = {
             active: false,
+            mode: 'draw',
             continueMode: 'tail',
             edge: null,
             baseGeo: null,
@@ -355,13 +561,15 @@
             history: [],
             options: null,
             previewSnap: null,
-            ignoreNextMouseDown: false
+            ignoreNextMouseDown: false,
+            branchSourceEdge: null
         };
 
         realUi.floorplanLineTool = tool;
 
         function beginTool(mode, edgeCell, opt) {
             tool.active = true;
+            tool.mode = 'draw';
             tool.continueMode = mode || 'tail';
             tool.edge = edgeCell || null;
             tool.baseGeo = edgeCell ? cloneLineGeometry(graph.getCellGeometry(edgeCell)) : null;
@@ -369,8 +577,27 @@
             tool.options = opt || null;
             tool.previewSnap = null;
             tool.ignoreNextMouseDown = false;
+            tool.branchSourceEdge = null;
             if (tool.prevCursor == null) tool.prevCursor = graph.container.style.cursor;
             graph.container.style.cursor = 'crosshair';
+        }
+
+        function beginBranchPick(edgeCell) {
+            if (!isFloorplanLineCell(graph, edgeCell)) return false;
+            tool.active = false;
+            tool.mode = 'branchPick';
+            tool.continueMode = 'tail';
+            tool.edge = null;
+            tool.baseGeo = null;
+            tool.history = [];
+            tool.options = null;
+            tool.previewSnap = null;
+            tool.ignoreNextMouseDown = false;
+            tool.branchSourceEdge = edgeCell;
+            if (tool.prevCursor == null) tool.prevCursor = graph.container.style.cursor;
+            graph.container.style.cursor = 'crosshair';
+            graph.setSelectionCell(edgeCell);
+            return true;
         }
 
         function createEdgeAtPoint(pt, opt) {
@@ -396,6 +623,46 @@
 
         realUi.startFloorplanLine = function () {
             beginTool('tail', null, null);
+        };
+
+        realUi.startFloorplanBranchPicker = function (cell) {
+            if (!cell || !cell.edge || !isFloorplanLineCell(graph, cell)) {
+                if (typeof mxUtils !== 'undefined' && mxUtils.alert) mxUtils.alert('请先选中一条 Floorplan Line。');
+                return false;
+            }
+            return beginBranchPick(cell);
+        };
+
+        realUi.startFloorplanBranchFromLine = function (cell, branchPt) {
+            if (!cell || !branchPt || !isFloorplanLineCell(graph, cell)) return null;
+
+            var baseGeo = graph.getCellGeometry(cell);
+            if (!baseGeo) return null;
+
+            var hit = findSnapPointOnLine(graph, cell, branchPt);
+            if (!hit || !hit.point) return null;
+
+            var inserted = insertVertexIntoLineGeometry(baseGeo, hit.point, hit.segmentIndex);
+
+            graph.getModel().beginUpdate();
+            try {
+                graph.getModel().setGeometry(cell, inserted.geometry);
+                syncLineAnchoredBranches(graph, cell, baseGeo);
+            } finally {
+                graph.getModel().endUpdate();
+            }
+
+            return realUi.startFloorplanLineFromPoint(hit.point, {
+                decorateEdge: function (edge, g) {
+                    attachFloorplanLinePointAnchor(g, edge, cell, hit.point, 'source');
+                    detachFloorplanLinePointAnchor(g, edge, 'target');
+                },
+                afterCommitPoint: function (ctx) {
+                    var edge = ctx && ctx.tool ? ctx.tool.edge : null;
+                    if (!edge) return;
+                    attachFloorplanLinePointAnchor(graph, edge, cell, hit.point, 'source');
+                }
+            });
         };
 
         realUi.startFloorplanLineFromPoint = function (pt, opt) {
@@ -436,9 +703,23 @@
 
         graph.addMouseListener({
             mouseDown: function (sender, me) {
-                if (!tool.active) return;
                 var evt = me.getEvent();
                 if (!mxEvent.isLeftMouseButton(evt)) return;
+
+                if (tool.mode === 'branchPick') {
+                    var branchPt = toGraphPoint(graph, evt);
+                    var branchLine = tool.branchSourceEdge;
+                    if (branchLine && realUi.startFloorplanBranchFromLine(branchLine, branchPt)) {
+                        me.consume();
+                        mxEvent.consume(evt);
+                        return;
+                    }
+                    me.consume();
+                    mxEvent.consume(evt);
+                    return;
+                }
+
+                if (!tool.active) return;
                 if (tool.ignoreNextMouseDown) {
                     tool.ignoreNextMouseDown = false;
                     me.consume();
@@ -453,7 +734,9 @@
                     if (!tool.edge) {
                         createEdgeAtPoint(pt, {});
                     } else {
+                        var oldGeo = cloneLineGeometry(tool.baseGeo);
                         commitPoint(graph, tool, pt);
+                        if (tool.edge && oldGeo) syncLineAnchoredBranches(graph, tool.edge, oldGeo);
                     }
                 } finally {
                     graph.getModel().endUpdate();
@@ -479,7 +762,9 @@
                 var pt = toGraphPoint(graph, evt);
                 graph.getModel().beginUpdate();
                 try {
+                    var oldGeo = cloneLineGeometry(tool.baseGeo);
                     commitPoint(graph, tool, pt);
+                    if (tool.edge && oldGeo) syncLineAnchoredBranches(graph, tool.edge, oldGeo);
                 } finally {
                     graph.getModel().endUpdate();
                 }
@@ -495,7 +780,7 @@
 
         graph.dblClick = (function (oldFn) {
             return function (evt, cell) {
-                if (tool.active) {
+                if (tool.active || tool.mode === 'branchPick') {
                     clearTool(graph, tool, true);
                     if (evt) mxEvent.consume(evt);
                     return;
@@ -522,10 +807,11 @@
                     if (typeof evt.stopImmediatePropagation === 'function') evt.stopImmediatePropagation();
                     else if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
                     undoLastCommittedPoint(graph, tool);
+                    if (tool.edge) syncLineAnchoredBranches(graph, tool.edge);
                     return false;
                 }
 
-                if (tool.active && (evt.key === 'Escape' || evt.key === 'Enter')) {
+                if ((tool.active || tool.mode === 'branchPick') && (evt.key === 'Escape' || evt.key === 'Enter')) {
                     if (typeof evt.preventDefault === 'function') evt.preventDefault();
                     if (typeof evt.stopImmediatePropagation === 'function') evt.stopImmediatePropagation();
                     else if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
@@ -554,6 +840,13 @@
                     realUi.continueFloorplanLineFromTail(graph.getSelectionCell());
                     return false;
                 }
+                if (evt.shiftKey && !evt.ctrlKey && !evt.altKey && (evt.key === 'B' || evt.key === 'b')) {
+                    if (typeof evt.preventDefault === 'function') evt.preventDefault();
+                    if (typeof evt.stopImmediatePropagation === 'function') evt.stopImmediatePropagation();
+                    else if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
+                    realUi.startFloorplanBranchPicker(graph.getSelectionCell());
+                    return false;
+                }
                 if (evt.shiftKey && !evt.ctrlKey && !evt.altKey && (evt.key === 'O' || evt.key === 'o')) {
                     if (typeof evt.preventDefault === 'function') evt.preventDefault();
                     if (typeof evt.stopImmediatePropagation === 'function') evt.stopImmediatePropagation();
@@ -565,6 +858,42 @@
 
             if (document.addEventListener) document.addEventListener('keydown', keydownHandler, true);
             else mxEvent.addListener(document, 'keydown', keydownHandler);
+        }
+
+        if (realUi.actions && !realUi._dftsFloorplanLineActionsInstalled) {
+            realUi._dftsFloorplanLineActionsInstalled = true;
+            realUi.actions.addAction('startSelectedFloorplanLineBranch', function () {
+                realUi.startFloorplanBranchPicker(graph.getSelectionCell());
+            }, null, null, 'Shift+B');
+        }
+
+        if (realUi.menus && !realUi._dftsFloorplanLineMenusInstalled) {
+            realUi._dftsFloorplanLineMenusInstalled = true;
+            var oldCreatePopupMenu = realUi.menus.createPopupMenu;
+            realUi.menus.createPopupMenu = function (menu, cell, evt) {
+                oldCreatePopupMenu.apply(this, arguments);
+                if (graph.getSelectionCount() !== 1) return;
+                var selected = graph.getSelectionCell();
+                if (!isFloorplanLineCell(graph, selected)) return;
+                menu.addSeparator();
+                menu.addItem('Add Branch', null, function () {
+                    realUi.startFloorplanBranchPicker(selected);
+                }, null, null, true);
+            };
+        }
+
+        if (!graph._dftsFloorplanLineBranchSyncInstalled) {
+            graph._dftsFloorplanLineBranchSyncInstalled = true;
+            graph.getModel().addListener(mxEvent.CHANGE, function (sender, evt) {
+                var edits = evt.getProperty('edit');
+                edits = edits && edits.changes ? edits.changes : [];
+                for (var i = 0; i < edits.length; i++) {
+                    var change = edits[i];
+                    if (!(change instanceof mxGeometryChange)) continue;
+                    if (!isFloorplanLineCell(graph, change.cell)) continue;
+                    syncLineAnchoredBranches(graph, change.cell, change.previous);
+                }
+            });
         }
     }
 
@@ -675,6 +1004,12 @@
     NS.normalizeGraph = normalizeGraph;
     NS.clonePoint = clonePoint;
     NS.cloneLineGeometry = cloneLineGeometry;
+    NS.isFloorplanLineCell = isFloorplanLineCell;
+    NS.getPolylinePoints = getPolylinePoints;
+    NS.findSnapPointOnLine = findSnapPointOnLine;
+    NS.attachFloorplanLinePointAnchor = attachFloorplanLinePointAnchor;
+    NS.detachFloorplanLinePointAnchor = detachFloorplanLinePointAnchor;
+    NS.syncLineAnchoredBranches = syncLineAnchoredBranches;
     NS.ensurePerimeterRegistered = ensurePerimeterRegistered;
     NS.buildFloorplanLineCell = buildFloorplanLineCell;
     NS.enableFloorplanFreeConnect = enableFloorplanFreeConnect;
