@@ -83,6 +83,39 @@
         return !!fallback;
     }
 
+    function parseNumberStyle(v, fallback) {
+        var n = parseFloat(v);
+        return isNaN(n) ? fallback : n;
+    }
+
+    function normalizeRotation(v) {
+        var n = parseNumberStyle(v, 0) % 360;
+        if (n < 0) n += 360;
+        return n;
+    }
+
+    function rotatePoint(x, y, cx, cy, deg) {
+        var rad = deg * Math.PI / 180;
+        var dx = x - cx;
+        var dy = y - cy;
+        var cos = Math.cos(rad);
+        var sin = Math.sin(rad);
+        return {
+            x: cx + dx * cos - dy * sin,
+            y: cy + dx * sin + dy * cos
+        };
+    }
+
+    function placeRotatedRect(boxWidth, boxHeight, centerX, centerY, rectWidth, rectHeight, deg) {
+        var center = rotatePoint(centerX, centerY, boxWidth / 2, boxHeight / 2, deg);
+        return new mxGeometry(
+            Math.round(center.x - rectWidth / 2),
+            Math.round(center.y - rectHeight / 2),
+            rectWidth,
+            rectHeight
+        );
+    }
+
     function isAutoInstanceName(instanceName, moduleName) {
         var inst = normalizeToken(instanceName);
         var mod = normalizeToken(moduleName);
@@ -120,12 +153,72 @@
         return isFloorplanModuleCell(graph, parent) ? parent : null;
     }
 
+    function getMuxPortLabelCell(moduleCell, key) {
+        if (!moduleCell || !moduleCell.children) return null;
+        for (var i = 0; i < moduleCell.children.length; i++) {
+            var child = moduleCell.children[i];
+            if (child && child.__dftsFloorplanMuxPort === key) return child;
+        }
+        return null;
+    }
+
+    function ensureMuxPortLabel(moduleCell, key, text, x, y, width, height, align) {
+        if (!moduleCell) return null;
+        var child = getMuxPortLabelCell(moduleCell, key);
+        var moduleStyle = String(moduleCell.style || '');
+        var rotation = normalizeRotation(styleValue(moduleStyle, 'rotation', '0'));
+        var childStyle = [
+            'shape=text',
+            'html=1',
+            'whiteSpace=wrap',
+            'align=' + (align || 'center'),
+            'verticalAlign=middle',
+            'strokeColor=none',
+            'fillColor=none',
+            'resizable=0',
+            'movable=0',
+            'rotatable=0',
+            'deletable=0',
+            'editable=0',
+            'selectable=0',
+            'fontStyle=0',
+            'fontSize=16',
+            'fontColor=#111111',
+            'rotation=' + rotation
+        ].join(';') + ';';
+        var boxWidth = Math.max(1, Math.round(Number(moduleCell.geometry && moduleCell.geometry.width || 0)));
+        var boxHeight = Math.max(1, Math.round(Number(moduleCell.geometry && moduleCell.geometry.height || 0)));
+        var geo = placeRotatedRect(boxWidth, boxHeight, x + width / 2, y + height / 2, width, height, rotation);
+        if (!child) {
+            child = new mxCell(text, geo, childStyle);
+            child.vertex = true;
+            child.connectable = false;
+            child.__dftsFloorplanMuxPort = key;
+            moduleCell.insert(child);
+        } else {
+            child.value = text;
+            child.style = childStyle;
+            child.geometry = geo;
+        }
+        return child;
+    }
+
+    function decorateFloorplanMuxCell(cell) {
+        if (!cell || !cell.geometry) return;
+        var width = Math.max(60, Math.round(Number(cell.geometry.width || 0)));
+        var height = Math.max(40, Math.round(Number(cell.geometry.height || 0)));
+        ensureMuxPortLabel(cell, 'q', 'Q', Math.round(width * 0.42), Math.round(height * 0.06), 30, 24, 'center');
+        ensureMuxPortLabel(cell, 'i0', 'I0', Math.round(width * 0.16), Math.round(height * 0.82), 36, 24, 'center');
+        ensureMuxPortLabel(cell, 'i1', 'I1', Math.round(width * 0.66), Math.round(height * 0.82), 36, 24, 'center');
+    }
+
     function syncInstanceLabelCell(graph, moduleCell) {
         if (!graph || !moduleCell || !isFloorplanModuleCell(graph, moduleCell)) return;
         var model = graph.getModel();
         var style = String(moduleCell.style || '');
         var moduleName = trim(styleValue(style, 'dftsFloorplan_moduleName', '')) || firstMeaningfulLine(moduleCell.value);
         var instanceName = trim(styleValue(style, 'dftsFloorplan_instanceName', ''));
+        var rotation = normalizeRotation(styleValue(style, 'rotation', '0'));
         var geo = moduleCell.geometry;
         if (!geo) return;
         var child = getInstanceLabelCell(graph, moduleCell);
@@ -147,12 +240,20 @@
             'fontStyle=0',
             'fontSize=' + fontSize,
             'fontColor=#666666',
-            'dftsFloorplanInstanceLabel=1'
+            'dftsFloorplanInstanceLabel=1',
+            'rotation=' + rotation
         ].join(';') + ';';
         var childWidth = Math.max(40, Math.round(Number(geo.width || 0) - 20));
         var childHeight = Math.max(14, Math.round(fontSize * 1.6));
-        var childX = Math.max(0, Math.round((Number(geo.width || 0) - childWidth) / 2));
-        var childY = Math.max(0, Math.round(Number(geo.height || 0) * 0.68));
+        var childGeo = placeRotatedRect(
+            Number(geo.width || 0),
+            Number(geo.height || 0),
+            Number(geo.width || 0) / 2,
+            Number(geo.height || 0) * 0.76,
+            childWidth,
+            childHeight,
+            rotation
+        );
         model.beginUpdate();
         try {
             if (!instanceName) {
@@ -160,7 +261,7 @@
                 return;
             }
             if (!child) {
-                child = new mxCell(instanceName, new mxGeometry(childX, childY, childWidth, childHeight), childStyle);
+                child = new mxCell(instanceName, childGeo, childStyle);
                 child.vertex = true;
                 child.connectable = false;
                 child.__dftsFloorplanInstanceLabel = true;
@@ -168,11 +269,14 @@
             } else {
                 model.setValue(child, instanceName);
                 model.setStyle(child, childStyle);
-                model.setGeometry(child, new mxGeometry(childX, childY, childWidth, childHeight));
+                model.setGeometry(child, childGeo);
             }
             child.visible = true;
         } finally {
             model.endUpdate();
+        }
+        if (String(styleValue(style, 'dftsFloorplan_type', '')) === 'mux2') {
+            decorateFloorplanMuxCell(moduleCell);
         }
         if (graph.refresh) graph.refresh(moduleCell);
     }
@@ -396,7 +500,7 @@
         }
 
         var style = [
-            'shape=rectangle',
+            'shape=' + (def.shape || 'rectangle'),
             'rounded=' + rounded,
             'whiteSpace=wrap',
             'html=1',
@@ -419,6 +523,7 @@
             'dftsFloorplan_instanceAuto=' + (instanceName ? '1' : '0'),
             'dftsFloorplan_designLevel='
         ].join(';') + ';';
+        if (def.extraStyle) style += String(def.extraStyle);
 
         var cell = new mxCell(label, new mxGeometry(0, 0, w, h), style);
         cell.vertex = true;
@@ -465,6 +570,24 @@
         fontSize: 20
     });
 
+    registerDefinition({
+        key: 'FloorplanMux2',
+        typeName: 'mux2',
+        defaultLabel: 'MUX',
+        autoLabelPrefix: 'MUX',
+        instanceBaseName: 'MUX',
+        w: 180,
+        h: 120,
+        shape: 'trapezoid',
+        extraStyle: 'direction=east;',
+        rounded: 0,
+        strokeWidth: 1,
+        fontSize: 20,
+        afterCreate: function (graph, cell) {
+            decorateFloorplanMuxCell(cell);
+        }
+    });
+
     function buildFallbackLineCell() {
         var lineNS = getLineNS();
         if (lineNS && lineNS.buildFloorplanLineCell) return lineNS.buildFloorplanLineCell();
@@ -493,6 +616,11 @@
                     var graph = sidebar.editorUi.editor.graph;
                     var cell = createByKey(graph, 'FloorplanModule', {});
                     return this.createVertexTemplateFromCells([cell], cell.geometry.width, cell.geometry.height, 'Floorplan Module');
+                }),
+                mxUtils.bind(this, function () {
+                    var graph = sidebar.editorUi.editor.graph;
+                    var cell = createByKey(graph, 'FloorplanMux2', {});
+                    return this.createVertexTemplateFromCells([cell], cell.geometry.width, cell.geometry.height, 'Floorplan Mux');
                 }),
                 // mxUtils.bind(this, function () {
                 //     var graph = sidebar.editorUi.editor.graph;
@@ -553,6 +681,7 @@
     installFloorplanLabelRenderer();
 
     global.buildFloorplanModule = makeCreateFn('FloorplanModule');
+    global.buildFloorplanMux2 = makeCreateFn('FloorplanMux2');
     global.installFloorplanPalette = installFloorplanPalette;
     global.installFloorplanIp = installFloorplanIp;
 
