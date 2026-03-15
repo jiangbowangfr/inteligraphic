@@ -23,10 +23,15 @@
         return opt.pinLabel || opt.pin_label || opt.deviceLabel || fallback || '';
     }
 
+    function withTrailingUnderscore(v) {
+        v = String(v || '').replace(/^_+|_+$/g, '');
+        return v ? (v + '_') : '';
+    }
+
     function registerInterface(def) {
         def.category = NS.CATEGORY.INTERFACE;
         def.useSymbolEngine = true;
-        def.labelPolicy = NS.POLICY.LABEL_USER_OR_AUTO_INCREMENT;
+        def.labelPolicy = NS.POLICY.LABEL_FIXED;
         def.instancePolicy = NS.POLICY.INSTANCE_DISABLED;
         def.lockBodyLabel = false;
         NS.registerDefinition(def);
@@ -44,219 +49,182 @@
 
     NS.registerConfigOpener('interface_common', openInterfaceConfigFallback);
 
-    registerInterface({
-        key: 'SSNHostInterface',
-        dftsType: 'ssn_host_interface',
-        defaultLabel: 'SSN_HOST',
-        autoLabelPrefix: 'SSN_HOST',
-        configKey: 'interface_common',
-        useDefSize: true,
-        w: 190, h: 40,
-        symbolMinW: 150, symbolMinH: 90,
-        bodyFont: 20, pinFont: 16,
-        pinsFactory: function (opt) {
-            var busWidth = opt.busWidth != null ? opt.busWidth : 4;
-            return {
-                west: [
-                    { name: 'ssn_bus_clock', type: 'clock_in', dir: 'input', pinKey: 'clock' },
-                    { name: 'ssn_bus_data_in' + NS.busSuffix(busWidth), type: 'data_in', dir: 'input', pinKey: 'data_in', busWidth: busWidth, isBus: (parseInt(busWidth, 10) || 1) > 1 },
-                    { name: 'ssn_bus_data_out' + NS.busSuffix(busWidth), type: 'data_out', dir: 'output', pinKey: 'data_out', busWidth: busWidth, isBus: (parseInt(busWidth, 10) || 1) > 1 }
-                ]
-            };
-        }
-    });
+    function clonePins(pins) {
+        return (pins || []).map(function (pin) {
+            return Object.assign({}, pin);
+        });
+    }
 
-    registerInterface({
-        key: 'SSNSlaveInterface',
-        dftsType: 'ssn_slave_interface',
-        defaultLabel: 'SSN_SLAVE',
-        autoLabelPrefix: 'SSN_SLAVE',
-        configKey: 'interface_common',
-        useDefSize: true,
-        w: 190, h: 40,
-        symbolMinW: 150, symbolMinH: 90,
-        bodyFont: 20, pinFont: 16,
-        pinsFactory: function (opt) {
-            var seed = pinLabelSeed(opt, '');
-            var busWidth = opt.busWidth != null ? opt.busWidth : 4;
-            return {
-                west: [
-                    { name: seed + 'ssn_to_bus_clock', type: 'clock_in', dir: 'input', pinKey: 'clock' },
-                    { name: seed + 'ssn_to_bus_data_in' + NS.busSuffix(busWidth), type: 'data_in', dir: 'input', pinKey: 'data_in', busWidth: busWidth, isBus: (parseInt(busWidth, 10) || 1) > 1 },
-                    { name: seed + 'ssn_from_bus_data_out' + NS.busSuffix(busWidth), type: 'data_out', dir: 'output', pinKey: 'data_out', busWidth: busWidth, isBus: (parseInt(busWidth, 10) || 1) > 1 }
-                ]
-            };
-        }
-    });
+    function groupPinsByDir(pins) {
+        var grouped = { west: [], east: [], north: [], south: [] };
+        clonePins(pins).forEach(function (pin) {
+            if ((pin && pin.dir) === 'output') grouped.east.push(pin);
+            else grouped.west.push(pin);
+        });
+        return grouped;
+    }
 
-    registerInterface({
-        key: 'BSCANHostInterface',
-        dftsType: 'bscan_host_interface',
-        defaultLabel: 'BSCAN_HOST',
-        autoLabelPrefix: 'BSCAN_HOST',
-        configKey: 'interface_common',
-        useDefSize: true,
-        w: 190, h: 40,
-        symbolMinW: 160, symbolMinH: 100,
-        bodyFont: 20, pinFont: 16,
-        pinsFactory: function () {
-            return {
-                west: [
-                    { name: 'bscan_select', type: 'data_in', dir: 'input', pinKey: 'select' },
-                    { name: 'bscan_force_disable', type: 'data_in', dir: 'input', pinKey: 'force_disable' },
-                    { name: 'bscan_select_jtag_input', type: 'data_in', dir: 'input', pinKey: 'select_jtag_input' },
-                    { name: 'bscan_select_jtag_output', type: 'data_in', dir: 'input', pinKey: 'select_jtag_output' },
-                    { name: 'bscan_clock', type: 'clock_in', dir: 'input', pinKey: 'clock' },
-                    { name: 'bscan_capture_en', type: 'data_in', dir: 'input', pinKey: 'capture_en' },
-                    { name: 'bscan_shift_en', type: 'data_in', dir: 'input', pinKey: 'shift_en' },
-                    { name: 'bscan_update_en', type: 'data_in', dir: 'input', pinKey: 'update_en' },
-                    { name: 'bscan_scan_in', type: 'data_in', dir: 'input', pinKey: 'scan_in' },
-                    { name: 'bscan_scan_out', type: 'data_out', dir: 'output', pinKey: 'scan_out' }
-                ]
-            };
+    function pickPins(pins, keys) {
+        var picked = [];
+        var wanted = {};
+        for (var i = 0; i < keys.length; i++) wanted[keys[i]] = true;
+        for (var j = 0; j < pins.length; j++) {
+            var pin = pins[j];
+            if (pin && wanted[pin.pinKey]) picked.push(pin);
         }
-    });
+        return picked;
+    }
 
-    registerInterface({
-        key: 'BSCANSlaveInterface',
-        dftsType: 'bscan_slave_interface',
-        defaultLabel: 'BSCAN_SLAVE',
-        autoLabelPrefix: 'BSCAN_SLAVE',
-        configKey: 'interface_common',
-        useDefSize: true,
-        w: 190, h: 40,
-        symbolMinW: 160, symbolMinH: 100,
-        bodyFont: 20, pinFont: 16,
-        pinsFactory: function (opt) {
-            var seed = pinLabelSeed(opt, '');
-            return {
-                west: [
-                    { name: seed + 'bscan_to_force_disable', type: 'data_in', dir: 'input', pinKey: 'force_disable' },
-                    { name: seed + 'bscan_to_select_jtag_input', type: 'data_in', dir: 'input', pinKey: 'select_jtag_input' },
-                    { name: seed + 'bscan_to_select_jtag_output', type: 'data_in', dir: 'input', pinKey: 'select_jtag_output' },
-                    { name: seed + 'bscan_to_clock', type: 'clock_in', dir: 'input', pinKey: 'clock' },
-                    { name: seed + 'bscan_to_capture_en', type: 'data_in', dir: 'input', pinKey: 'capture_en' },
-                    { name: seed + 'bscan_to_shift_en', type: 'data_in', dir: 'input', pinKey: 'shift_en' },
-                    { name: seed + 'bscan_to_update_en', type: 'data_in', dir: 'input', pinKey: 'update_en' },
-                    { name: seed + 'bscan_to_scan_in', type: 'data_in', dir: 'input', pinKey: 'scan_in' },
-                    { name: seed + 'bscan_from_scan_out', type: 'data_out', dir: 'output', pinKey: 'scan_out' }
-                ]
-            };
-        }
-    });
+    function registerInterfacePart(def) {
+        registerInterface({
+            key: def.key,
+            dftsType: def.dftsType,
+            defaultLabel: def.defaultLabel,
+            autoLabelPrefix: def.defaultLabel,
+            configKey: 'interface_common',
+            useDefSize: true,
+            w: def.w,
+            h: def.h,
+            symbolMinW: def.symbolMinW,
+            symbolMinH: def.symbolMinH,
+            bodyFont: 20,
+            pinFont: 16,
+            pinsFactory: function (opt) {
+                return groupPinsByDir(pickPins(def.pinFactory(opt), def.pinKeys));
+            }
+        });
+    }
 
-    registerInterface({
-        key: 'IJTAGHostInterface',
-        dftsType: 'ijtag_host_interface',
-        defaultLabel: 'IJTAG_HOST',
-        autoLabelPrefix: 'IJTAG_HOST',
-        configKey: 'interface_common',
-        useDefSize: true,
-        w: 190, h: 40,
-        symbolMinW: 160, symbolMinH: 100,
-        bodyFont: 20, pinFont: 16,
-        pinsFactory: function () {
-            return {
-                west: [
-                    { name: 'ijtag_tck', type: 'clock_in', dir: 'input', pinKey: 'tck' },
-                    { name: 'ijtag_reset', type: 'data_in', dir: 'input', pinKey: 'reset' },
-                    { name: 'ijtag_ce', type: 'data_in', dir: 'input', pinKey: 'ce' },
-                    { name: 'ijtag_se', type: 'data_in', dir: 'input', pinKey: 'se' },
-                    { name: 'ijtag_ue', type: 'data_in', dir: 'input', pinKey: 'ue' },
-                    { name: 'ijtag_sel', type: 'data_in', dir: 'input', pinKey: 'sel' },
-                    { name: 'ijtag_si', type: 'data_in', dir: 'input', pinKey: 'si' },
-                    { name: 'ijtag_so', type: 'data_out', dir: 'output', pinKey: 'so' }
-                ]
-            };
-        }
-    });
+    function buildSSNHostPins(opt) {
+        var busWidth = opt.busWidth != null ? opt.busWidth : 4;
+        var isBus = (parseInt(busWidth, 10) || 1) > 1;
+        return [
+            { name: 'ssn_bus_clock', type: 'clock_in', dir: 'input', pinKey: 'clock' },
+            { name: 'ssn_bus_data_in' + NS.busSuffix(busWidth), type: 'data_in', dir: 'input', pinKey: 'data_in', busWidth: busWidth, isBus: isBus },
+            { name: 'ssn_bus_data_out' + NS.busSuffix(busWidth), type: 'data_out', dir: 'output', pinKey: 'data_out', busWidth: busWidth, isBus: isBus }
+        ];
+    }
 
-    registerInterface({
-        key: 'IJTAGSlaveInterface',
-        dftsType: 'ijtag_slave_interface',
-        defaultLabel: 'IJTAG_SLAVE',
-        autoLabelPrefix: 'IJTAG_SLAVE',
-        configKey: 'interface_common',
-        useDefSize: true,
-        w: 190, h: 40,
-        symbolMinW: 160, symbolMinH: 100,
-        bodyFont: 20, pinFont: 16,
-        pinsFactory: function (opt) {
-            var seed = pinLabelSeed(opt, '');
-            return {
-                west: [
-                    { name: seed + 'ijtag_to_tck', type: 'clock_in', dir: 'input', pinKey: 'tck' },
-                    { name: seed + 'ijtag_to_reset', type: 'data_in', dir: 'input', pinKey: 'reset' },
-                    { name: seed + 'ijtag_to_ce', type: 'data_in', dir: 'input', pinKey: 'ce' },
-                    { name: seed + 'ijtag_to_se', type: 'data_in', dir: 'input', pinKey: 'se' },
-                    { name: seed + 'ijtag_to_ue', type: 'data_in', dir: 'input', pinKey: 'ue' },
-                    { name: seed + 'ijtag_to_sel', type: 'data_in', dir: 'input', pinKey: 'sel' },
-                    { name: seed + 'ijtag_to_si', type: 'data_in', dir: 'input', pinKey: 'si' },
-                    { name: seed + 'ijtag_from_so', type: 'data_out', dir: 'output', pinKey: 'so' }
-                ]
-            };
-        }
-    });
+    function buildSSNSlavePins(opt) {
+        var seed = withTrailingUnderscore(pinLabelSeed(opt, ''));
+        var busWidth = opt.busWidth != null ? opt.busWidth : 4;
+        var isBus = (parseInt(busWidth, 10) || 1) > 1;
+        return [
+            { name: seed + 'ssn_to_bus_clock', type: 'clock_out', dir: 'output', pinKey: 'clock' },
+            { name: seed + 'ssn_to_bus_data_in' + NS.busSuffix(busWidth), type: 'data_out', dir: 'output', pinKey: 'data_in', busWidth: busWidth, isBus: isBus },
+            { name: seed + 'ssn_to_bus_data_out' + NS.busSuffix(busWidth), type: 'data_out', dir: 'input', pinKey: 'data_out', busWidth: busWidth, isBus: isBus }
+        ];
+    }
 
-    registerInterface({
-        key: 'BISRHostInterface',
-        dftsType: 'bisr_host_interface',
-        defaultLabel: 'BISR_HOST',
-        autoLabelPrefix: 'BISR_HOST',
-        configKey: 'interface_common',
-        useDefSize: true,
-        w: 190, h: 40,
-        symbolMinW: 170, symbolMinH: 110,
-        bodyFont: 20, pinFont: 16,
-        pinsFactory: function (opt) {
-            var pdg = opt.pdg || '';
-            return {
-                west: [
-                    { name: pdg + 'bisr_mem_chain_select', type: 'data_in', dir: 'input', pinKey: 'mem_chain_select' },
-                    { name: pdg + 'bisr_shift_en', type: 'data_in', dir: 'input', pinKey: 'shift_en' },
-                    { name: pdg + 'bisr_clk', type: 'clock_in', dir: 'input', pinKey: 'clk' },
-                    { name: pdg + 'bisr_mem_disable', type: 'data_in', dir: 'input', pinKey: 'mem_disable' },
-                    { name: pdg + 'bisr_reset', type: 'data_in', dir: 'input', pinKey: 'reset' },
-                    { name: pdg + 'bisr_si', type: 'data_in', dir: 'input', pinKey: 'si' },
-                    { name: pdg + 'bisr_so', type: 'data_out', dir: 'output', pinKey: 'so' }
-                ]
-            };
-        }
-    });
+    function buildBSCANHostPins() {
+        return [
+            { name: 'bscan_select', type: 'data_in', dir: 'input', pinKey: 'select' },
+            { name: 'bscan_force_disable', type: 'data_in', dir: 'input', pinKey: 'force_disable' },
+            { name: 'bscan_select_jtag_input', type: 'data_in', dir: 'input', pinKey: 'select_jtag_input' },
+            { name: 'bscan_select_jtag_output', type: 'data_in', dir: 'input', pinKey: 'select_jtag_output' },
+            { name: 'bscan_clock', type: 'clock_in', dir: 'input', pinKey: 'clock' },
+            { name: 'bscan_capture_en', type: 'data_in', dir: 'input', pinKey: 'capture_en' },
+            { name: 'bscan_shift_en', type: 'data_in', dir: 'input', pinKey: 'shift_en' },
+            { name: 'bscan_update_en', type: 'data_in', dir: 'input', pinKey: 'update_en' },
+            { name: 'bscan_scan_in', type: 'data_in', dir: 'input', pinKey: 'scan_in' },
+            { name: 'bscan_scan_out', type: 'data_out', dir: 'output', pinKey: 'scan_out' }
+        ];
+    }
 
-    registerInterface({
-        key: 'BISRSlaveInterface',
-        dftsType: 'bisr_slave_interface',
-        defaultLabel: 'BISR_SLAVE',
-        autoLabelPrefix: 'BISR_SLAVE',
-        configKey: 'interface_common',
-        useDefSize: true,
-        w: 190, h: 40,
-        symbolMinW: 170, symbolMinH: 110,
-        bodyFont: 20, pinFont: 16,
-        pinsFactory: function (opt) {
-            var pdg = opt.pdg || '';
-            var seed = pinLabelSeed(opt, '');
-            var prefix = pdg + '_' + seed;
-            if(pdg === '' && seed === '') prefix = '';
-            return {
-                west: [
-                    { name: prefix + 'bisr_to_mem_chain_select', type: 'data_in', dir: 'input', pinKey: 'mem_chain_select' },
-                    { name: prefix + 'bisr_to_shift_en', type: 'data_in', dir: 'input', pinKey: 'shift_en' },
-                    { name: prefix + 'bisr_to_clk', type: 'clock_in', dir: 'input', pinKey: 'clk' },
-                    { name: prefix + 'bisr_to_mem_disable', type: 'data_in', dir: 'input', pinKey: 'mem_disable' },
-                    { name: prefix + 'bisr_to_reset', type: 'data_in', dir: 'input', pinKey: 'reset' },
-                    { name: prefix + 'bisr_to_si', type: 'data_in', dir: 'input', pinKey: 'si' },
-                    { name: prefix + 'bisr_so', type: 'data_out', dir: 'output', pinKey: 'so' }
-                ]
-            };
-        }
-    });
+    function buildBSCANSlavePins(opt) {
+        var seed = withTrailingUnderscore(pinLabelSeed(opt, ''));
+        return [
+            { name: seed + 'bscan_to_force_disable', type: 'data_out', dir: 'output', pinKey: 'force_disable' },
+            { name: seed + 'bscan_to_select_jtag_input', type: 'data_out', dir: 'output', pinKey: 'select_jtag_input' },
+            { name: seed + 'bscan_to_select_jtag_output', type: 'data_out', dir: 'output', pinKey: 'select_jtag_output' },
+            { name: seed + 'bscan_to_clock', type: 'clock_out', dir: 'output', pinKey: 'clock' },
+            { name: seed + 'bscan_to_capture_en', type: 'data_out', dir: 'output', pinKey: 'capture_en' },
+            { name: seed + 'bscan_to_shift_en', type: 'data_out', dir: 'output', pinKey: 'shift_en' },
+            { name: seed + 'bscan_to_update_en', type: 'data_out', dir: 'output', pinKey: 'update_en' },
+            { name: seed + 'bscan_to_scan_in', type: 'data_out', dir: 'output', pinKey: 'scan_in' },
+            { name: seed + 'bscan_from_scan_out', type: 'data_in', dir: 'input', pinKey: 'scan_out' }
+        ];
+    }
+
+    function buildIJTAGHostPins() {
+        return [
+            { name: 'ijtag_tck', type: 'clock_in', dir: 'input', pinKey: 'tck' },
+            { name: 'ijtag_reset', type: 'data_in', dir: 'input', pinKey: 'reset' },
+            { name: 'ijtag_ce', type: 'data_in', dir: 'input', pinKey: 'ce' },
+            { name: 'ijtag_se', type: 'data_in', dir: 'input', pinKey: 'se' },
+            { name: 'ijtag_ue', type: 'data_in', dir: 'input', pinKey: 'ue' },
+            { name: 'ijtag_sel', type: 'data_in', dir: 'input', pinKey: 'sel' },
+            { name: 'ijtag_si', type: 'data_in', dir: 'input', pinKey: 'si' },
+            { name: 'ijtag_so', type: 'data_out', dir: 'output', pinKey: 'so' }
+        ];
+    }
+
+    function buildIJTAGSlavePins(opt) {
+        var seed = withTrailingUnderscore(pinLabelSeed(opt, ''));
+        return [
+            { name: seed + 'ijtag_to_tck', type: 'clock_out', dir: 'output', pinKey: 'tck' },
+            { name: seed + 'ijtag_to_reset', type: 'data_out', dir: 'output', pinKey: 'reset' },
+            { name: seed + 'ijtag_to_ce', type: 'data_out', dir: 'output', pinKey: 'ce' },
+            { name: seed + 'ijtag_to_se', type: 'data_out', dir: 'output', pinKey: 'se' },
+            { name: seed + 'ijtag_to_ue', type: 'data_out', dir: 'output', pinKey: 'ue' },
+            { name: seed + 'ijtag_to_sel', type: 'data_out', dir: 'output', pinKey: 'sel' },
+            { name: seed + 'ijtag_to_si', type: 'data_in', dir: 'input', pinKey: 'si' },
+            { name: seed + 'ijtag_from_so', type: 'data_out', dir: 'output', pinKey: 'so' }
+        ];
+    }
+
+    function buildBISRHostPins(opt) {
+        var pdg = withTrailingUnderscore(opt.pdg || '');
+        return [
+            { name: pdg + 'bisr_mem_chain_select', type: 'data_in', dir: 'input', pinKey: 'mem_chain_select' },
+            { name: pdg + 'bisr_shift_en', type: 'data_in', dir: 'input', pinKey: 'shift_en' },
+            { name: pdg + 'bisr_clk', type: 'clock_in', dir: 'input', pinKey: 'clk' },
+            { name: pdg + 'bisr_mem_disable', type: 'data_in', dir: 'input', pinKey: 'mem_disable' },
+            { name: pdg + 'bisr_reset', type: 'data_in', dir: 'input', pinKey: 'reset' },
+            { name: pdg + 'bisr_si', type: 'data_in', dir: 'input', pinKey: 'si' },
+            { name: pdg + 'bisr_so', type: 'data_out', dir: 'output', pinKey: 'so' }
+        ];
+    }
+
+    function buildBISRSlavePins(opt) {
+        var pdg = withTrailingUnderscore(opt.pdg || '');
+        var seed = withTrailingUnderscore(pinLabelSeed(opt, ''));
+        var prefix = pdg + seed;
+        return [
+            { name: prefix + 'bisr_to_mem_chain_select', type: 'data_out', dir: 'output', pinKey: 'mem_chain_select' },
+            { name: prefix + 'bisr_to_shift_en', type: 'data_out', dir: 'output', pinKey: 'shift_en' },
+            { name: prefix + 'bisr_to_clk', type: 'clock_out', dir: 'output', pinKey: 'clk' },
+            { name: prefix + 'bisr_to_mem_disable', type: 'data_out', dir: 'output', pinKey: 'mem_disable' },
+            { name: prefix + 'bisr_to_reset', type: 'data_out', dir: 'output', pinKey: 'reset' },
+            { name: prefix + 'bisr_to_si', type: 'data_out', dir: 'output', pinKey: 'si' },
+            { name: prefix + 'bisr_from_so', type: 'data_in', dir: 'input', pinKey: 'so' }
+        ];
+    }
+
+    registerInterfacePart({ key: 'SSNHostInputInterface', dftsType: 'ssn_host_interface', defaultLabel: 'SSN_HI', w: 190, h: 40, symbolMinW: 150, symbolMinH: 90, pinFactory: buildSSNHostPins, pinKeys: ['clock', 'data_in'] });
+    registerInterfacePart({ key: 'SSNHostOutputInterface', dftsType: 'ssn_host_interface', defaultLabel: 'SSN_HO', w: 190, h: 40, symbolMinW: 150, symbolMinH: 90, pinFactory: buildSSNHostPins, pinKeys: ['data_out'] });
+    registerInterfacePart({ key: 'SSNSlaveInputInterface', dftsType: 'ssn_slave_interface', defaultLabel: 'SSN_SI', w: 190, h: 40, symbolMinW: 150, symbolMinH: 90, pinFactory: buildSSNSlavePins, pinKeys: ['data_out'] });
+    registerInterfacePart({ key: 'SSNSlaveOutputInterface', dftsType: 'ssn_slave_interface', defaultLabel: 'SSN_SO', w: 190, h: 40, symbolMinW: 150, symbolMinH: 90, pinFactory: buildSSNSlavePins, pinKeys: ['clock', 'data_in'] });
+
+    registerInterfacePart({ key: 'BSCANHostInputInterface', dftsType: 'bscan_host_interface', defaultLabel: 'BSCAN_HI', w: 190, h: 40, symbolMinW: 160, symbolMinH: 100, pinFactory: buildBSCANHostPins, pinKeys: ['select', 'force_disable', 'select_jtag_input', 'select_jtag_output', 'clock', 'capture_en', 'shift_en', 'update_en', 'scan_in'] });
+    registerInterfacePart({ key: 'BSCANHostOutputInterface', dftsType: 'bscan_host_interface', defaultLabel: 'BSCAN_HO', w: 190, h: 40, symbolMinW: 160, symbolMinH: 100, pinFactory: buildBSCANHostPins, pinKeys: ['scan_out'] });
+    registerInterfacePart({ key: 'BSCANSlaveInputInterface', dftsType: 'bscan_slave_interface', defaultLabel: 'BSCAN_SI', w: 190, h: 40, symbolMinW: 160, symbolMinH: 100, pinFactory: buildBSCANSlavePins, pinKeys: ['scan_out'] });
+    registerInterfacePart({ key: 'BSCANSlaveOutputInterface', dftsType: 'bscan_slave_interface', defaultLabel: 'BSCAN_SO', w: 190, h: 40, symbolMinW: 160, symbolMinH: 100, pinFactory: buildBSCANSlavePins, pinKeys: ['force_disable', 'select_jtag_input', 'select_jtag_output', 'clock', 'capture_en', 'shift_en', 'update_en', 'scan_in'] });
+
+    registerInterfacePart({ key: 'IJTAGHostInputInterface', dftsType: 'ijtag_host_interface', defaultLabel: 'IJTAG_HI', w: 190, h: 40, symbolMinW: 160, symbolMinH: 100, pinFactory: buildIJTAGHostPins, pinKeys: ['tck', 'reset', 'ce', 'se', 'ue', 'sel', 'si'] });
+    registerInterfacePart({ key: 'IJTAGHostOutputInterface', dftsType: 'ijtag_host_interface', defaultLabel: 'IJTAG_HO', w: 190, h: 40, symbolMinW: 160, symbolMinH: 100, pinFactory: buildIJTAGHostPins, pinKeys: ['so'] });
+    registerInterfacePart({ key: 'IJTAGSlaveInputInterface', dftsType: 'ijtag_slave_interface', defaultLabel: 'IJTAG_SI', w: 190, h: 40, symbolMinW: 160, symbolMinH: 100, pinFactory: buildIJTAGSlavePins, pinKeys: ['si'] });
+    registerInterfacePart({ key: 'IJTAGSlaveOutputInterface', dftsType: 'ijtag_slave_interface', defaultLabel: 'IJTAG_SO', w: 190, h: 40, symbolMinW: 160, symbolMinH: 100, pinFactory: buildIJTAGSlavePins, pinKeys: ['tck', 'reset', 'ce', 'se', 'ue', 'sel', 'so'] });
+
+    registerInterfacePart({ key: 'BISRHostInputInterface', dftsType: 'bisr_host_interface', defaultLabel: 'BISR_HI', w: 190, h: 40, symbolMinW: 170, symbolMinH: 110, pinFactory: buildBISRHostPins, pinKeys: ['mem_chain_select', 'shift_en', 'clk', 'mem_disable', 'reset', 'si'] });
+    registerInterfacePart({ key: 'BISRHostOutputInterface', dftsType: 'bisr_host_interface', defaultLabel: 'BISR_HO', w: 190, h: 40, symbolMinW: 170, symbolMinH: 110, pinFactory: buildBISRHostPins, pinKeys: ['so'] });
+    registerInterfacePart({ key: 'BISRSlaveInputInterface', dftsType: 'bisr_slave_interface', defaultLabel: 'BISR_SI', w: 190, h: 40, symbolMinW: 170, symbolMinH: 110, pinFactory: buildBISRSlavePins, pinKeys: ['so'] });
+    registerInterfacePart({ key: 'BISRSlaveOutputInterface', dftsType: 'bisr_slave_interface', defaultLabel: 'BISR_SO', w: 190, h: 40, symbolMinW: 170, symbolMinH: 110, pinFactory: buildBISRSlavePins, pinKeys: ['mem_chain_select', 'shift_en', 'clk', 'mem_disable', 'reset', 'si'] });
 
     function makeInterfacePinName(dftsType, pinKey, params) {
         params = params || {};
-        var pinSeed = params.pinLabel || params.pin_label || params.deviceLabel || params.label || 'U0';
-        var pdg = params.pdg || 'PDG0';
+        var pinSeed = String(params.pinLabel || params.pin_label || params.deviceLabel || params.label || 'U0').replace(/^_+|_+$/g, '');
+        var pdg = String(params.pdg || 'PDG0').replace(/^_+|_+$/g, '');
         var busWidth = parseInt(params.busWidth, 10) || 1;
         var bus = NS.busSuffix(busWidth);
 
@@ -269,7 +237,7 @@
         if (dftsType === 'ssn_slave_interface') {
             if (pinKey === 'clock') return pinSeed + '_ssn_to_bus_clock';
             if (pinKey === 'data_in') return pinSeed + '_ssn_to_bus_data_in' + bus;
-            if (pinKey === 'data_out') return pinSeed + '_ssn_from_bus_data_out' + bus;
+            if (pinKey === 'data_out') return pinSeed + '_ssn_to_bus_data_out' + bus;
         }
 
         if (dftsType === 'bscan_host_interface') {
@@ -337,7 +305,7 @@
             if (pinKey === 'mem_disable') return prefix + '_bisr_to_mem_disable';
             if (pinKey === 'reset') return prefix + '_bisr_to_reset';
             if (pinKey === 'si') return prefix + '_bisr_to_si';
-            if (pinKey === 'so') return prefix + '_bisr_so';
+            if (pinKey === 'so') return prefix + '_bisr_from_so';
         }
 
         return null;
@@ -431,14 +399,30 @@
         }
     }
 
-    global.buildSSNHostInterface = NS.makeCreateFn('SSNHostInterface');
-    global.buildSSNSlaveInterface = NS.makeCreateFn('SSNSlaveInterface');
-    global.buildBSCANHostInterface = NS.makeCreateFn('BSCANHostInterface');
-    global.buildBSCANSlaveInterface = NS.makeCreateFn('BSCANSlaveInterface');
-    global.buildIJTAGHostInterface = NS.makeCreateFn('IJTAGHostInterface');
-    global.buildIJTAGSlaveInterface = NS.makeCreateFn('IJTAGSlaveInterface');
-    global.buildBISRHostInterface = NS.makeCreateFn('BISRHostInterface');
-    global.buildBISRSlaveInterface = NS.makeCreateFn('BISRSlaveInterface');
+    global.buildSSNHI = NS.makeCreateFn('SSNHostInputInterface');
+    global.buildSSNHO = NS.makeCreateFn('SSNHostOutputInterface');
+    global.buildSSNSI = NS.makeCreateFn('SSNSlaveInputInterface');
+    global.buildSSNSO = NS.makeCreateFn('SSNSlaveOutputInterface');
+    global.buildBSCANHI = NS.makeCreateFn('BSCANHostInputInterface');
+    global.buildBSCANHO = NS.makeCreateFn('BSCANHostOutputInterface');
+    global.buildBSCANSI = NS.makeCreateFn('BSCANSlaveInputInterface');
+    global.buildBSCANSO = NS.makeCreateFn('BSCANSlaveOutputInterface');
+    global.buildIJTAGHI = NS.makeCreateFn('IJTAGHostInputInterface');
+    global.buildIJTAGHO = NS.makeCreateFn('IJTAGHostOutputInterface');
+    global.buildIJTAGSI = NS.makeCreateFn('IJTAGSlaveInputInterface');
+    global.buildIJTAGSO = NS.makeCreateFn('IJTAGSlaveOutputInterface');
+    global.buildBISRHI = NS.makeCreateFn('BISRHostInputInterface');
+    global.buildBISRHO = NS.makeCreateFn('BISRHostOutputInterface');
+    global.buildBISRSI = NS.makeCreateFn('BISRSlaveInputInterface');
+    global.buildBISRSO = NS.makeCreateFn('BISRSlaveOutputInterface');
+    global.buildSSNHostInterface = global.buildSSNHI;
+    global.buildSSNSlaveInterface = global.buildSSNSI;
+    global.buildBSCANHostInterface = global.buildBSCANHI;
+    global.buildBSCANSlaveInterface = global.buildBSCANSI;
+    global.buildIJTAGHostInterface = global.buildIJTAGHI;
+    global.buildIJTAGSlaveInterface = global.buildIJTAGSI;
+    global.buildBISRHostInterface = global.buildBISRHI;
+    global.buildBISRSlaveInterface = global.buildBISRSI;
     global.updateParamInterface = updateParamInterface;
 
     NS.makeInterfacePinName = makeInterfacePinName;
