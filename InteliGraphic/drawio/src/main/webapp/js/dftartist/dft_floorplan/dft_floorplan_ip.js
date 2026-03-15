@@ -4,7 +4,12 @@
     NS.__loaded = true;
 
     NS.VERSION = '2.1.0';
-    NS.POLICY = { LABEL_USER_OR_AUTO_INCREMENT: 'user_or_auto_increment' };
+    NS.POLICY = {
+        LABEL_USER_OR_AUTO_INCREMENT: 'user_or_auto_increment',
+        INSTANCE_REQUIRED: 'required',
+        INSTANCE_OPTIONAL: 'optional',
+        INSTANCE_DISABLED: 'disabled'
+    };
     NS._defsByKey = NS._defsByKey || {};
 
     function getLineNS() {
@@ -22,6 +27,59 @@
 
     function trim(v) {
         return v == null ? '' : String(v).replace(/^\s+|\s+$/g, '');
+    }
+
+    function escapeHtml(v) {
+        return String(v == null ? '' : v)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function styleValue(styleText, key, fallback) {
+        var raw = String(styleText || '');
+        if (!raw || !key) return fallback;
+        var parts = raw.split(';');
+        for (var i = 0; i < parts.length; i++) {
+            var seg = parts[i];
+            var idx = seg.indexOf('=');
+            if (idx <= 0) continue;
+            if (seg.slice(0, idx).trim() !== key) continue;
+            return seg.slice(idx + 1).trim();
+        }
+        return fallback;
+    }
+
+    function isFloorplanModuleCell(graph, cell) {
+        if (!graph || !cell) return false;
+        var style = '';
+        try { style = cell.style || (graph.getModel && graph.getModel().getStyle ? graph.getModel().getStyle(cell) : ''); } catch (e) {}
+        return String(styleValue(style, 'dftsIP_type', '')) === 'floorplan_module' ||
+            (String(styleValue(style, 'floorplan', '0')) === '1' && String(styleValue(style, 'dftsFloorplanRect', '0')) === '1');
+    }
+
+    function installFloorplanLabelRenderer() {
+        if (global.__DFTS_FLOORPLAN_LABEL_RENDER_PATCHED__) return;
+        var GraphCtor = global.Graph || global.mxGraph;
+        if (!GraphCtor || !GraphCtor.prototype) return;
+        var proto = GraphCtor.prototype;
+        var base = proto.convertValueToString;
+        proto.convertValueToString = function (cell) {
+            var text = base ? base.apply(this, arguments) : (cell && cell.value != null ? String(cell.value) : '');
+            if (!isFloorplanModuleCell(this, cell)) return text;
+            var style = '';
+            try { style = cell && cell.style ? String(cell.style) : ''; } catch (e) {}
+            var moduleName = trim(styleValue(style, 'dftsFloorplan_moduleName', '')) || trim(text);
+            var instanceName = trim(styleValue(style, 'dftsFloorplan_instanceName', ''));
+            if (!instanceName) return moduleName;
+            return '<div style="text-align:center;line-height:1.25;">' +
+                '<div>' + escapeHtml(moduleName) + '</div>' +
+                '<div style="margin-top:6px;font-size:0.7em;color:#666;">' + escapeHtml(instanceName) + '</div>' +
+                '</div>';
+        };
+        global.__DFTS_FLOORPLAN_LABEL_RENDER_PATCHED__ = true;
     }
 
     function rejectCreate(msg) {
@@ -77,9 +135,26 @@
         return prefix + '_' + (maxIndex + 1);
     }
 
+    function getNextInstanceName(graph, base) {
+        base = trim(base || 'MODULE').replace(/\n/g, ' ').replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'MODULE';
+        var re = new RegExp('^' + base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '_inst_(\\d+)$', 'i');
+        var maxIndex = 0;
+        var cells = getAllFloorplanRects(graph);
+        for (var i = 0; i < cells.length; i++) {
+            var style = cells[i] && cells[i].style ? String(cells[i].style) : '';
+            var name = trim(styleValue(style, 'dftsFloorplan_instanceName', ''));
+            var m = re.exec(name);
+            if (!m) continue;
+            var idx = parseInt(m[1], 10);
+            if (!isNaN(idx)) maxIndex = Math.max(maxIndex, idx);
+        }
+        return base + '_inst_' + (maxIndex + 1);
+    }
+
     function registerDefinition(def) {
         if (!def || !def.key) throw new Error('registerDefinition 缺少 key');
         def.labelPolicy = NS.POLICY.LABEL_USER_OR_AUTO_INCREMENT;
+        if (!def.instancePolicy) def.instancePolicy = NS.POLICY.INSTANCE_REQUIRED;
         def.lockLabel = false;
         NS._defsByKey[def.key] = def;
         return def;
@@ -107,6 +182,12 @@
         if (isNaN(strokeWidth)) strokeWidth = (def.strokeWidth == null ? 1 : def.strokeWidth);
         var fontSize = Math.max(10, parseInt(opt.fontSize, 10) || def.fontSize || 20);
 
+        var instanceName = trim(opt.instanceName);
+        var instancePolicy = def.instancePolicy || NS.POLICY.INSTANCE_REQUIRED;
+        if (!instanceName && instancePolicy !== NS.POLICY.INSTANCE_DISABLED) {
+            instanceName = getNextInstanceName(opt.graph, def.instanceBaseName || def.defaultLabel || def.key);
+        }
+
         var style = [
             'shape=rectangle',
             'rounded=' + rounded,
@@ -127,7 +208,7 @@
             'dftsIP_type=floorplan_module',
             // 弹窗里的特殊参数
             'dftsFloorplan_moduleName=',
-            'dftsFloorplan_instanceName=',
+            'dftsFloorplan_instanceName=' + instanceName,
             'dftsFloorplan_designLevel='
         ].join(';') + ';';
 
@@ -140,7 +221,7 @@
     function createByDefinition(graph, def, opt) {
         opt = opt || {};
         var label = resolveLabel(graph, def, opt);
-        var cell = buildRectCell(def, label, opt);
+        var cell = buildRectCell(def, label, Object.assign({}, opt, { graph: graph }));
         if (typeof def.afterCreate === 'function') def.afterCreate(graph, cell, opt, { resolvedLabel: label });
         return cell;
     }
@@ -167,6 +248,7 @@
         typeName: 'module',
         defaultLabel: 'MODULE',
         autoLabelPrefix: 'MODULE',
+        instanceBaseName: 'MODULE',
         w: 220,
         h: 140,
         rounded: 0,
@@ -222,6 +304,7 @@
     function installFloorplanIp(ui) {
         var realUi = normalizeUi(ui);
         if (!realUi) return;
+        installFloorplanLabelRenderer();
         var lineNS = getLineNS();
         if (lineNS) {
             if (lineNS.enableFloorplanFreeConnect) lineNS.enableFloorplanFreeConnect(realUi);
@@ -241,8 +324,10 @@
     NS.installFloorplanPalette = installFloorplanPalette;
     NS.installFloorplanIp = installFloorplanIp;
 
+    installFloorplanLabelRenderer();
+
     global.buildFloorplanModule = makeCreateFn('FloorplanModule');
     global.installFloorplanPalette = installFloorplanPalette;
     global.installFloorplanIp = installFloorplanIp;
 
-})(this);
+})(typeof globalThis !== 'undefined' ? globalThis : (typeof window !== 'undefined' ? window : this));
