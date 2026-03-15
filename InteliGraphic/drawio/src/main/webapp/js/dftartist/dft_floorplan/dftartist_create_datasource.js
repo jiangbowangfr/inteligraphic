@@ -142,9 +142,9 @@
 
         def.category = NS.CATEGORY.DATASOURCE;
         def.useSymbolEngine = true;
-        def.labelPolicy = NS.POLICY.LABEL_USER_OR_DEFAULT;
-        def.instancePolicy = NS.POLICY.INSTANCE_OPTIONAL;
-        def.lockBodyLabel = false;
+        def.labelPolicy = NS.POLICY.LABEL_FIXED;
+        def.instancePolicy = NS.POLICY.INSTANCE_REQUIRED;
+        def.lockBodyLabel = true;
 
         def.afterCreate = function (graph, body, runtimeOpt, ctx) {
             markDataSourceAsFloorplan(graph, body, def, runtimeOpt, ctx);

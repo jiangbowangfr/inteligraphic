@@ -145,6 +145,7 @@
             version: '3',
             title: trim(model.title || model.label || model.moduleName || 'IP'),
             instanceName: trim(model.instanceName || ''),
+            instanceAuto: model.instanceAuto !== false,
             showInstance: model.showInstance !== false,
             lockBodyLabel: !!model.lockBodyLabel,
             dftsType: trim(model.dftsType || ''),
@@ -204,7 +205,15 @@
     }
     function setModel(body, model) {
         if (!body) return null;
-        body.__dftsSymbolModel = recoverModelFromBody(body, normalizeModel(model));
+        var previous = getModel(body);
+        var normalized = normalizeModel(model);
+        if (model && model.instanceAuto == null) {
+            var previousName = trim(previous && previous.instanceName || '');
+            var nextName = trim(normalized.instanceName || '');
+            if (previous && nextName && nextName !== previousName) normalized.instanceAuto = false;
+            else if (previous) normalized.instanceAuto = previous.instanceAuto !== false;
+        }
+        body.__dftsSymbolModel = recoverModelFromBody(body, normalized);
         syncEncodedModelStyle(body, body.__dftsSymbolModel);
         return body.__dftsSymbolModel;
     }
@@ -229,6 +238,7 @@
         if (typeof mxUtils !== 'undefined' && mxUtils.setStyle) {
             style = mxUtils.setStyle(style, 'dftsIP_symbolModel', encoded);
             style = mxUtils.setStyle(style, 'dftsIP_lockBodyLabel', model.lockBodyLabel ? '1' : '0');
+            style = mxUtils.setStyle(style, 'dftsIP_instanceAuto', model.instanceAuto !== false ? '1' : '0');
         }
         body.style = style;
     }
@@ -246,6 +256,10 @@
 
         if (!trim(normalized.instanceName) && instanceText) {
             normalized.instanceName = instanceText;
+        }
+
+        if (model && model.instanceAuto == null) {
+            normalized.instanceAuto = readStyleValue(body.style || '', 'dftsIP_instanceAuto') !== '0';
         }
 
         var styleRotation = normalizeRotation(readStyleValue(body.style || '', 'rotation'));
@@ -787,6 +801,7 @@
 
         var updated = clone(model) || {};
         updated.instanceName = next;
+        updated.instanceAuto = true;
         setModel(body, updated);
         relayout(graph, body);
         return true;
@@ -1206,13 +1221,16 @@
         var title = trim(runtimeOpt.resolvedBodyLabel || runtimeOpt.label || def.defaultLabel || def.key || 'IP');
         var instanceName = trim(runtimeOpt.instanceName || '');
         var instancePolicy = def.instancePolicy || (NS.POLICY && NS.POLICY.INSTANCE_REQUIRED) || 'required';
+        var instanceAuto = false;
         if (!instanceName && instancePolicy !== ((NS.POLICY && NS.POLICY.INSTANCE_DISABLED) || 'disabled')) {
             instanceName = allocateInstanceName(graph, def.instanceBaseName || def.defaultLabel || title);
+            instanceAuto = true;
         }
 
         var model = normalizeModel({
             title: title,
             instanceName: instanceName,
+            instanceAuto: instanceAuto,
             dftsType: def.dftsType || '',
             category: def.category || '',
             rounded: runtimeOpt.rounded != null ? runtimeOpt.rounded : (def.rounded || 0),
@@ -1367,6 +1385,13 @@
         graph.__dftsSymbolExternalPinsPoliciesInstalled = true;
 
         function isChild(cell) { return !!(cell && cell.__dftsSymbolChild); }
+        function isInstanceChild(cell) { return !!(cell && cell.__dftsSymbolChild && cell.__dftsSymbolKind === 'instance'); }
+        function getBodyForChild(cell) { return cell && cell.parent && isSymbolBody(cell.parent) ? cell.parent : null; }
+        function sanitizeInstanceName(value) {
+            var text = toStr(value).replace(/\r/g, '');
+            var firstLine = text.split('\n')[0];
+            return trim(firstLine);
+        }
 
         var baseMovable = graph.isCellMovable;
         graph.isCellMovable = function (cell) {
@@ -1382,14 +1407,46 @@
 
         var baseSelectable = graph.isCellSelectable;
         graph.isCellSelectable = function (cell) {
+            if (isInstanceChild(cell)) return true;
             if (isChild(cell)) return false;
             return baseSelectable ? baseSelectable.apply(this, arguments) : true;
         };
 
         var baseEditable = graph.isCellEditable;
         graph.isCellEditable = function (cell) {
+            if (isInstanceChild(cell)) return true;
             if (isChild(cell)) return false;
             return baseEditable ? baseEditable.apply(this, arguments) : false;
+        };
+
+        var baseLabelChanged = graph.labelChanged;
+        graph.labelChanged = function (cell, value, evt) {
+            if (isInstanceChild(cell)) {
+                var body = getBodyForChild(cell);
+                var current = body ? clone(getModel(body)) : null;
+                if (!body || !current) return;
+                var nextName = sanitizeInstanceName(value);
+                if (!nextName) nextName = trim(current.instanceName || '');
+                if (!nextName) return;
+                if (nextName === trim(current.instanceName || '')) {
+                    if (cell.value !== nextName) {
+                        var model = this.getModel();
+                        model.beginUpdate();
+                        try {
+                            model.setValue(cell, nextName);
+                        } finally {
+                            model.endUpdate();
+                        }
+                    }
+                    return;
+                }
+                current.instanceName = nextName;
+                current.instanceAuto = false;
+                setModel(body, current);
+                relayout(this, body);
+                return;
+            }
+            return baseLabelChanged ? baseLabelChanged.apply(this, arguments) : undefined;
         };
 
         var baseEdgeValidationError = graph.getEdgeValidationError;
@@ -1408,6 +1465,14 @@
                 return baseDeletable.apply(this, arguments);
             };
         }
+
+        graph.addListener(mxEvent.CLICK, function (sender, evt) {
+            var cell = evt.getProperty('cell');
+            if (isInstanceChild(cell)) {
+                graph.startEditingAtCell(cell);
+                evt.consume();
+            }
+        });
 
         graph.addListener(mxEvent.CELLS_RESIZED, function (sender, evt) {
             var cells = evt.getProperty('cells') || [];
