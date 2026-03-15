@@ -123,6 +123,101 @@
         };
     }
 
+    function getStyleValue(styleText, key, fallback) {
+        var raw = String(styleText || '');
+        if (!raw || !key) return fallback;
+        var parts = raw.split(';');
+        for (var i = 0; i < parts.length; i++) {
+            var seg = parts[i];
+            var idx = seg.indexOf('=');
+            if (idx <= 0) continue;
+            if (seg.slice(0, idx).trim() !== key) continue;
+            return seg.slice(idx + 1).trim();
+        }
+        return fallback;
+    }
+
+    function isMuxDataSourceBody(graph, body) {
+        if (!graph || !body) return false;
+        var style = body.style || (graph.getModel && graph.getModel().getStyle ? graph.getModel().getStyle(body) : '');
+        return String(getStyleValue(style, 'dftsIP_type', '')) === 'mux_data_source';
+    }
+
+    function getMuxDecorationCell(body, key) {
+        if (!body || !body.children) return null;
+        for (var i = 0; i < body.children.length; i++) {
+            var child = body.children[i];
+            if (child && child.__dftsMuxDataSourceDecoration === key) return child;
+        }
+        return null;
+    }
+
+    function ensureMuxDecorationCell(graph, body, key, text, x, y, width, height, align, fontSize, fontColor, weight) {
+        if (!graph || !body || !body.geometry) return null;
+        var model = graph.getModel();
+        var child = getMuxDecorationCell(body, key);
+        var geo = new mxGeometry(Math.round(x), Math.round(y), Math.round(width), Math.round(height));
+        var style = [
+            'shape=text',
+            'html=1',
+            'whiteSpace=wrap',
+            'align=' + (align || 'center'),
+            'verticalAlign=middle',
+            'strokeColor=none',
+            'fillColor=none',
+            'resizable=0',
+            'movable=0',
+            'rotatable=0',
+            'deletable=0',
+            'editable=0',
+            'selectable=0',
+            'fontStyle=' + (weight || 0),
+            'fontSize=' + (fontSize || 16),
+            'fontColor=' + (fontColor || '#111111')
+        ].join(';') + ';';
+
+        if (!child) {
+            child = new mxCell(text, geo, style);
+            child.vertex = true;
+            child.connectable = false;
+            child.__dftsMuxDataSourceDecoration = key;
+            model.add(body, child);
+        } else {
+            model.setValue(child, text);
+            model.setGeometry(child, geo);
+            model.setStyle(child, style);
+        }
+        return child;
+    }
+
+    function syncMuxDataSourceDecoration(graph, body) {
+        if (!graph || !body || !isMuxDataSourceBody(graph, body) || !body.geometry) return;
+        var width = Math.max(60, Math.round(Number(body.geometry.width || 0)));
+        var height = Math.max(40, Math.round(Number(body.geometry.height || 0)));
+        var model = graph.getModel();
+        model.beginUpdate();
+        try {
+            ensureMuxDecorationCell(graph, body, 'q', 'Q', width * 0.42, height * 0.04, 30, 24, 'center', 16, '#111111', 1);
+            ensureMuxDecorationCell(graph, body, 'i0', 'I0', width * 0.14, height * 0.80, 36, 24, 'center', 16, '#111111', 0);
+            ensureMuxDecorationCell(graph, body, 'i1', 'I1', width * 0.66, height * 0.80, 36, 24, 'center', 16, '#111111', 0);
+        } finally {
+            model.endUpdate();
+        }
+    }
+
+    function syncMuxDataSourceDecorations(cells, graph) {
+        if (!graph || !cells || !cells.length) return;
+        var seen = {};
+        for (var i = 0; i < cells.length; i++) {
+            var body = resolveDataSourceBody(graph, cells[i]);
+            if (!body || !isMuxDataSourceBody(graph, body)) continue;
+            var id = body.getId ? body.getId() : body.id;
+            if (seen[id]) continue;
+            seen[id] = true;
+            syncMuxDataSourceDecoration(graph, body);
+        }
+    }
+
     function styleMapToObject(styleText) {
         var out = {};
         if (!styleText) return out;
@@ -1057,6 +1152,39 @@
     // });
 
     registerDataSource({
+        key: 'MuxDataSource',
+        dftsType: 'mux_data_source',
+        defaultLabel: 'MUX',
+        instanceBaseName: 'MUX',
+        configKey: 'data_source_common',
+        useDefSize: true,
+        w: 180,
+        h: 120,
+        rounded: 0,
+        strokeWidth: 1,
+        bodyFont: 20,
+        pinFont: 16,
+        buildSymbolModel: function (graph, def, runtimeOpt, model) {
+            var next = clone(model || {});
+            next.bodyShape = 'trapezoid';
+            next.bodyExtraStyle = 'direction=east;';
+            return next;
+        },
+        afterCreate: function (graph, body) {
+            syncMuxDataSourceDecoration(graph, body);
+        },
+        pinsFactory: staticPins({
+            west: [
+                { name: 'I0', type: 'data_in', dir: 'input', pinKey: 'i0' },
+                { name: 'I1', type: 'data_in', dir: 'input', pinKey: 'i1' }
+            ],
+            north: [
+                { name: 'Q', type: 'data_out', dir: 'output', pinKey: 'q', floorplanLineTarget: true }
+            ]
+        })
+    });
+
+    registerDataSource({
         key: 'SSNPadSource',
         dftsType: 'ssn_data_source',
         defaultLabel: 'PadSource',
@@ -1142,6 +1270,7 @@
     // });
 
     // global.buildPatternDataSource = NS.makeCreateFn('PatternDataSource');
+    global.buildMuxDataSource = NS.makeCreateFn('MuxDataSource');
     global.buildSSNDataSource = NS.makeCreateFn('SSNPadSource');
     // global.buildExternalDataSource = NS.makeCreateFn('ExternalDataSource');
 
@@ -1155,7 +1284,20 @@
 
     NS.installDataSourceIp = function (ui) {
         var realUi = normalizeUi(ui);
-        if (realUi && realUi.editor && realUi.editor.graph) NS.ensureGraphPatches(realUi.editor.graph);
+        if (realUi && realUi.editor && realUi.editor.graph) {
+            var graph = realUi.editor.graph;
+            NS.ensureGraphPatches(graph);
+            if (!graph.__dftsMuxDataSourceDecorationSyncInstalled) {
+                graph.__dftsMuxDataSourceDecorationSyncInstalled = true;
+                graph.addListener(mxEvent.CELLS_RESIZED, function (sender, evt) {
+                    syncMuxDataSourceDecorations(evt.getProperty('cells') || [], graph);
+                });
+                graph.addListener(mxEvent.CELLS_MOVED, function (sender, evt) {
+                    syncMuxDataSourceDecorations(evt.getProperty('cells') || [], graph);
+                });
+                syncMuxDataSourceDecorations(NS.getAllChipBodies ? NS.getAllChipBodies(graph) : [], graph);
+            }
+        }
         NS.installEditingPolicy(ui);
         NS.installInstanceFollow(ui);
         NS.installConfigAction(ui);

@@ -617,11 +617,6 @@
                     var cell = createByKey(graph, 'FloorplanModule', {});
                     return this.createVertexTemplateFromCells([cell], cell.geometry.width, cell.geometry.height, 'Floorplan Module');
                 }),
-                mxUtils.bind(this, function () {
-                    var graph = sidebar.editorUi.editor.graph;
-                    var cell = createByKey(graph, 'FloorplanMux2', {});
-                    return this.createVertexTemplateFromCells([cell], cell.geometry.width, cell.geometry.height, 'Floorplan Mux');
-                }),
                 // mxUtils.bind(this, function () {
                 //     var graph = sidebar.editorUi.editor.graph;
                 //     var cell = createByKey(graph, 'FloorplanBlock', {});
