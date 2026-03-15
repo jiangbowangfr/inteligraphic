@@ -29,15 +29,6 @@
         return v == null ? '' : String(v).replace(/^\s+|\s+$/g, '');
     }
 
-    function escapeHtml(v) {
-        return String(v == null ? '' : v)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
-    }
-
     function styleValue(styleText, key, fallback) {
         var raw = String(styleText || '');
         if (!raw || !key) return fallback;
@@ -52,6 +43,55 @@
         return fallback;
     }
 
+    function setStyleValue(styleText, key, value) {
+        var raw = String(styleText || '');
+        var next = key + '=' + String(value == null ? '' : value);
+        var re = new RegExp('(?:^|;)' + key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=[^;]*');
+        if (re.test(raw)) {
+            return raw.replace(re, function (m) {
+                return (m.charAt(0) === ';' ? ';' : '') + next;
+            });
+        }
+        if (raw && raw.charAt(raw.length - 1) !== ';') raw += ';';
+        return raw + next + ';';
+    }
+
+    function stripMarkup(v) {
+        return String(v == null ? '' : v)
+            .replace(/<br\s*\/?>/gi, '\n')
+            .replace(/<[^>]+>/g, ' ');
+    }
+
+    function firstMeaningfulLine(v) {
+        var lines = stripMarkup(v).replace(/\r/g, '\n').split('\n');
+        for (var i = 0; i < lines.length; i++) {
+            var line = trim(lines[i]);
+            if (line) return line;
+        }
+        return '';
+    }
+
+    function normalizeToken(v) {
+        return trim(v).replace(/\n/g, ' ').replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    }
+
+    function parseBoolStyle(v, fallback) {
+        if (v == null || v === '') return !!fallback;
+        var s = String(v).toLowerCase();
+        if (s === '1' || s === 'true' || s === 'yes' || s === 'on') return true;
+        if (s === '0' || s === 'false' || s === 'no' || s === 'off') return false;
+        return !!fallback;
+    }
+
+    function isAutoInstanceName(instanceName, moduleName) {
+        var inst = normalizeToken(instanceName);
+        var mod = normalizeToken(moduleName);
+        if (!inst) return true;
+        if (!/_inst_\d+$/i.test(inst)) return false;
+        if (!mod) return true;
+        return new RegExp('^' + mod.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '_inst_\\d+$', 'i').test(inst);
+    }
+
     function isFloorplanModuleCell(graph, cell) {
         if (!graph || !cell) return false;
         var style = '';
@@ -60,24 +100,191 @@
             (String(styleValue(style, 'floorplan', '0')) === '1' && String(styleValue(style, 'dftsFloorplanRect', '0')) === '1');
     }
 
+    function getInstanceLabelCell(graph, moduleCell) {
+        if (!graph || !moduleCell) return null;
+        var model = graph.getModel();
+        var count = model.getChildCount(moduleCell);
+        for (var i = 0; i < count; i++) {
+            var child = model.getChildAt(moduleCell, i);
+            if (child && child.__dftsFloorplanInstanceLabel) return child;
+            var style = child && child.style ? String(child.style) : '';
+            if (String(styleValue(style, 'dftsFloorplanInstanceLabel', '0')) === '1') return child;
+        }
+        return null;
+    }
+
+    function getFloorplanModuleParent(graph, cell) {
+        if (!graph || !cell) return null;
+        var model = graph.getModel();
+        var parent = model ? model.getParent(cell) : null;
+        return isFloorplanModuleCell(graph, parent) ? parent : null;
+    }
+
+    function syncInstanceLabelCell(graph, moduleCell) {
+        if (!graph || !moduleCell || !isFloorplanModuleCell(graph, moduleCell)) return;
+        var model = graph.getModel();
+        var style = String(moduleCell.style || '');
+        var moduleName = trim(styleValue(style, 'dftsFloorplan_moduleName', '')) || firstMeaningfulLine(moduleCell.value);
+        var instanceName = trim(styleValue(style, 'dftsFloorplan_instanceName', ''));
+        var geo = moduleCell.geometry;
+        if (!geo) return;
+        var child = getInstanceLabelCell(graph, moduleCell);
+        var fontSize = Math.max(9, Math.round((parseInt(styleValue(style, 'fontSize', '20'), 10) || 20) * 0.55));
+        var childStyle = [
+            'shape=text',
+            'html=1',
+            'whiteSpace=wrap',
+            'align=center',
+            'verticalAlign=middle',
+            'strokeColor=none',
+            'fillColor=none',
+            'resizable=0',
+            'movable=0',
+            'rotatable=0',
+            'deletable=0',
+            'editable=1',
+            'selectable=1',
+            'fontStyle=0',
+            'fontSize=' + fontSize,
+            'fontColor=#666666',
+            'dftsFloorplanInstanceLabel=1'
+        ].join(';') + ';';
+        var childWidth = Math.max(40, Math.round(Number(geo.width || 0) - 20));
+        var childHeight = Math.max(14, Math.round(fontSize * 1.6));
+        var childX = Math.max(0, Math.round((Number(geo.width || 0) - childWidth) / 2));
+        var childY = Math.max(0, Math.round(Number(geo.height || 0) * 0.68));
+        model.beginUpdate();
+        try {
+            if (!instanceName) {
+                if (child) model.remove(child);
+                return;
+            }
+            if (!child) {
+                child = new mxCell(instanceName, new mxGeometry(childX, childY, childWidth, childHeight), childStyle);
+                child.vertex = true;
+                child.connectable = false;
+                child.__dftsFloorplanInstanceLabel = true;
+                model.add(moduleCell, child);
+            } else {
+                model.setValue(child, instanceName);
+                model.setStyle(child, childStyle);
+                model.setGeometry(child, new mxGeometry(childX, childY, childWidth, childHeight));
+            }
+            child.visible = true;
+        } finally {
+            model.endUpdate();
+        }
+        if (graph.refresh) graph.refresh(moduleCell);
+    }
+
+    function syncFloorplanModuleCell(graph, cell) {
+        if (!graph || !cell || !isFloorplanModuleCell(graph, cell)) return;
+        var model = graph.getModel();
+        var style = String(cell.style || '');
+        var rawValue = cell.value != null ? String(cell.value) : '';
+        var previousModule = firstMeaningfulLine(rawValue) || 'MODULE';
+        var currentModule = trim(styleValue(style, 'dftsFloorplan_moduleName', '')) || previousModule || 'MODULE';
+        var currentInstance = trim(styleValue(style, 'dftsFloorplan_instanceName', ''));
+        var instanceAuto = parseBoolStyle(styleValue(style, 'dftsFloorplan_instanceAuto', ''), !currentInstance || isAutoInstanceName(currentInstance, previousModule));
+        if ((!currentInstance || instanceAuto) && currentModule !== previousModule) {
+            currentInstance = getNextInstanceName(graph, currentModule);
+            instanceAuto = true;
+        }
+        var nextValue = currentModule;
+        var nextStyle = style;
+        nextStyle = setStyleValue(nextStyle, 'dftsFloorplan_moduleName', currentModule);
+        nextStyle = setStyleValue(nextStyle, 'dftsFloorplan_instanceName', currentInstance);
+        nextStyle = setStyleValue(nextStyle, 'dftsFloorplan_instanceAuto', instanceAuto ? '1' : '0');
+        model.beginUpdate();
+        try {
+            if (String(rawValue) !== String(nextValue)) model.setValue(cell, nextValue);
+            if (String(style) !== String(nextStyle)) model.setStyle(cell, nextStyle);
+        } finally {
+            model.endUpdate();
+        }
+        syncInstanceLabelCell(graph, cell);
+    }
+
+    function syncAllFloorplanModules(graph) {
+        var cells = getAllFloorplanRects(graph);
+        for (var i = 0; i < cells.length; i++) syncFloorplanModuleCell(graph, cells[i]);
+    }
+
     function installFloorplanLabelRenderer() {
         if (global.__DFTS_FLOORPLAN_LABEL_RENDER_PATCHED__) return;
         var GraphCtor = global.Graph || global.mxGraph;
         if (!GraphCtor || !GraphCtor.prototype) return;
         var proto = GraphCtor.prototype;
         var base = proto.convertValueToString;
+        var baseLabelChanged = proto.cellLabelChanged;
+        var baseIsCellEditable = proto.isCellEditable;
+        var baseIsCellSelectable = proto.isCellSelectable;
         proto.convertValueToString = function (cell) {
             var text = base ? base.apply(this, arguments) : (cell && cell.value != null ? String(cell.value) : '');
+            if (cell && cell.__dftsFloorplanInstanceLabel) return text;
             if (!isFloorplanModuleCell(this, cell)) return text;
             var style = '';
             try { style = cell && cell.style ? String(cell.style) : ''; } catch (e) {}
-            var moduleName = trim(styleValue(style, 'dftsFloorplan_moduleName', '')) || trim(text);
-            var instanceName = trim(styleValue(style, 'dftsFloorplan_instanceName', ''));
-            if (!instanceName) return moduleName;
-            return '<div style="text-align:center;line-height:1.25;">' +
-                '<div>' + escapeHtml(moduleName) + '</div>' +
-                '<div style="margin-top:6px;font-size:0.7em;color:#666;">' + escapeHtml(instanceName) + '</div>' +
-                '</div>';
+            var moduleName = trim(styleValue(style, 'dftsFloorplan_moduleName', '')) || firstMeaningfulLine(text);
+            return moduleName || text;
+        };
+        proto.isCellEditable = function (cell) {
+            if (cell && cell.__dftsFloorplanInstanceLabel) return !this.isCellLocked(cell);
+            return baseIsCellEditable ? baseIsCellEditable.apply(this, arguments) : true;
+        };
+        proto.isCellSelectable = function (cell) {
+            if (cell && cell.__dftsFloorplanInstanceLabel) return true;
+            return baseIsCellSelectable ? baseIsCellSelectable.apply(this, arguments) : true;
+        };
+        proto.cellLabelChanged = function (cell, value, autoSize) {
+            if (cell && cell.__dftsFloorplanInstanceLabel) {
+                var parent = getFloorplanModuleParent(this, cell);
+                if (!parent) return baseLabelChanged ? baseLabelChanged.apply(this, arguments) : undefined;
+                var nextInstanceName = firstMeaningfulLine(value);
+                var model = this.getModel ? this.getModel() : null;
+                if (!model) return undefined;
+                model.beginUpdate();
+                try {
+                    var parentStyle = String(parent.style || '');
+                    parentStyle = setStyleValue(parentStyle, 'dftsFloorplan_instanceName', nextInstanceName);
+                    parentStyle = setStyleValue(parentStyle, 'dftsFloorplan_instanceAuto', '0');
+                    model.setStyle(parent, parentStyle);
+                    if (baseLabelChanged) baseLabelChanged.call(this, cell, nextInstanceName, autoSize);
+                } finally {
+                    model.endUpdate();
+                }
+                syncFloorplanModuleCell(this, parent);
+                return undefined;
+            }
+            if (!isFloorplanModuleCell(this, cell)) {
+                return baseLabelChanged ? baseLabelChanged.apply(this, arguments) : undefined;
+            }
+            var moduleName = firstMeaningfulLine(value);
+            var currentStyle = String(cell && cell.style || '');
+            var prevInstance = trim(styleValue(currentStyle, 'dftsFloorplan_instanceName', ''));
+            var prevModule = trim(styleValue(currentStyle, 'dftsFloorplan_moduleName', '')) || firstMeaningfulLine(cell && cell.value);
+            var nextModule = moduleName || prevModule || 'MODULE';
+            var nextInstance = prevInstance;
+            var instanceAuto = parseBoolStyle(styleValue(currentStyle, 'dftsFloorplan_instanceAuto', ''), !prevInstance || isAutoInstanceName(prevInstance, prevModule));
+            if (!prevInstance || instanceAuto) {
+                nextInstance = getNextInstanceName(this, nextModule);
+                instanceAuto = true;
+            }
+            var model = this.getModel ? this.getModel() : null;
+            if (!model) return baseLabelChanged ? baseLabelChanged.apply(this, arguments) : undefined;
+            model.beginUpdate();
+            try {
+                if (baseLabelChanged) baseLabelChanged.call(this, cell, nextModule, autoSize);
+                var style = String(cell && cell.style || '');
+                style = setStyleValue(style, 'dftsFloorplan_moduleName', nextModule);
+                style = setStyleValue(style, 'dftsFloorplan_instanceName', nextInstance);
+                style = setStyleValue(style, 'dftsFloorplan_instanceAuto', instanceAuto ? '1' : '0');
+                model.setStyle(cell, style);
+            } finally {
+                model.endUpdate();
+            }
+            syncInstanceLabelCell(this, cell);
+            return undefined;
         };
         global.__DFTS_FLOORPLAN_LABEL_RENDER_PATCHED__ = true;
     }
@@ -185,7 +392,7 @@
         var instanceName = trim(opt.instanceName);
         var instancePolicy = def.instancePolicy || NS.POLICY.INSTANCE_REQUIRED;
         if (!instanceName && instancePolicy !== NS.POLICY.INSTANCE_DISABLED) {
-            instanceName = getNextInstanceName(opt.graph, def.instanceBaseName || def.defaultLabel || def.key);
+            instanceName = getNextInstanceName(opt.graph, label || def.instanceBaseName || def.defaultLabel || def.key);
         }
 
         var style = [
@@ -207,8 +414,9 @@
             'dftsFloorplan_defKey=' + def.key,
             'dftsIP_type=floorplan_module',
             // 弹窗里的特殊参数
-            'dftsFloorplan_moduleName=',
+            'dftsFloorplan_moduleName=' + label,
             'dftsFloorplan_instanceName=' + instanceName,
+            'dftsFloorplan_instanceAuto=' + (instanceName ? '1' : '0'),
             'dftsFloorplan_designLevel='
         ].join(';') + ';';
 
@@ -223,6 +431,7 @@
         var label = resolveLabel(graph, def, opt);
         var cell = buildRectCell(def, label, Object.assign({}, opt, { graph: graph }));
         if (typeof def.afterCreate === 'function') def.afterCreate(graph, cell, opt, { resolvedLabel: label });
+        syncFloorplanModuleCell(graph, cell);
         return cell;
     }
 
@@ -305,6 +514,22 @@
         var realUi = normalizeUi(ui);
         if (!realUi) return;
         installFloorplanLabelRenderer();
+        var graph = realUi.editor && realUi.editor.graph ? realUi.editor.graph : null;
+        if (graph && !graph.__dftsFloorplanSyncInstalled) {
+            graph.__dftsFloorplanSyncInstalled = true;
+            var syncBusy = false;
+            var scheduleSync = function () {
+                if (syncBusy) return;
+                syncBusy = true;
+                try {
+                    syncAllFloorplanModules(graph);
+                } finally {
+                    syncBusy = false;
+                }
+            };
+            try { graph.getModel().addListener(mxEvent.CHANGE, scheduleSync); } catch (e) {}
+            scheduleSync();
+        }
         var lineNS = getLineNS();
         if (lineNS) {
             if (lineNS.enableFloorplanFreeConnect) lineNS.enableFloorplanFreeConnect(realUi);
@@ -323,6 +548,7 @@
     NS.makeCreateFn = makeCreateFn;
     NS.installFloorplanPalette = installFloorplanPalette;
     NS.installFloorplanIp = installFloorplanIp;
+    NS.syncFloorplanModuleCell = syncFloorplanModuleCell;
 
     installFloorplanLabelRenderer();
 
