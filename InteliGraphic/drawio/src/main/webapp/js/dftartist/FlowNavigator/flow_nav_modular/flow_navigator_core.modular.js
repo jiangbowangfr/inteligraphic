@@ -131,8 +131,8 @@
   function previewInterfaceGeneration(ui) {
     if (!Shared.getActivePageReady(ui)) throw new Error('Open a page before previewing interface generation.');
     var analysis = Analysis.analyzeDataflow(ui);
-    Shared.logDock(ui, 'Preview: ' + analysis.interfacePlan.markers.length + ' marker(s), ' + analysis.interfacePlan.pairs.length + ' pair(s).', analysis.interfacePlan.markers.length ? 'info' : 'warning');
-    Shared.setReports(ui, [{ title: 'Interface Preview', items: { markers: analysis.interfacePlan.markers.length, pairs: analysis.interfacePlan.pairs.length, modules: analysis.modules.length } }]);
+    Shared.logDock(ui, 'Preview: ' + analysis.interfacePlan.markers.length + ' marker(s), ' + analysis.interfacePlan.chains.length + ' chain(s).', analysis.interfacePlan.markers.length ? 'info' : 'warning');
+    Shared.setReports(ui, [{ title: 'Interface Preview', items: { markers: analysis.interfacePlan.markers.length, chains: analysis.interfacePlan.chains.length, modules: analysis.modules.length } }]);
     return analysis;
   }
 
@@ -140,10 +140,17 @@
     if (!Shared.getActivePageReady(ui)) throw new Error('Open a page before generating interfaces.');
     if (!Shared.isFloorplanPageOpen(ui)) throw new Error('Open a floorplan page before generating interfaces.');
     var analysis = Analysis.analyzeDataflow(ui);
+    if (!analysis.pass) {
+      var message = 'Dataflow check has errors. Run Check first and fix all errors before generating interfaces.';
+      Shared.logDock(ui, message, 'error');
+      Shared.setReports(ui, [{ title: 'Generate Interface', items: { status: 'blocked', errors: analysis.errorCount, warnings: analysis.warningCount } }]);
+      Shared.setJobs(ui, [{ name: 'generate_interface', status: 'error', detail: analysis.errorCount + ' error(s)', progress: 100 }]);
+      throw new Error(message);
+    }
     var result = Markers.createInterfaceMarkers(ui, analysis, { overwrite: true });
     Shared.ensureState(ui).lastInterfaceReport = result;
-    Shared.logDock(ui, 'Generated ' + result.created.length + ' floorplan interface marker(s) from ' + result.plan.pairs.length + ' pair(s).', result.created.length ? 'success' : 'warning');
-    Shared.setReports(ui, [{ title: 'Generate Interface', items: { markersCreated: result.created.length, pairs: result.plan.pairs.length } }]);
+    Shared.logDock(ui, 'Generated ' + result.created.length + ' floorplan interface marker(s) from ' + result.plan.chains.length + ' chain(s).', result.created.length ? 'success' : 'warning');
+    Shared.setReports(ui, [{ title: 'Generate Interface', items: { markersCreated: result.created.length, chains: result.plan.chains.length } }]);
     Shared.setJobs(ui, [{ name: 'generate_interface', status: 'success', detail: result.created.length + ' marker(s)', progress: 100 }]);
     return result;
   }
@@ -688,7 +695,7 @@
       { key: 'dataflow', label: 'Dataflow Check', desc: 'Validate SSN loop, module coverage, and host uniqueness.', actions: [
         { label: 'Check', key: 'dataflow:check', primary: true }
       ] },
-      { key: 'generateInterface', label: 'Generate Interface', desc: 'Generate boundary SSN host/slave marker pairs on the floorplan page.', actions: [
+      { key: 'generateInterface', label: 'Generate Interface', desc: 'Generate floorplan HI/HO/SI/SO interface markers after dataflow check passes.', actions: [
         { label: 'Preview', key: 'ifgen:preview' },
         { label: 'Generate', key: 'ifgen:run', primary: true }
       ] },

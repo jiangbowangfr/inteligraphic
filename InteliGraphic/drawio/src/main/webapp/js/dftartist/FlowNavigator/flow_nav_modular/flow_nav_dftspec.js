@@ -39,6 +39,8 @@
             var marker = modulePlan.markers[m];
             lines.push('      - id: ' + q(marker.id));
             lines.push('        role: ' + q(marker.role));
+            lines.push('        interface_type: ' + q(marker.interfaceType || ''));
+            lines.push('        layer: ' + q(marker.layerName || ''));
             lines.push('        pair: ' + q(marker.pairId || ''));
             lines.push('        side: ' + q(marker.side));
             lines.push('        offset: ' + String(Number(marker.offset || 0).toFixed(4)));
