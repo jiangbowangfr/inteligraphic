@@ -4,6 +4,19 @@
     NS.__loaded = true;
 
     NS.VERSION = '2.1.0';
+    NS.DEFAULT_LINE_TYPE = NS.DEFAULT_LINE_TYPE || 'data';
+    NS.LINE_TYPE_STYLE = NS.LINE_TYPE_STYLE || {
+        data: {
+            strokeColor: '#000000',
+            endArrow: 'classic',
+            lineType: 'data'
+        },
+        clock: {
+            strokeColor: '#ff0000',
+            endArrow: 'classic',
+            lineType: 'clock'
+        }
+    };
 
     function normalizeUi(ui) {
         if (!ui) return null;
@@ -284,6 +297,10 @@
 
     function buildFloorplanLineCell(opt) {
         opt = opt || {};
+        var lineType = String(opt.lineType || NS.DEFAULT_LINE_TYPE || 'data').toLowerCase();
+        var typeStyle = NS.LINE_TYPE_STYLE[lineType] || NS.LINE_TYPE_STYLE.clock;
+        if (opt.strokeColor == null && typeStyle && typeStyle.strokeColor != null) opt.strokeColor = typeStyle.strokeColor;
+        if (opt.endArrow == null && typeStyle && typeStyle.endArrow != null) opt.endArrow = typeStyle.endArrow;
 
         var geo = new mxGeometry();
         geo.relative = false;
@@ -311,6 +328,7 @@
             'strokeColor=' + strokeColor,
             'strokeWidth=' + strokeWidth,
             'dashed=' + dashed,
+            'dftFloorplanLineType=' + lineType,
             'floorplanLine=1'
         ].join(';') + ';';
 
@@ -1033,6 +1051,15 @@
     NS.normalizeGraph = normalizeGraph;
     NS.clonePoint = clonePoint;
     NS.cloneLineGeometry = cloneLineGeometry;
+    NS.getDefaultLineType = function () {
+        return NS.DEFAULT_LINE_TYPE || 'data';
+    };
+    NS.setDefaultLineType = function (type) {
+        var next = String(type || '').toLowerCase();
+        if (!NS.LINE_TYPE_STYLE[next]) next = 'data';
+        NS.DEFAULT_LINE_TYPE = next;
+        return next;
+    };
     NS.isFloorplanLineCell = isFloorplanLineCell;
     NS.getPolylinePoints = getPolylinePoints;
     NS.findSnapPointOnLine = findSnapPointOnLine;
