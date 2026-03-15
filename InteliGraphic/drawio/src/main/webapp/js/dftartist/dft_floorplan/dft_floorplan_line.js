@@ -255,6 +255,12 @@
         }
     }
 
+    function deleteFloorplanLineCell(graph, cell) {
+        if (!graph || !isFloorplanLineCell(graph, cell)) return false;
+        graph.removeCells([cell]);
+        return true;
+    }
+
     function toGraphPoint(graph, evt) {
         var p = mxUtils.convertPoint(graph.container, mxEvent.getClientX(evt), mxEvent.getClientY(evt));
         var s = graph.view.scale;
@@ -797,8 +803,10 @@
                 if (isInput) return;
 
                 var canUndoLocal = !!(tool.edge && tool.baseGeo && tool.history && tool.history.length > 1 && (tool.active || graph.getSelectionCell() === tool.edge));
+                var canDeleteLocal = !!(tool.mode === 'branchPick' || tool.active || isFloorplanLineCell(graph, graph.getSelectionCell()));
                 var isUndoKey = canUndoLocal && (
                     evt.key === 'Backspace' ||
+                    evt.key === 'Delete' ||
                     (((evt.ctrlKey || evt.metaKey) && !evt.altKey) && (evt.key === 'z' || evt.key === 'Z'))
                 );
 
@@ -808,6 +816,27 @@
                     else if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
                     undoLastCommittedPoint(graph, tool);
                     if (tool.edge) syncLineAnchoredBranches(graph, tool.edge);
+                    return false;
+                }
+
+                if (canDeleteLocal && (evt.key === 'Delete' || evt.key === 'Backspace')) {
+                    if (typeof evt.preventDefault === 'function') evt.preventDefault();
+                    if (typeof evt.stopImmediatePropagation === 'function') evt.stopImmediatePropagation();
+                    else if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
+
+                    if (tool.mode === 'branchPick') {
+                        clearTool(graph, tool, true);
+                        return false;
+                    }
+
+                    if (tool.active && tool.edge) {
+                        var edgeToDelete = tool.edge;
+                        clearTool(graph, tool, false);
+                        deleteFloorplanLineCell(graph, edgeToDelete);
+                        return false;
+                    }
+
+                    deleteFloorplanLineCell(graph, graph.getSelectionCell());
                     return false;
                 }
 
