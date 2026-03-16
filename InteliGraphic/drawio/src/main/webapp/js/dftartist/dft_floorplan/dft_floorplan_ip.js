@@ -329,8 +329,8 @@
         nextStyle = setStyleValue(nextStyle, 'verticalAlign', 'top');
         nextStyle = setStyleValue(nextStyle, 'labelPosition', 'center');
         nextStyle = setStyleValue(nextStyle, 'verticalLabelPosition', 'middle');
-        nextStyle = setStyleValue(nextStyle, 'spacingLeft', '10');
-        nextStyle = setStyleValue(nextStyle, 'spacingTop', '8');
+        nextStyle = setStyleValue(nextStyle, 'spacingLeft', '6');
+        nextStyle = setStyleValue(nextStyle, 'spacingTop', '4');
         model.beginUpdate();
         try {
             if (String(rawValue) !== String(nextValue)) model.setValue(cell, nextValue);
@@ -368,10 +368,10 @@
             var baseFontSize = parseInt(styleValue(style, 'fontSize', '20'), 10) || 20;
             var moduleFontSize = Math.max(11, Math.round(baseFontSize * 0.8));
             var instanceFontSize = Math.max(9, Math.round(baseFontSize * 0.55));
-            var html = '<div style="text-align:left;line-height:1.2;padding:8px 0 0 10px;">';
+            var html = '<div style="text-align:left;line-height:1.15;padding:4px 0 0 6px;">';
             html += '<div style="font-size:' + moduleFontSize + 'px;color:#111111;font-weight:400;">' + mxUtils.htmlEntities(moduleName || '') + '</div>';
             if (instanceName) {
-                html += '<div style="margin-top:2px;font-size:' + instanceFontSize + 'px;color:#666666;font-weight:400;">' + mxUtils.htmlEntities(instanceName) + '</div>';
+                html += '<div style="margin-top:1px;font-size:' + instanceFontSize + 'px;color:#666666;font-weight:400;">' + mxUtils.htmlEntities(instanceName) + '</div>';
             }
             html += '</div>';
             return html;
@@ -590,8 +590,8 @@
             'verticalAlign=top',
             'labelPosition=center',
             'verticalLabelPosition=middle',
-            'spacingLeft=10',
-            'spacingTop=8',
+            'spacingLeft=6',
+            'spacingTop=4',
             'connectable=1',
             'resizable=1',
             'movable=1',
