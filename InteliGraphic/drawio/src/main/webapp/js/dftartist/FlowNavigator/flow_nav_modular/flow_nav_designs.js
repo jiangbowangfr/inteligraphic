@@ -117,6 +117,26 @@
     return !!cell && String(Shared.styleValue(cell.style || '', 'flowModuleShell', '0')) === '1';
   }
 
+  function resizeCellDebugMeta(cell, geo) {
+    var style = String(cell && cell.style || '');
+    return {
+      id: cell && cell.id ? cell.id : '',
+      value: cell && cell.value != null ? String(cell.value).slice(0, 80) : '',
+      isModuleShell: isFlowModuleShell(cell),
+      isGeneratedModule: String(Shared.styleValue(style, 'dftsFlowNavGeneratedModule', '0')) === '1',
+      isChipBody: String(Shared.styleValue(style, 'dftsIP_chipBody', '0')) === '1',
+      isGeneratedInterface: String(Shared.styleValue(style, 'flowGeneratedDesignInterface', '0')) === '1',
+      flowModule: String(Shared.styleValue(style, 'flowModule', '')),
+      flowLayer: String(Shared.styleValue(style, 'flowLayer', '')),
+      flowInterfaceType: String(Shared.styleValue(style, 'flowInterfaceType', '')),
+      x: geo ? Number(geo.x || 0) : null,
+      y: geo ? Number(geo.y || 0) : null,
+      width: geo ? Number(geo.width || 0) : null,
+      height: geo ? Number(geo.height || 0) : null,
+      style: style.slice(0, 220)
+    };
+  }
+
   function installShellResizeBehavior(graph) {
     if (!graph || graph.__flowModuleShellResizeInstalled) return;
     graph.__flowModuleShellResizeInstalled = true;
@@ -154,6 +174,11 @@
           var sx = oldGeo2.width ? (newGeo2.width / oldGeo2.width) : 1;
           var sy = oldGeo2.height ? (newGeo2.height / oldGeo2.height) : 1;
           var childCount = model2.getChildCount(shell);
+          var beforeChildren = [];
+          for (var bc = 0; bc < childCount; bc++) {
+            var beforeChild = model2.getChildAt(shell, bc);
+            beforeChildren.push(resizeCellDebugMeta(beforeChild, model2.getGeometry(beforeChild)));
+          }
           emitDesignLog('shell-resize-plan', {
             shellId: shell.id || '',
             oldGeo: { x: oldGeo2.x, y: oldGeo2.y, width: oldGeo2.width, height: oldGeo2.height },
@@ -161,6 +186,10 @@
             sx: sx,
             sy: sy,
             childCount: childCount
+          });
+          emitDesignLog('shell-resize-children-before', {
+            shellId: shell.id || '',
+            children: beforeChildren
           });
           for (var c = 0; c < childCount; c++) {
             var child = model2.getChildAt(shell, c);
@@ -171,6 +200,12 @@
             nextGeo.y = Math.round(Number(childGeo.y || 0) * sy);
             nextGeo.width = Math.max(1, Math.round(Number(childGeo.width || 0) * sx));
             nextGeo.height = Math.max(1, Math.round(Number(childGeo.height || 0) * sy));
+            emitDesignLog('shell-resize-child-step', {
+              shellId: shell.id || '',
+              index: c,
+              before: resizeCellDebugMeta(child, childGeo),
+              after: resizeCellDebugMeta(child, nextGeo)
+            });
             model2.setGeometry(child, nextGeo);
             if (global.DftsIP && global.DftsIP.Symbol && typeof global.DftsIP.Symbol.relayout === 'function') {
               try {
@@ -180,6 +215,15 @@
               } catch (e) {}
             }
           }
+          var afterChildren = [];
+          for (var ac = 0; ac < childCount; ac++) {
+            var afterChild = model2.getChildAt(shell, ac);
+            afterChildren.push(resizeCellDebugMeta(afterChild, model2.getGeometry(afterChild)));
+          }
+          emitDesignLog('shell-resize-children-after', {
+            shellId: shell.id || '',
+            children: afterChildren
+          });
         }
       } finally {
         model2.endUpdate();
