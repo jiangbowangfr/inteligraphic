@@ -641,13 +641,16 @@
     });
   }
 
-  function classifyModuleInterfaces(moduleEvents, line, chainId, chainIndex, sourceModuleName, markerCounterRef, issues) {
+  function classifyModuleInterfaces(moduleEvents, line, chainId, chainIndex, sourceModuleName, markerCounterRef, issues, opt) {
+    opt = opt || {};
     var markers = [];
     var entryCount = 0;
     var exitCount = 0;
+    var forceSlaveOnly = !!opt.forceSlaveOnly;
     var i;
     for (i = 0; i < moduleEvents.length; i++) {
-      moduleEvents[i].direction = moduleEvents[i].role === 'host' ? 'entry' : 'exit';
+      if (forceSlaveOnly) moduleEvents[i].direction = moduleEvents[i].role === 'slave' ? 'entry' : 'exit';
+      else moduleEvents[i].direction = moduleEvents[i].role === 'host' ? 'entry' : 'exit';
       if (moduleEvents[i].direction === 'entry') entryCount++;
       else exitCount++;
     }
@@ -666,8 +669,13 @@
     for (i = 0; i < moduleEvents.length; i++) {
       var evt = moduleEvents[i];
       var interfaceType = '';
-      if (evt.direction === 'entry') interfaceType = i === 0 ? 'HI' : 'SI';
-      else interfaceType = i === moduleEvents.length - 1 ? 'HO' : 'SO';
+      if (forceSlaveOnly) {
+        interfaceType = evt.direction === 'entry' ? 'SI' : 'SO';
+      } else if (evt.direction === 'entry') {
+        interfaceType = i === 0 ? 'HI' : 'SI';
+      } else {
+        interfaceType = i === moduleEvents.length - 1 ? 'HO' : 'SO';
+      }
       markers.push(createInterfaceMarker(evt, interfaceType, chainId, chainIndex, markerCounterRef.value++, line, sourceModuleName));
     }
     return markers;
@@ -707,18 +715,30 @@
     var markerCounterRef = { value: 0 };
     for (var i = 0; i < events.length; i++) {
       var evt = events[i];
-      evt.direction = evt.role === 'host' ? 'entry' : 'exit';
-      if (sourceModule && sameModuleCell(evt.moduleCell, sourceModule)) continue;
       var moduleKey = String((evt.moduleCell && evt.moduleCell.id) || evt.moduleName || '');
       if (!moduleKey) continue;
       if (!grouped[moduleKey]) {
-        grouped[moduleKey] = [];
+        grouped[moduleKey] = {
+          events: [],
+          isSourceModule: !!(sourceModule && sameModuleCell(evt.moduleCell, sourceModule))
+        };
         orderedModuleKeys.push(moduleKey);
       }
-      grouped[moduleKey].push(evt);
+      grouped[moduleKey].events.push(evt);
+      if (sourceModule && sameModuleCell(evt.moduleCell, sourceModule)) grouped[moduleKey].isSourceModule = true;
     }
     for (i = 0; i < orderedModuleKeys.length; i++) {
-      var moduleMarkers = classifyModuleInterfaces(grouped[orderedModuleKeys[i]], line, chainId, chainIndex, sourceModuleName, markerCounterRef, issues);
+      var moduleGroup = grouped[orderedModuleKeys[i]];
+      var moduleMarkers = classifyModuleInterfaces(
+        moduleGroup.events,
+        line,
+        chainId,
+        chainIndex,
+        sourceModuleName,
+        markerCounterRef,
+        issues,
+        { forceSlaveOnly: !!moduleGroup.isSourceModule }
+      );
       for (var m = 0; m < moduleMarkers.length; m++) markers.push(moduleMarkers[m]);
     }
     for (i = 0; i < markers.length; i++) {
