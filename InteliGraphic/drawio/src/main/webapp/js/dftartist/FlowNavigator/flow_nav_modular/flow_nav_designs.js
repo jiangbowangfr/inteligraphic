@@ -113,6 +113,82 @@
     graph.removeCells(doomed, false);
   }
 
+  function isFlowModuleShell(cell) {
+    return !!cell && String(Shared.styleValue(cell.style || '', 'flowModuleShell', '0')) === '1';
+  }
+
+  function installShellResizeBehavior(graph) {
+    if (!graph || graph.__flowModuleShellResizeInstalled) return;
+    graph.__flowModuleShellResizeInstalled = true;
+    var originalCellsResized = graph.cellsResized;
+    graph.cellsResized = function (cells, bounds, recurse, constrain, extend) {
+      var shellPlans = [];
+      if (cells && bounds && cells.length === bounds.length && this.getModel) {
+        var model = this.getModel();
+        for (var i = 0; i < cells.length; i++) {
+          var cell = cells[i];
+          if (!isFlowModuleShell(cell)) continue;
+          var oldGeo = model.getGeometry(cell);
+          var newGeo = bounds[i];
+          if (!oldGeo || !newGeo) continue;
+          shellPlans.push({
+            shell: cell,
+            oldGeo: oldGeo.clone ? oldGeo.clone() : new mxGeometry(oldGeo.x, oldGeo.y, oldGeo.width, oldGeo.height),
+            newGeo: new mxGeometry(newGeo.x, newGeo.y, newGeo.width, newGeo.height)
+          });
+        }
+      }
+
+      var result = originalCellsResized.call(this, cells, bounds, recurse, constrain, extend);
+
+      if (!shellPlans.length) return result;
+
+      var model2 = this.getModel();
+      model2.beginUpdate();
+      try {
+        for (var p = 0; p < shellPlans.length; p++) {
+          var plan = shellPlans[p];
+          var shell = plan.shell;
+          var oldGeo2 = plan.oldGeo;
+          var newGeo2 = plan.newGeo;
+          var sx = oldGeo2.width ? (newGeo2.width / oldGeo2.width) : 1;
+          var sy = oldGeo2.height ? (newGeo2.height / oldGeo2.height) : 1;
+          var childCount = model2.getChildCount(shell);
+          emitDesignLog('shell-resize-plan', {
+            shellId: shell.id || '',
+            oldGeo: { x: oldGeo2.x, y: oldGeo2.y, width: oldGeo2.width, height: oldGeo2.height },
+            newGeo: { x: newGeo2.x, y: newGeo2.y, width: newGeo2.width, height: newGeo2.height },
+            sx: sx,
+            sy: sy,
+            childCount: childCount
+          });
+          for (var c = 0; c < childCount; c++) {
+            var child = model2.getChildAt(shell, c);
+            var childGeo = model2.getGeometry(child);
+            if (!child || !childGeo) continue;
+            var nextGeo = childGeo.clone ? childGeo.clone() : new mxGeometry(childGeo.x, childGeo.y, childGeo.width, childGeo.height);
+            nextGeo.x = Math.round(Number(childGeo.x || 0) * sx);
+            nextGeo.y = Math.round(Number(childGeo.y || 0) * sy);
+            nextGeo.width = Math.max(1, Math.round(Number(childGeo.width || 0) * sx));
+            nextGeo.height = Math.max(1, Math.round(Number(childGeo.height || 0) * sy));
+            model2.setGeometry(child, nextGeo);
+            if (global.DftsIP && global.DftsIP.Symbol && typeof global.DftsIP.Symbol.relayout === 'function') {
+              try {
+                if (String(Shared.styleValue(child.style || '', 'dftsIP_chipBody', '0')) === '1') {
+                  global.DftsIP.Symbol.relayout(graph, child);
+                }
+              } catch (e) {}
+            }
+          }
+        }
+      } finally {
+        model2.endUpdate();
+      }
+
+      return result;
+    };
+  }
+
   function currentGraphSummary(ui) {
     var graph = Shared.graphOf(ui);
     var parent = Shared.getDefaultParent(ui);
@@ -612,6 +688,31 @@
     };
   }
 
+  function fitShellToPage(graph, shell, metrics) {
+    if (!graph || !shell || !metrics) return;
+    installShellResizeBehavior(graph);
+    var geo = graph.getCellGeometry(shell);
+    if (!geo) return;
+    var availW = Math.max(100, Number(metrics.width || 0) - Number(metrics.margin || 0) * 2);
+    var availH = Math.max(100, Number(metrics.height || 0) - Number(metrics.margin || 0) * 2);
+    var sx = availW / Math.max(1, Number(geo.width || 1));
+    var sy = availH / Math.max(1, Number(geo.height || 1));
+    var scale = Math.min(sx, sy);
+    if (!isFinite(scale) || scale <= 0) scale = 1;
+    var nextW = Math.max(1, Math.round(Number(geo.width || 0) * scale));
+    var nextH = Math.max(1, Math.round(Number(geo.height || 0) * scale));
+    var nextX = Math.round(Number(metrics.margin || 0) + (availW - nextW) / 2);
+    var nextY = Math.round(Number(metrics.margin || 0) + (availH - nextH) / 2);
+    emitDesignLog('fit-shell-to-page', {
+      shellId: shell.id || '',
+      from: { x: geo.x, y: geo.y, width: geo.width, height: geo.height },
+      to: { x: nextX, y: nextY, width: nextW, height: nextH },
+      scale: scale,
+      page: { width: metrics.width, height: metrics.height, margin: metrics.margin }
+    });
+    graph.resizeCell(shell, new mxRectangle(nextX, nextY, nextW, nextH), false);
+  }
+
   function interfaceVisualSize(cell, side) {
     var geo = cell && cell.geometry ? cell.geometry : null;
     var w = Number(geo && geo.width || 190);
@@ -815,6 +916,7 @@
     style = mxUtils.setStyle(style, 'resizable', '1');
     style = mxUtils.setStyle(style, 'rotatable', '0');
     style = mxUtils.setStyle(style, 'aspect', 'fixed');
+    style = mxUtils.setStyle(style, 'recursiveResize', '1');
     style = mxUtils.setStyle(style, 'connectable', '0');
     style = mxUtils.setStyle(style, 'flowModuleShell', '1');
     style = mxUtils.setStyle(style, 'flowModule', moduleName || '');
@@ -839,6 +941,7 @@
     var graph = Shared.graphOf(ui);
     var parent = Shared.getDefaultParent(ui);
     if (!graph || !parent) throw new Error('Graph is not ready for materialization.');
+    installShellResizeBehavior(graph);
 
     var metrics = pageMetrics(graph);
     var includeInterfaces = opts.includeInterfaces !== false;
@@ -920,6 +1023,7 @@
       var shellChildren = [body].concat(addedInterfaces);
       lockChildrenStyles(graph, shellChildren);
       var shell = buildShellGroup(graph, moduleName, shellChildren);
+      if (shell) fitShellToPage(graph, shell, metrics);
       emitDesignLog('shell-built', {
         moduleName: moduleName,
         pageName: ui && ui._activeProjectPageCtx ? ui._activeProjectPageCtx.name || '' : '',
