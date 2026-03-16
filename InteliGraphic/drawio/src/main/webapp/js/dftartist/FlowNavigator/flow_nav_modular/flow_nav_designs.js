@@ -48,6 +48,13 @@
     return { pageName: pageName, created: created };
   }
 
+  function ensureFloorplanContainer(ui, parentDesign) {
+    if (global.DFTProjectExplorerPhase2 && typeof global.DFTProjectExplorerPhase2.getFloorplanContainer === 'function') {
+      return global.DFTProjectExplorerPhase2.getFloorplanContainer(ui, true, parentDesign || null);
+    }
+    return Shared.getFloorplanContainer(ui);
+  }
+
   function captureCurrentPageCtx(ui) {
     var ctx = ui && ui._activeProjectPageCtx;
     return ctx ? { designRef: ctx.designRef, name: ctx.name } : null;
@@ -121,6 +128,22 @@
       if (!name) continue;
       if (!out[name]) out[name] = [];
       out[name].push(entry);
+    }
+    return out;
+  }
+
+  function normalizeLayerName(name) {
+    return String(name || '').trim().toLowerCase();
+  }
+
+  function groupMarkersByLayer(markerEntries) {
+    var out = {};
+    for (var i = 0; i < markerEntries.length; i++) {
+      var entry = markerEntries[i];
+      var layer = normalizeLayerName(entry && entry.meta && entry.meta.layerName);
+      if (!layer) continue;
+      if (!out[layer]) out[layer] = [];
+      out[layer].push(entry);
     }
     return out;
   }
@@ -352,16 +375,21 @@
     return group;
   }
 
-  async function materializeModulePage(ui, moduleName, markerEntries) {
+  async function materializeModulePage(ui, moduleName, markerEntries, opts) {
+    opts = opts || {};
     clearCurrentGraph(ui);
     var graph = Shared.graphOf(ui);
     var parent = Shared.getDefaultParent(ui);
     if (!graph || !parent) throw new Error('Graph is not ready for materialization.');
 
     var metrics = pageMetrics(graph);
-    var bySide = countBySide(markerEntries);
+    var includeInterfaces = opts.includeInterfaces !== false;
+    var entries = Array.isArray(markerEntries) ? markerEntries : [];
+    var bySide = countBySide(entries);
     var interfacePrototypes = {};
-    for (var i = 0; i < markerEntries.length; i++) interfacePrototypes[markerEntries[i].meta.id] = createInterfaceCell(graph, markerEntries[i].meta);
+    if (includeInterfaces) {
+      for (var i = 0; i < entries.length; i++) interfacePrototypes[entries[i].meta.id] = createInterfaceCell(graph, entries[i].meta);
+    }
 
     var sideBand = 64;
     var topBand = 64;
@@ -375,9 +403,11 @@
     graph.getModel().beginUpdate();
     try {
       var body = addCellAt(graph, parent, createFloorplanModuleCell(graph, moduleName, bodyRect.width, bodyRect.height), bodyRect.x, bodyRect.y);
-      var placements = positionInterfacesAroundBody(bodyRect, bySide, interfacePrototypes);
       var addedInterfaces = [];
-      for (var p = 0; p < placements.length; p++) addedInterfaces.push(addCellAt(graph, parent, placements[p].cell, placements[p].x, placements[p].y));
+      if (includeInterfaces) {
+        var placements = positionInterfacesAroundBody(bodyRect, bySide, interfacePrototypes);
+        for (var p = 0; p < placements.length; p++) addedInterfaces.push(addCellAt(graph, parent, placements[p].cell, placements[p].x, placements[p].y));
+      }
       var shellChildren = [body].concat(addedInterfaces);
       lockChildrenStyles(graph, shellChildren);
       var shell = buildShellGroup(graph, moduleName, shellChildren);
@@ -398,25 +428,55 @@
     var designInputs = Designs.collectDesignInputs(ui);
     var moduleNames = Object.keys(designInputs).sort();
     if (!moduleNames.length) throw new Error('No generated floorplan interfaces found. Generate interfaces first.');
+    var pageOrder = ['ssn', 'ijtag', 'bscan', 'bisr'];
     var previousCtx = captureCurrentPageCtx(ui);
     var results = [];
     try {
       for (var i = 0; i < moduleNames.length; i++) {
         var moduleName = moduleNames[i];
         var markerEntries = designInputs[moduleName];
+        var layerInputs = groupMarkersByLayer(markerEntries);
         var ensured = await ensureTopLevelDesign(ui, moduleName);
         var design = ensured.design;
-        await ensurePage(ui, design, 'main');
-        await withOpenedPage(ui, design, 'main', async function () {
-          await materializeModulePage(ui, moduleName, markerEntries);
-        });
-        results.push({
-          module: moduleName,
-          design: design,
-          createdDesign: ensured.created,
-          page: 'main',
-          markerCount: markerEntries.length
-        });
+        var floorplan = ensureFloorplanContainer(ui, design);
+        var shellPageName = Shared.sanitizeName ? (Shared.sanitizeName(moduleName) + '_floorplan') : (String(moduleName).replace(/[^a-zA-Z0-9]+/g, '_') + '_floorplan');
+        if (floorplan) {
+          await ensurePage(ui, floorplan, shellPageName);
+          await withOpenedPage(ui, floorplan, shellPageName, (function () {
+            return async function () {
+              await materializeModulePage(ui, moduleName, [], {
+                includeInterfaces: false
+              });
+            };
+          })());
+          results.push({
+            module: moduleName,
+            design: floorplan,
+            createdDesign: false,
+            page: shellPageName,
+            markerCount: 0
+          });
+        }
+        for (var j = 0; j < pageOrder.length; j++) {
+          var pageName = pageOrder[j];
+          var pageMarkers = layerInputs[pageName] || [];
+          if (!pageMarkers.length) continue;
+          await ensurePage(ui, design, pageName);
+          await withOpenedPage(ui, design, pageName, (function (currentPageName, currentPageMarkers) {
+            return async function () {
+              await materializeModulePage(ui, moduleName, currentPageMarkers, {
+                includeInterfaces: true
+              });
+            };
+          })(pageName, pageMarkers));
+          results.push({
+            module: moduleName,
+            design: design,
+            createdDesign: ensured.created,
+            page: pageName,
+            markerCount: pageMarkers.length
+          });
+        }
       }
     } finally {
       await restorePageCtx(ui, previousCtx);
