@@ -290,7 +290,9 @@
         var currentModule = trim(styleValue(style, 'dftsFloorplan_moduleName', '')) || previousModule || 'MODULE';
         var currentInstance = trim(styleValue(style, 'dftsFloorplan_instanceName', ''));
         var instanceAuto = parseBoolStyle(styleValue(style, 'dftsFloorplan_instanceAuto', ''), !currentInstance || isAutoInstanceName(currentInstance, previousModule));
-        if ((!currentInstance || instanceAuto) && currentModule !== previousModule) {
+        var needsInstance = !currentInstance;
+        var needsRenameSync = !!currentInstance && instanceAuto && currentModule !== previousModule;
+        if (needsInstance || needsRenameSync) {
             currentInstance = getNextInstanceName(graph, currentModule);
             instanceAuto = true;
         }

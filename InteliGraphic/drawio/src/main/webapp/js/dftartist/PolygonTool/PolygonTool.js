@@ -404,7 +404,7 @@ PolygonTool.prototype.resolveFloorplanLabel = function () {
     return 'MODULE';
 };
 
-PolygonTool.prototype.buildFloorplanPolygonStyle = function (polyStr) {
+PolygonTool.prototype.buildFloorplanPolygonStyle = function (polyStr, label) {
     return [
         'shape=' + CustomPolygonShape.prototype.cst.SHAPE,
         'polyPoints=' + polyStr,
@@ -425,7 +425,7 @@ PolygonTool.prototype.buildFloorplanPolygonStyle = function (polyStr) {
         'dftsFloorplan_labelPolicy=user_or_auto_increment',
         'dftsFloorplan_defKey=FloorplanModule',
         'dftsIP_type=floorplan_module',
-        'dftsFloorplan_moduleName=',
+        'dftsFloorplan_moduleName=' + String(label || ''),
         'dftsFloorplan_instanceName=',
         'dftsFloorplan_designLevel='
     ].join(';') + ';';
@@ -447,7 +447,7 @@ PolygonTool.prototype.finish = function () {
     this.ensureFloorplanPerimeter();
 
     var label = this.resolveFloorplanLabel();
-    var style = this.buildFloorplanPolygonStyle(polyStr);
+    var style = this.buildFloorplanPolygonStyle(polyStr, label);
 
     var graph = this.graph;
     var model = graph.getModel();
@@ -468,6 +468,25 @@ PolygonTool.prototype.finish = function () {
             style
         );
         if (vertex) vertex.connectable = true;
+        if (window.__DFTS_FLOORPLAN_DEBUG__ && typeof console !== 'undefined' && console.log) {
+            console.log('[PolygonTool] floorplan polygon created', {
+                cellId: vertex && vertex.id,
+                label: label,
+                style: vertex && vertex.style
+            });
+        }
+        var floorplanNS = window.DftsFloorplan || null;
+        if (vertex && floorplanNS && typeof floorplanNS.syncFloorplanModuleCell === 'function') {
+            floorplanNS.syncFloorplanModuleCell(graph, vertex);
+            if (window.__DFTS_FLOORPLAN_DEBUG__ && typeof console !== 'undefined' && console.log) {
+                console.log('[PolygonTool] floorplan polygon synced', {
+                    cellId: vertex && vertex.id,
+                    value: vertex && vertex.value,
+                    style: vertex && vertex.style,
+                    childCount: vertex && vertex.children ? vertex.children.length : 0
+                });
+            }
+        }
     }
     finally {
         model.endUpdate();
