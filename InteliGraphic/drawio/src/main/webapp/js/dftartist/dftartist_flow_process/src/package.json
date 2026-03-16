@@ -12,6 +12,7 @@
                 "preview": "vite preview"
         },
         "dependencies": {
+                "@ant-design/charts": "^2.6.7",
                 "antd": "^5.27.4",
                 "prismjs": "^1.30.0",
                 "react": "^19.1.1",
