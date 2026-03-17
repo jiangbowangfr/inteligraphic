@@ -410,4 +410,20 @@
     document.body.appendChild(overlay);
     return overlay;
   };
+
+  Shared.showDftspecPreview = function showDftspecPreview(ui, fallbackText) {
+    try {
+      global.DFT_CTX = ui || global.DFT_CTX || null;
+      if (typeof global.dftArtistPreviewCode === 'function') {
+        global.dftArtistPreviewCode(ui);
+        return true;
+      }
+      if (global.DFTPreviewCode && typeof global.DFTPreviewCode.open === 'function') {
+        global.DFTPreviewCode.open();
+        return true;
+      }
+    } catch (e) {}
+    Shared.showTextPreview('Generated DFTSPEC', text(fallbackText));
+    return false;
+  };
 })(typeof globalThis !== 'undefined' ? globalThis : (typeof window !== 'undefined' ? window : this));

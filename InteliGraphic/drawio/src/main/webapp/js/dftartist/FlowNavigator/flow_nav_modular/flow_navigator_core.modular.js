@@ -384,7 +384,7 @@
     var built = await buildDftspecUsingConverters(ui);
     var text = built.dftspec;
     Shared.ensureState(ui).lastDftspec = text;
-    if (showPreview !== false) Shared.showTextPreview('Generated DFTSPEC', text);
+    if (showPreview !== false) Shared.showDftspecPreview(ui, text);
     Shared.logDock(ui, saveAfterBuild ? 'Generated DFTSPEC.' : 'Generated DFTSPEC preview.', 'success');
     Shared.setReports(ui, [{ title: 'Generate DFTSPEC', items: { bytes: text.length, lines: text.split('\n').length, status: 'generated' } }]);
     Shared.setJobs(ui, [{ name: 'generate_dftspec', status: 'success', detail: 'Preview ready', progress: 100 }]);
