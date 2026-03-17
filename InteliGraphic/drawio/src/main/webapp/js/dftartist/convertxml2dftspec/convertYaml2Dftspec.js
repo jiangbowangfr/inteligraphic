@@ -139,7 +139,10 @@ function convertEDTYamlToDftspec(spec) {
         if (!keys.length) return out;
         keys.forEach((instName) => {
             const node = smuxSecondary[instName] || {};
-            out += `\n${indent}Pipeline(${instName}) {`;
+            const t = String(node.type || '').toLowerCase();
+            if (t === 'ssn_host_interface' || t === 'ssn_slave_interface') return;
+            const blockName = typeToSsnBlockName(t) || 'Pipeline';
+            out += `\n${indent}${blockName}(${instName}) {`;
             out += emitParams(node.params, indentLevel + 2);
             out += `\n${indent}}`;
         });
@@ -159,7 +162,10 @@ function convertEDTYamlToDftspec(spec) {
                     if (!seg || typeof seg !== 'object') return;
                     Object.keys(seg).forEach((instName) => {
                         const node = seg[instName] || {};
-                        out += `\n${indent}  Pipeline(${instName}) {`;
+                        const t = String(node.type || '').toLowerCase();
+                        if (t === 'ssn_host_interface' || t === 'ssn_slave_interface') return;
+                        const blockName = typeToSsnBlockName(t) || 'Pipeline';
+                        out += `\n${indent}  ${blockName}(${instName}) {`;
                         out += emitParams(node.params, indentLevel + 4);
                         out += `\n${indent}  }`;
                     });
@@ -167,7 +173,10 @@ function convertEDTYamlToDftspec(spec) {
             } else {
                 Object.keys(pathObj).forEach((instName) => {
                     const node = pathObj[instName] || {};
-                    out += `\n${indent}  Pipeline(${instName}) {`;
+                    const t = String(node.type || '').toLowerCase();
+                    if (t === 'ssn_host_interface' || t === 'ssn_slave_interface') return;
+                    const blockName = typeToSsnBlockName(t) || 'Pipeline';
+                    out += `\n${indent}  ${blockName}(${instName}) {`;
                     out += emitParams(node.params, indentLevel + 4);
                     out += `\n${indent}  }`;
                 });
