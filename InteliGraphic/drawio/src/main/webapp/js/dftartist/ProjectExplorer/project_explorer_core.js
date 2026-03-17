@@ -1099,6 +1099,9 @@
   }
 
   function clearProjectContext(ui) {
+    if (global.DFTPageSessionManager && typeof global.DFTPageSessionManager.resetWorkspace === 'function') {
+      try { global.DFTPageSessionManager.resetWorkspace(ui, 'Page-1'); } catch (e) {}
+    }
     ui.projectModel = { name: '', path: '', designs: [], __placeholder: true };
     ui._projectRootPath = '';
     ui._projectYamlDir = '';

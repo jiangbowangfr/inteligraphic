@@ -254,6 +254,10 @@ function handleDftartProject(path, data) {
 
         (async () => {
             try {
+                if (window.DFTPageSessionManager && typeof window.DFTPageSessionManager.resetWorkspace === 'function') {
+                    try { window.DFTPageSessionManager.resetWorkspace(ui, 'Page-1'); } catch (_) { }
+                }
+
                 const model = (_parseProjectYaml(txt) || { name: 'project', path: '', designs: [] });
                 if (!Array.isArray(model.designs)) model.designs = [];
 

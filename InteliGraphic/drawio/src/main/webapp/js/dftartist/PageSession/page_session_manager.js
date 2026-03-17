@@ -465,6 +465,134 @@
     }
   }
 
+  function enterNoProjectMode(ui) {
+    if (!ui) return;
+
+    try { ui._noProjectMode = true; } catch (e0) {}
+
+    try {
+      if (ui.editor && ui.editor.graph) ui.editor.graph.setEnabled(false);
+    } catch (e1) {}
+
+    try {
+      if (ui.diagramContainer) ui.diagramContainer.style.display = 'none';
+    } catch (e2) {}
+
+    try {
+      if (ui._splashContainer) {
+        ui._splashContainer.style.display = 'flex';
+        ui._splashContainer.style.position = 'absolute';
+        ui._splashContainer.style.left = '0';
+        ui._splashContainer.style.right = '0';
+        ui._splashContainer.style.top = '0';
+        ui._splashContainer.style.bottom = '0';
+        ui._splashContainer.style.zIndex = '3';
+        ui._splashContainer.style.background = 'rgba(255,255,255,0.92)';
+        var splashParent = (ui._phase1 && ui._phase1.workspaceBody) || ui.container;
+        if (splashParent && ui._splashContainer.parentNode !== splashParent) {
+          splashParent.appendChild(ui._splashContainer);
+        }
+      }
+    } catch (e3) {}
+
+    try {
+      if (ui._phase1 && ui._phase1.designTab) {
+        ui._phase1.designTab.textContent = 'Design';
+        ui._phase1.designTab.title = '';
+      }
+    } catch (e4) {}
+
+    try {
+      if (typeof ui.refresh === 'function') ui.refresh(true);
+    } catch (e5) {}
+  }
+
+  function renamePageSilently(ui, page, pageName) {
+    if (!ui || !page || !pageName) return;
+    try {
+      if (typeof page.setName === 'function') page.setName(pageName);
+      else page.name = pageName;
+    } catch (e0) {}
+    try {
+      if (page.node && typeof page.node.setAttribute === 'function') {
+        page.node.setAttribute('name', pageName);
+      }
+    } catch (e1) {}
+    try {
+      if (typeof ui.updatePageTabs === 'function') ui.updatePageTabs();
+    } catch (e2) {}
+  }
+
+  function resetPageDiagramData(ui, page) {
+    if (!ui || !page) return;
+
+    try {
+      if (page.viewState) {
+        page.viewState.scale = 1;
+        delete page.viewState.scrollLeft;
+        delete page.viewState.scrollTop;
+        delete page.viewState.currentRoot;
+        delete page.viewState.defaultParent;
+      }
+    } catch (e0) {}
+
+    try {
+      if (typeof ui.initDiagramNode === 'function' && typeof global.mxCodec === 'function' &&
+        typeof global.mxUtils !== 'undefined' && typeof global.mxGraphModel === 'function') {
+        var doc = global.mxUtils.createXmlDocument();
+        var codec = new global.mxCodec(doc);
+        var emptyModel = new global.mxGraphModel();
+        ui.initDiagramNode(page, codec.encode(emptyModel));
+      } else if (page.node && page.node.ownerDocument && typeof page.node.ownerDocument.createElement === 'function') {
+        var replacement = page.node.ownerDocument.createElement('diagram');
+        var pageName = typeof page.getName === 'function' ? page.getName() : page.name;
+        replacement.setAttribute('name', pageName || 'Page-1');
+        page.node = replacement;
+      }
+    } catch (e1) {}
+  }
+
+  function resetWorkspace(ui, pageName) {
+    if (!ui) return;
+
+    try { ui._activeProjectPageCtx = null; } catch (e0) {}
+    try { ui._activeEnvCtx = null; } catch (e1) {}
+
+    var targetName = text(pageName).trim() || 'Page-1';
+    var blankPage = createBlankPageTab(ui, targetName);
+    if (!blankPage) {
+      blankPage = ui.currentPage || (ui.pages && ui.pages[0]) || null;
+      if (blankPage) {
+        renamePageSilently(ui, blankPage, targetName);
+        resetPageDiagramData(ui, blankPage);
+      }
+    }
+
+    if (blankPage && typeof ui.selectPage === 'function') {
+      try { ui.selectPage(blankPage, true); } catch (e2) {}
+    }
+
+    clearGraphPage(ui);
+
+    if (blankPage) {
+      resetPageDiagramData(ui, blankPage);
+    }
+
+    if (Array.isArray(ui.pages) && ui.pages.length > 1 && typeof ui.removePage === 'function') {
+      for (var i = ui.pages.length - 1; i >= 0; i--) {
+        var page = ui.pages[i];
+        if (!page || page === blankPage) continue;
+        try { ui.removePage(page); } catch (e3) {}
+      }
+    }
+
+    try {
+      if (typeof ui.updatePageTabs === 'function') ui.updatePageTabs();
+    } catch (e4) {}
+
+    enterNoProjectMode(ui);
+  }
+
   function createBlankPageTab(ui, pageName) {
     if (!ui || !pageName) return null;
     if (typeof ui.createPage === 'function' && typeof ui.insertPage === 'function') {
@@ -778,6 +906,9 @@
   NS.ensureHelpersBound = ensureHelpersBound;
   NS.ensureWorkspaceReady = ensureWorkspaceReady;
   NS.clearGraphPage = clearGraphPage;
+  NS.enterNoProjectMode = enterNoProjectMode;
+  NS.renamePageSilently = renamePageSilently;
+  NS.resetWorkspace = resetWorkspace;
   NS.ensurePageTab = ensurePageTab;
   NS.resolvePageFileAbs = resolvePageFileAbs;
   NS.loadPageXmlToCurrent = loadPageXmlToCurrent;
