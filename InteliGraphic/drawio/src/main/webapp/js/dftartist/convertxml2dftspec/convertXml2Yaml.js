@@ -177,8 +177,15 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
             }
 
             function getType(nodeId) {
-                const t = (getNodeAttr(nodeId).type || "").trim();
-                return t;
+                const at = getNodeAttr(nodeId);
+                const direct = String(at.type || "").trim();
+                if (direct) return direct;
+                const style = String(at.style || at.__cell_style || "");
+                if (style) {
+                    const m = style.match(/(?:^|;)dftsIP_type=([^;]+)/);
+                    if (m && m[1]) return String(m[1]).trim();
+                }
+                return "";
             }
 
             function getLabel(nodeId) {
@@ -1085,13 +1092,24 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
 
         function isPlainObject(o) { return Object.prototype.toString.call(o) === "[object Object]"; }
 
+        function collectPrefixedAttrs(at, prefixes) {
+            const out = {};
+            const wanted = Array.isArray(prefixes) ? prefixes : [prefixes];
+            Object.keys(at || {}).forEach((k) => {
+                if (k === 'id' || k === 'label' || k === 'type') return;
+                if (k.indexOf('__cell_') === 0) return;
+                if (wanted.some((p) => String(k).indexOf(p) === 0)) out[k] = at[k];
+            });
+            return out;
+        }
+
         function parseEdtAndScanhost(ctx) {
             const { objectsById, childrenByParent, edges, getType, getLabel, getPrettyLabel } = ctx;
             const res = { EDT: {}, SCAN_HOST: {}, FIFO: {}, BFM: {}, BFD: {} };
 
             Object.keys(objectsById).forEach((oid) => {
                 const at = objectsById[oid];
-                const t = (at.type || "").toLowerCase();
+                const t = String((getType && getType(oid)) || at.type || "").toLowerCase();
 
                 // 识别不同类型的对象
                 let name, bucket;
@@ -1121,6 +1139,12 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
                 if (t === "edt" || t === "sh" || t === "scanhost") {
                     nested = postprocessTitlesChainGroups(nested);
                 }
+                if (t === "edt") {
+                    const flatAttrs = collectPrefixedAttrs(at, ['edt_']);
+                    if (Object.keys(flatAttrs).length) {
+                        nested = Object.assign({}, flatAttrs, nested || {});
+                    }
+                }
                 //else if (t === "fifo") {
                 //    nested = postprocessFifoConfig(nested, oid, ctx);
                 //} else if (t === "bfm" || t === "bfd") {
@@ -1145,12 +1169,12 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
         }
 
         function parseEdtAndScanhost1(ctx) {
-            const { objectsById, childrenByParent, edges } = ctx;
+            const { objectsById, childrenByParent, edges, getType } = ctx;
             const res = { EDT: {}, SCAN_HOST: {} };
 
             Object.keys(objectsById).forEach((oid) => {
                 const at = objectsById[oid];
-                const t = (at.type || "").toLowerCase();
+                const t = String((getType && getType(oid)) || at.type || "").toLowerCase();
                 if (["edt", "sh", "scanhost"].indexOf(t) < 0) return;
                 let name, bucket;
                 if (t === "edt") { name = (at.label || "EDT").toLowerCase(); bucket = res.EDT; }

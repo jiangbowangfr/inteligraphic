@@ -41,8 +41,7 @@ function convertEDTYamlToDftspec(spec) {
     }
 
     const scanDataSpec = spec.MGC_SCAN_DATA_SPEC;
-    let result = `read_config_data -in $dftspec -from_string {
-  EDT {`;
+    let result = '';
 
     // 递归处理配置对象
     const processConfig = (config, indentLevel) => {
@@ -117,6 +116,10 @@ function convertEDTYamlToDftspec(spec) {
         return map[t] || null;
     }
 
+    function isRenderableSsnType(typeName) {
+        return !!typeToSsnBlockName(typeName);
+    }
+
     function emitParams(params, indentLevel) {
         const indent = ' '.repeat(indentLevel);
         let out = '';
@@ -140,8 +143,8 @@ function convertEDTYamlToDftspec(spec) {
         keys.forEach((instName) => {
             const node = smuxSecondary[instName] || {};
             const t = String(node.type || '').toLowerCase();
-            if (t === 'ssn_host_interface' || t === 'ssn_slave_interface') return;
-            const blockName = typeToSsnBlockName(t) || 'Pipeline';
+            if (!isRenderableSsnType(t)) return;
+            const blockName = typeToSsnBlockName(t);
             out += `\n${indent}${blockName}(${instName}) {`;
             out += emitParams(node.params, indentLevel + 2);
             out += `\n${indent}}`;
@@ -163,8 +166,8 @@ function convertEDTYamlToDftspec(spec) {
                     Object.keys(seg).forEach((instName) => {
                         const node = seg[instName] || {};
                         const t = String(node.type || '').toLowerCase();
-                        if (t === 'ssn_host_interface' || t === 'ssn_slave_interface') return;
-                        const blockName = typeToSsnBlockName(t) || 'Pipeline';
+                        if (!isRenderableSsnType(t)) return;
+                        const blockName = typeToSsnBlockName(t);
                         out += `\n${indent}  ${blockName}(${instName}) {`;
                         out += emitParams(node.params, indentLevel + 4);
                         out += `\n${indent}  }`;
@@ -174,8 +177,8 @@ function convertEDTYamlToDftspec(spec) {
                 Object.keys(pathObj).forEach((instName) => {
                     const node = pathObj[instName] || {};
                     const t = String(node.type || '').toLowerCase();
-                    if (t === 'ssn_host_interface' || t === 'ssn_slave_interface') return;
-                    const blockName = typeToSsnBlockName(t) || 'Pipeline';
+                    if (!isRenderableSsnType(t)) return;
+                    const blockName = typeToSsnBlockName(t);
                     out += `\n${indent}  ${blockName}(${instName}) {`;
                     out += emitParams(node.params, indentLevel + 4);
                     out += `\n${indent}  }`;
@@ -193,8 +196,8 @@ function convertEDTYamlToDftspec(spec) {
         Object.keys(order).forEach((instName) => {
             const node = order[instName] || {};
             const t = String(node.type || '').toLowerCase();
-            if (t === 'ssn_host_interface' || t === 'ssn_slave_interface') return;
-            const blockName = typeToSsnBlockName(t) || 'Pipeline';
+            if (!isRenderableSsnType(t)) return;
+            const blockName = typeToSsnBlockName(t);
             out += `\n${indent}${blockName}(${instName}) {`;
             out += emitParams(node.params, indentLevel + 2);
             if (node.smux_secondary) {
@@ -208,6 +211,210 @@ function convertEDTYamlToDftspec(spec) {
             out += `\n${indent}}`;
         });
         return out;
+    }
+
+    function setNestedValue(target, path, value) {
+        let cur = target;
+        for (let i = 0; i < path.length - 1; i++) {
+            const key = path[i];
+            if (!cur[key] || typeof cur[key] !== 'object' || Array.isArray(cur[key])) cur[key] = {};
+            cur = cur[key];
+        }
+        cur[path[path.length - 1]] = value;
+    }
+
+    function pruneEmptyObjects(obj) {
+        if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return obj;
+        Object.keys(obj).forEach((k) => {
+            const v = pruneEmptyObjects(obj[k]);
+            const emptyObj = v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0;
+            if (v === undefined || emptyObj) delete obj[k];
+            else obj[k] = v;
+        });
+        return obj;
+    }
+
+    function normalizeEdtConfig(raw) {
+        const cfg = Object.assign({}, raw || {});
+        const out = {};
+        const topMap = {
+            edt_top_ijtag_host_interface: ['ijtag_host_interface'],
+        };
+        const nestedMap = {
+            edt_lb_present: ['LogicBistOptions', 'present'],
+            edt_lb_capture_per_cycle: ['LogicBistOptions', 'capture_per_cycle'],
+            edt_lb_prpg_reference_seed: ['LogicBistOptions', 'prpg_reference_seed'],
+            edt_lb_self_test: ['LogicBistOptions', 'self_test'],
+            edt_lb_shiftcycles_max: ['LogicBistOptions', 'ShiftCycles', 'max'],
+            edt_lb_shiftcycles_hw_default: ['LogicBistOptions', 'ShiftCycles', 'hardware_default'],
+            edt_lb_warmup_max: ['LogicBistOptions', 'WarmupPatternCount', 'max'],
+            edt_lb_warmup_hw_default: ['LogicBistOptions', 'WarmupPatternCount', 'hardware_default'],
+
+            edt_cc_present: ['ControllerChain', 'present'],
+            edt_cc_clock: ['ControllerChain', 'clock'],
+            edt_cc_segment_per_instrument: ['ControllerChain', 'segment_per_instrument'],
+            edt_cc_max_segment_length: ['ControllerChain', 'max_segment_length'],
+            edt_cc_if_enable: ['ControllerChain', 'Interface', 'enable'],
+            edt_cc_if_scan_en: ['ControllerChain', 'Interface', 'scan_en'],
+            edt_cc_if_scan_in: ['ControllerChain', 'Interface', 'scan_in'],
+            edt_cc_if_scan_out: ['ControllerChain', 'Interface', 'scan_out'],
+            edt_cc_conn_scan_en: ['ControllerChain', 'Connections', 'scan_en'],
+            edt_cc_conn_controller_chain_enable: ['ControllerChain', 'Connections', 'controller_chain_enable'],
+            edt_cc_conn_controller_chain_scan_in: ['ControllerChain', 'Connections', 'controller_chain_scan_in'],
+            edt_cc_conn_controller_chain_scan_out: ['ControllerChain', 'Connections', 'controller_chain_scan_out'],
+
+            edt_conn_edt_clock: ['Connections', 'edt_clock'],
+            edt_conn_edt_slave_clock: ['Connections', 'edt_slave_clock'],
+            edt_conn_edt_update: ['Connections', 'edt_update'],
+            edt_conn_edt_reset: ['Connections', 'edt_reset'],
+            edt_conn_sec_edt_bypass: ['Connections', 'StaticExternalControls', 'edt_bypass'],
+            edt_conn_sec_edt_single_bypass_chain: ['Connections', 'StaticExternalControls', 'edt_single_bypass_chain'],
+            edt_conn_sec_edt_configuration: ['Connections', 'StaticExternalControls', 'edt_configuration'],
+            edt_conn_sec_edt_low_power_shift_enable: ['Connections', 'StaticExternalControls', 'edt_low_power_shift_enable'],
+
+            edt_ctrl_ijtag_host_interface: ['Controller', 'ijtag_host_interface'],
+            edt_ctrl_longest_chain_range: ['Controller', 'longest_chain_range'],
+            edt_ctrl_scan_chain_count: ['Controller', 'scan_chain_count'],
+            edt_ctrl_input_channel_count: ['Controller', 'input_channel_count'],
+            edt_ctrl_output_channel_count: ['Controller', 'output_channel_count'],
+            edt_ctrl_separate_control_data_channels: ['Controller', 'separate_control_data_channels'],
+            edt_ctrl_parent_instance: ['Controller', 'parent_instance'],
+            edt_ctrl_leaf_instance_name: ['Controller', 'leaf_instance_name'],
+            edt_ctrl_connect_bscan_segments_to_lsb_chains: ['Controller', 'connect_bscan_segments_to_lsb_chains'],
+            edt_ctrl_edt_bypass_change_edge_clock: ['Controller', 'edt_bypass_change_edge_clock'],
+            edt_ctrl_chain_output_masking_disable: ['Controller', 'chain_output_masking_disable'],
+            edt_ctrl_lvx_present: ['Controller', 'LVxMode', 'present'],
+            edt_ctrl_lvx_enable_one_chain: ['Controller', 'LVxMode', 'enable_one_chain'],
+
+            edt_ctrl_if_edt_clock: ['Controller', 'Interface', 'edt_clock'],
+            edt_ctrl_if_edt_slave_clock: ['Controller', 'Interface', 'edt_slave_clock'],
+            edt_ctrl_if_edt_update: ['Controller', 'Interface', 'edt_update'],
+            edt_ctrl_if_edt_reset: ['Controller', 'Interface', 'edt_reset'],
+            edt_ctrl_if_edt_channels_in_bus: ['Controller', 'Interface', 'edt_channels_in_bus'],
+            edt_ctrl_if_edt_channels_out_bus: ['Controller', 'Interface', 'edt_channels_out_bus'],
+            edt_ctrl_if_edt_bypass_change_edge_clock: ['Controller', 'Interface', 'edt_bypass_change_edge_clock'],
+            edt_ctrl_spo_min_switching_threshold_percentage: ['Controller', 'ShiftPowerOptions', 'min_switching_threshold_percentage'],
+            edt_ctrl_spo_present: ['Controller', 'ShiftPowerOptions', 'present'],
+            edt_ctrl_spo_full_control: ['Controller', 'ShiftPowerOptions', 'full_control'],
+
+            edt_ctrl_lbopt_present: ['Controller', 'LogicBistOptions', 'present'],
+            edt_ctrl_lbopt_misr_input_ratio: ['Controller', 'LogicBistOptions', 'misr_input_ratio'],
+            edt_ctrl_lbopt_chain_mask_register_ratio: ['Controller', 'LogicBistOptions', 'chain_mask_register_ratio'],
+            edt_ctrl_lbopt_prpg_seed: ['Controller', 'LogicBistOptions', 'prpg_seed'],
+            edt_ctrl_lbopt_spo_present: ['Controller', 'LogicBistOptions', 'ShiftPowerOptions', 'present'],
+            edt_ctrl_lbopt_spo_default_operation: ['Controller', 'LogicBistOptions', 'ShiftPowerOptions', 'default_operation'],
+            edt_ctrl_lbopt_spo_stp_hw_default: ['Controller', 'LogicBistOptions', 'ShiftPowerOptions', 'SwitchingThresholdPercentage', 'hardware_default'],
+
+            edt_ctrl_if_ijtag_static_signals_driven: ['Controller', 'Interface', 'IjtagScanInterface', 'static_signals_driven'],
+            edt_ctrl_if_ijtag_tck: ['Controller', 'Interface', 'IjtagScanInterface', 'tck'],
+            edt_ctrl_if_ijtag_reset: ['Controller', 'Interface', 'IjtagScanInterface', 'reset'],
+            edt_ctrl_if_ijtag_select: ['Controller', 'Interface', 'IjtagScanInterface', 'select'],
+            edt_ctrl_if_ijtag_capture_en: ['Controller', 'Interface', 'IjtagScanInterface', 'capture_en'],
+            edt_ctrl_if_ijtag_shift_en: ['Controller', 'Interface', 'IjtagScanInterface', 'shift_en'],
+            edt_ctrl_if_ijtag_update_en: ['Controller', 'Interface', 'IjtagScanInterface', 'update_en'],
+            edt_ctrl_if_ijtag_scan_in: ['Controller', 'Interface', 'IjtagScanInterface', 'scan_in'],
+            edt_ctrl_if_ijtag_scan_out: ['Controller', 'Interface', 'IjtagScanInterface', 'scan_out'],
+
+            edt_ctrl_if_sec_edt_bypass: ['Controller', 'Interface', 'StaticExternalControls', 'edt_bypass'],
+            edt_ctrl_if_sec_edt_single_bypass_chain: ['Controller', 'Interface', 'StaticExternalControls', 'edt_single_bypass_chain'],
+            edt_ctrl_if_sec_edt_configuration: ['Controller', 'Interface', 'StaticExternalControls', 'edt_configuration'],
+            edt_ctrl_if_sec_edt_low_power_shift_enable: ['Controller', 'Interface', 'StaticExternalControls', 'edt_low_power_shift_enable'],
+
+            edt_ctrl_if_lb_reset: ['Controller', 'Interface', 'LogicBist', 'reset'],
+            edt_ctrl_if_lb_enable: ['Controller', 'Interface', 'LogicBist', 'enable'],
+            edt_ctrl_if_lb_prpg_en: ['Controller', 'Interface', 'LogicBist', 'prpg_en'],
+            edt_ctrl_if_lb_misr_en: ['Controller', 'Interface', 'LogicBist', 'misr_en'],
+            edt_ctrl_if_lb_low_power_shift_en: ['Controller', 'Interface', 'LogicBist', 'low_power_shift_en'],
+            edt_ctrl_if_lb_self_test_en: ['Controller', 'Interface', 'LogicBist', 'self_test_en'],
+            edt_ctrl_if_lb_misr: ['Controller', 'Interface', 'LogicBist', 'misr'],
+
+            edt_ctrl_bc_present: ['Controller', 'BypassChains', 'present'],
+            edt_ctrl_bc_bypass_chain_count: ['Controller', 'BypassChains', 'bypass_chain_count'],
+            edt_ctrl_bc_single_bypass_chain: ['Controller', 'BypassChains', 'single_bypass_chain'],
+            edt_ctrl_bc_chain_id: ['Controller', 'BypassChains', 'BypassChain', 'id'],
+            edt_ctrl_bc_scan_chain_range_list: ['Controller', 'BypassChains', 'BypassChain', 'scan_chain_range_list'],
+
+            edt_ctrl_comp_type: ['Controller', 'Compactor', 'type'],
+            edt_ctrl_comp_pipeline_logic_levels: ['Controller', 'Compactor', 'pipeline_logic_levels_in_compactor'],
+            edt_ctrl_comp_change_edge: ['Controller', 'Compactor', 'change_edge_at_compactor_output'],
+            edt_ctrl_comp_conn_id: ['Controller', 'Compactor', 'CompactorConnection', 'id'],
+            edt_ctrl_comp_conn_scan_chain_range_list: ['Controller', 'Compactor', 'CompactorConnection', 'scan_chain_range_list'],
+
+            edt_ctrl_clocking_type: ['Controller', 'Clocking', 'type'],
+            edt_ctrl_clocking_lockup_cells: ['Controller', 'Clocking', 'lockup_cells'],
+            edt_ctrl_clocking_reset_signal: ['Controller', 'Clocking', 'reset_signal'],
+            edt_ctrl_clocking_reset_polarity: ['Controller', 'Clocking', 'reset_polarity'],
+
+            edt_ctrl_hcc_present: ['Controller', 'HighCompressionConfiguration', 'present'],
+            edt_ctrl_hcc_input_channel_count: ['Controller', 'HighCompressionConfiguration', 'input_channel_count'],
+            edt_ctrl_hcc_output_channel_count: ['Controller', 'HighCompressionConfiguration', 'output_channel_count'],
+
+            edt_ctrl_conn_edt_clock: ['Controller', 'Connections', 'edt_clock'],
+            edt_ctrl_conn_edt_slave_clock: ['Controller', 'Connections', 'edt_slave_clock'],
+            edt_ctrl_conn_edt_update: ['Controller', 'Connections', 'edt_update'],
+            edt_ctrl_conn_edt_reset: ['Controller', 'Connections', 'edt_reset'],
+            edt_ctrl_conn_ssh_chain_group: ['Controller', 'Connections', 'ssh_chain_group'],
+            edt_ctrl_conn_mode_enables: ['Controller', 'Connections', 'mode_enables'],
+            edt_ctrl_conn_edt_bypass_change_edge_clock: ['Controller', 'Connections', 'edt_bypass_change_edge_clock'],
+            edt_ctrl_conn_sec_edt_bypass: ['Controller', 'Connections', 'StaticExternalControls', 'edt_bypass'],
+            edt_ctrl_conn_sec_edt_single_bypass_chain: ['Controller', 'Connections', 'StaticExternalControls', 'edt_single_bypass_chain'],
+            edt_ctrl_conn_sec_edt_configuration: ['Controller', 'Connections', 'StaticExternalControls', 'edt_configuration'],
+            edt_ctrl_conn_sec_edt_low_power_shift_enable: ['Controller', 'Connections', 'StaticExternalControls', 'edt_low_power_shift_enable'],
+
+            edt_ctrl_conn_in_range: ['Controller', 'Connections', 'EdtChannelsIn', 'range'],
+            edt_ctrl_conn_in_port_pin_name: ['Controller', 'Connections', 'EdtChannelsIn', 'port_pin_name'],
+            edt_ctrl_conn_in_pipeline_clock: ['Controller', 'Connections', 'EdtChannelsIn', 'pipeline_clock'],
+            edt_ctrl_conn_in_insert_lockup_cell: ['Controller', 'Connections', 'EdtChannelsIn', 'insert_lockup_cell'],
+            edt_ctrl_conn_in_lockup_cell_type: ['Controller', 'Connections', 'EdtChannelsIn', 'lockup_cell_type'],
+            edt_ctrl_conn_in_ps_parent_instance: ['Controller', 'Connections', 'EdtChannelsIn', 'PipelineStage', 'parent_instance'],
+            edt_ctrl_conn_in_ps_leaf_instance_name: ['Controller', 'Connections', 'EdtChannelsIn', 'PipelineStage', 'leaf_instance_name'],
+            edt_ctrl_conn_in_ps_pipeline_clock: ['Controller', 'Connections', 'EdtChannelsIn', 'PipelineStage', 'pipeline_clock'],
+            edt_ctrl_conn_in_ps_insert_lockup_cell: ['Controller', 'Connections', 'EdtChannelsIn', 'PipelineStage', 'insert_lockup_cell'],
+            edt_ctrl_conn_in_ps_lockup_cell_type: ['Controller', 'Connections', 'EdtChannelsIn', 'PipelineStage', 'lockup_cell_type'],
+
+            edt_ctrl_conn_out_range: ['Controller', 'Connections', 'EdtChannelsOut', 'range'],
+            edt_ctrl_conn_out_port_pin_name: ['Controller', 'Connections', 'EdtChannelsOut', 'port_pin_name'],
+            edt_ctrl_conn_out_pipeline_clock: ['Controller', 'Connections', 'EdtChannelsOut', 'pipeline_clock'],
+            edt_ctrl_conn_out_insert_lockup_cell: ['Controller', 'Connections', 'EdtChannelsOut', 'insert_lockup_cell'],
+            edt_ctrl_conn_out_lockup_cell_type: ['Controller', 'Connections', 'EdtChannelsOut', 'lockup_cell_type'],
+            edt_ctrl_conn_out_ps_parent_instance: ['Controller', 'Connections', 'EdtChannelsOut', 'PipelineStage', 'parent_instance'],
+            edt_ctrl_conn_out_ps_leaf_instance_name: ['Controller', 'Connections', 'EdtChannelsOut', 'PipelineStage', 'leaf_instance_name'],
+            edt_ctrl_conn_out_ps_pipeline_clock: ['Controller', 'Connections', 'EdtChannelsOut', 'PipelineStage', 'pipeline_clock'],
+            edt_ctrl_conn_out_ps_insert_lockup_cell: ['Controller', 'Connections', 'EdtChannelsOut', 'PipelineStage', 'insert_lockup_cell'],
+            edt_ctrl_conn_out_ps_lockup_cell_type: ['Controller', 'Connections', 'EdtChannelsOut', 'PipelineStage', 'lockup_cell_type'],
+
+            edt_ctrl_dec_segments: ['Controller', 'Decompressor', 'segments'],
+            edt_ctrl_dec_max_chains_per_segment: ['Controller', 'Decompressor', 'max_chains_per_segment'],
+        };
+
+        Object.keys(topMap).forEach((k) => {
+            if (cfg[k] !== undefined && cfg[k] !== '') {
+                setNestedValue(out, topMap[k], cfg[k]);
+                delete cfg[k];
+            }
+        });
+
+        const controllerId = cfg.edt_ctrl_id;
+        if (controllerId !== undefined && controllerId !== '') {
+            setNestedValue(out, ['Controller', 'id'], controllerId);
+            delete cfg.edt_ctrl_id;
+        }
+
+        Object.keys(nestedMap).forEach((k) => {
+            if (cfg[k] !== undefined && cfg[k] !== '') {
+                setNestedValue(out, nestedMap[k], cfg[k]);
+                delete cfg[k];
+            }
+        });
+
+        Object.keys(cfg).forEach((k) => {
+            if (cfg[k] === undefined || cfg[k] === '') delete cfg[k];
+        });
+
+        if (Object.keys(cfg).length) {
+            out.Raw = cfg;
+        }
+        return pruneEmptyObjects(out) || {};
     }
 
     function emitDatapathBlock(dpName, dpCfg, indentLevel) {
@@ -226,62 +433,52 @@ function convertEDTYamlToDftspec(spec) {
         return out;
     }
 
-    // 先写 DATAPATH（新结构）
+    // 先写 SSN DATAPATH（新结构）
     if (scanDataSpec.DATAPATH && typeof scanDataSpec.DATAPATH === 'object') {
         const dpNames = Object.keys(scanDataSpec.DATAPATH || {});
         if (dpNames.length) {
-            result += `\n    SSN {`;
-            result += `\n      ijtag_host_interface : Sib(ssn);`;
+            let ssnBlock = `read_config_data -in $dftspec -from_string {\n  SSN {`;
+            ssnBlock += `\n    ijtag_host_interface : Sib(ssn);`;
             dpNames.forEach((dpName) => {
                 const dpCfg = scanDataSpec.DATAPATH[dpName];
-                result += emitDatapathBlock(dpName, dpCfg, 6);
+                ssnBlock += emitDatapathBlock(dpName, dpCfg, 4);
             });
-            result += `\n    }`;
+            ssnBlock += `\n  }\n}\n`;
+            result += ssnBlock;
         }
     }
 
     // 处理EDT配置
     if (scanDataSpec.INSTRUMENTS && scanDataSpec.INSTRUMENTS.EDT) {
         const edtConfigs = scanDataSpec.INSTRUMENTS.EDT;
+        const edtNames = Object.keys(edtConfigs || {});
+        if (edtNames.length) {
+            let edtBlock = `read_config_data -in $dftspec -from_string {\n  EDT {`;
 
-        for (const [edtName, edtConfig] of Object.entries(edtConfigs)) {
-            result += `\n    Controller(${edtName}) {`;
-
-            // 分离Controller属性和其他配置
-            const controllerProps = {};
-            const otherConfigs = {};
-
-            for (const [key, value] of Object.entries(edtConfig)) {
-                if (key === 'Controller') {
-                    Object.assign(controllerProps, value);
-                } else {
-                    otherConfigs[key] = value;
-                }
+            for (const [edtName, edtConfig] of Object.entries(edtConfigs)) {
+                const normalized = normalizeEdtConfig(edtConfig);
+                Object.entries(normalized).forEach(([key, value]) => {
+                    if (key === 'Controller' && value && typeof value === 'object' && !Array.isArray(value)) {
+                        edtBlock += `\n    Controller {`;
+                        edtBlock += processConfig(value, 6);
+                        edtBlock += `\n    }`;
+                        return;
+                    }
+                    if (typeof value === 'object' && !Array.isArray(value)) {
+                        edtBlock += `\n    ${key} {`;
+                        edtBlock += processConfig(value, 6);
+                        edtBlock += `\n    }`;
+                    } else {
+                        edtBlock += `\n    ${key} : ${formatValue(value)};`;
+                    }
+                });
             }
 
-            // 先处理Controller属性
-            for (const [key, value] of Object.entries(controllerProps)) {
-                const formattedValue = formatValue(value);
-                result += `\n      ${key} : ${formattedValue};`;
-            }
-
-            // 处理其他配置
-            for (const [key, value] of Object.entries(otherConfigs)) {
-                if (typeof value === 'object' && !Array.isArray(value)) {
-                    result += `\n      ${key} {`;
-                    result += processConfig(value, 8);
-                    result += `\n      }`;
-                } else {
-                    const formattedValue = formatValue(value);
-                    result += `\n      ${key} : ${formattedValue};`;
-                }
-            }
-
-            result += `\n    }`;
+            edtBlock += `\n  }\n}\n`;
+            result += edtBlock;
         }
     }
 
-    result += `\n  }\n}\n`;
     return result;
 }
 
@@ -289,16 +486,9 @@ function convertEDTYamlToDftspec(spec) {
 function formatValue(value) {
     if (value === null || value === undefined) return 'null';
     if (typeof value === 'boolean') return value ? 'on' : 'off';
-    if (typeof value === 'number') return value.toString();
-    if (Array.isArray(value)) return `[${value.join(', ')}]`;
-    if (typeof value === 'string') {
-        // 保持特殊格式不变
-        if (value.includes('[') && value.includes(']') || value.includes(',')) {
-            return value;
-        }
-        return `"${value}"`;
-    }
-    return JSON.stringify(value);
+    if (typeof value === 'number') return String(value);
+    if (Array.isArray(value)) return `[${value.map((v) => formatValue(v)).join(', ')}]`;
+    return String(value);
 }
 
 function convertSCANMC(spec) {
