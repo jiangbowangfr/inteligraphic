@@ -467,6 +467,9 @@
       root.state = {
         activeTab: (ui._phase1 && ui._phase1.state && ui._phase1.state.projectTab) || 'sources',
         searchText: '',
+        scrollTopByTab: {},
+        pendingRestoreByTab: {},
+        renderedTab: '',
         expanded: {},
         selectedKey: '',
         menuBound: false
@@ -478,6 +481,14 @@
   function setStatus(ui, msg) {
     try {
       if (ui && ui.editor && typeof ui.editor.setStatus === 'function') ui.editor.setStatus(msg);
+    } catch (e) {}
+  }
+
+  function logScrollDebug(stage, detail) {
+    try {
+      if (global.console && typeof global.console.debug === 'function') {
+        global.console.debug('[ProjectExplorerScroll]', stage, detail || {});
+      }
     } catch (e) {}
   }
 
@@ -1651,9 +1662,25 @@
 
   async function openPage(ui, designRef, pageName) {
     if (!ui || !designRef || !pageName) return;
+    var state = getState(ui);
+    var root = ui._phase2ProjectExplorer;
+    logScrollDebug('openPage:begin', {
+      pageName: pageName,
+      designName: designRef && designRef.name ? designRef.name : '',
+      activeTab: state.activeTab,
+      selectedKey: state.selectedKey,
+      bodyScrollTop: root && root.dom && root.dom.body ? root.dom.body.scrollTop : null,
+      savedScrollTop: state.scrollTopByTab && state.scrollTopByTab[state.activeTab]
+    });
     if (global.DFTPageSessionManager && typeof global.DFTPageSessionManager.openPage === 'function') {
       try {
         await global.DFTPageSessionManager.openPage(ui, designRef, pageName, { source: 'project-explorer' });
+        logScrollDebug('openPage:after-session-manager', {
+          pageName: pageName,
+          activeTab: state.activeTab,
+          bodyScrollTop: root && root.dom && root.dom.body ? root.dom.body.scrollTop : null,
+          savedScrollTop: state.scrollTopByTab && state.scrollTopByTab[state.activeTab]
+        });
         NS.refresh(ui);
         return;
       } catch (e) {
@@ -2170,6 +2197,7 @@
   function createNode(ui, config) {
     var state = getState(ui);
     var row = createEl('div', 'phase2-node');
+    if (config.key) row.setAttribute('data-node-key', config.key);
     row.style.paddingLeft = (6 + (config.depth || 0) * 16) + 'px';
     if (config.key && (state.selectedKey === config.key || (ui && ui._activeWorkspaceKey === config.key))) row.className += ' selected';
     if (config.activePage) row.className += ' active-page';
@@ -2516,7 +2544,20 @@
     var root = ui._phase2ProjectExplorer;
     if (!root || !root.dom) return;
     var state = getState(ui);
+    var previousTab = state.renderedTab || state.activeTab;
+    state.scrollTopByTab = state.scrollTopByTab || {};
+    state.pendingRestoreByTab = state.pendingRestoreByTab || {};
+    var hasPendingSaveSkip = Object.prototype.hasOwnProperty.call(state.pendingRestoreByTab, previousTab);
+    var hasPendingRestore = Object.prototype.hasOwnProperty.call(state.pendingRestoreByTab, state.activeTab);
     if (ui._phase1 && ui._phase1.state) ui._phase1.state.projectTab = state.activeTab;
+    if (!hasPendingSaveSkip && root.dom.body) state.scrollTopByTab[previousTab] = root.dom.body.scrollTop || 0;
+    logScrollDebug('renderActiveTab:save', {
+      previousTab: previousTab,
+      activeTab: state.activeTab,
+      previousScrollTop: state.scrollTopByTab[previousTab],
+      selectedKey: state.selectedKey,
+      pendingRestoreTop: hasPendingRestore ? state.pendingRestoreByTab[state.activeTab] : null
+    });
     var tabs = root.dom.tabBar.querySelectorAll('.phase2-project-tab');
     for (var i = 0; i < tabs.length; i++) tabs[i].className = tabs[i].getAttribute('data-key') === state.activeTab ? 'phase2-project-tab active' : 'phase2-project-tab';
     root.dom.search.value = state.searchText || '';
@@ -2527,6 +2568,44 @@
     else if (state.activeTab === 'hierarchy') renderHierarchy(ui, panel);
     else if (state.activeTab === 'runs') renderRuns(ui, panel);
     else renderFiles(ui, panel);
+    state.renderedTab = state.activeTab;
+    var restoreTop = hasPendingRestore
+      ? Number(state.pendingRestoreByTab[state.activeTab] || 0)
+      : Number(state.scrollTopByTab[state.activeTab] || 0);
+    if (hasPendingRestore) {
+      state.scrollTopByTab[state.activeTab] = restoreTop;
+      delete state.pendingRestoreByTab[state.activeTab];
+    }
+    var restoreKey = state.selectedKey || '';
+    function applyScrollRestore(source) {
+      root.dom.body.scrollTop = restoreTop;
+      var selectedNode = null;
+      if (!restoreTop && restoreKey) {
+        var candidates = root.dom.body.querySelectorAll('[data-node-key]');
+        for (var c = 0; c < candidates.length; c++) {
+          if (candidates[c].getAttribute('data-node-key') === restoreKey) {
+            selectedNode = candidates[c];
+            break;
+          }
+        }
+        if (selectedNode && typeof selectedNode.scrollIntoView === 'function') {
+          selectedNode.scrollIntoView({ block: 'nearest' });
+        }
+      }
+      logScrollDebug('renderActiveTab:restore:' + source, {
+        activeTab: state.activeTab,
+        restoreTop: restoreTop,
+        actualScrollTop: root.dom.body.scrollTop,
+        restoreKey: restoreKey,
+        selectedNodeFound: !!selectedNode
+      });
+    }
+    applyScrollRestore('immediate');
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(function () { applyScrollRestore('raf'); });
+    } else {
+      setTimeout(function () { applyScrollRestore('timeout'); }, 0);
+    }
   }
 
   async function openNewEntryDialog(ui, opts) {
@@ -2896,6 +2975,16 @@
     host.appendChild(toolbar);
 
     var body = createEl('div', 'phase2-project-body');
+    body.onscroll = function () {
+      var state = getState(ui);
+      state.scrollTopByTab = state.scrollTopByTab || {};
+      state.scrollTopByTab[state.activeTab] = body.scrollTop || 0;
+      logScrollDebug('body:scroll', {
+        activeTab: state.activeTab,
+        scrollTop: body.scrollTop,
+        selectedKey: state.selectedKey
+      });
+    };
     host.appendChild(body);
     root.dom = { titlebar: titlebar, tabBar: tabBar, toolbar: toolbar, search: search, body: body };
   }

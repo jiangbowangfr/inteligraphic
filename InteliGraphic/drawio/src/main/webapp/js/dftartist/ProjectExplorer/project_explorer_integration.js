@@ -75,6 +75,33 @@
       host.querySelector &&
       host.querySelector('.phase2-project-host');
 
+    try {
+      if (global.console && typeof global.console.debug === 'function') {
+        global.console.debug('[ProjectExplorerAttach]', {
+          forceClear: !!forceClear,
+          alreadyMounted: !!alreadyMounted,
+          hostScrollTop: host && typeof host.scrollTop === 'number' ? host.scrollTop : null,
+          bodyScrollTop: ui && ui._phase2ProjectExplorer && ui._phase2ProjectExplorer.dom && ui._phase2ProjectExplorer.dom.body
+            ? ui._phase2ProjectExplorer.dom.body.scrollTop
+            : null
+        });
+      }
+    } catch (debugErr) {}
+
+    if (forceClear && ui && ui._phase2ProjectExplorer && ui._phase2ProjectExplorer.state) {
+      try {
+        var state = ui._phase2ProjectExplorer.state;
+        var body = ui._phase2ProjectExplorer.dom && ui._phase2ProjectExplorer.dom.body;
+        var activeTab = state.activeTab || 'sources';
+        state.scrollTopByTab = state.scrollTopByTab || {};
+        state.pendingRestoreByTab = state.pendingRestoreByTab || {};
+        if (body) {
+          state.scrollTopByTab[activeTab] = body.scrollTop || 0;
+          state.pendingRestoreByTab[activeTab] = body.scrollTop || 0;
+        }
+      } catch (captureErr) {}
+    }
+
     if (alreadyMounted && !forceClear) {
       try { global.DFTProjectExplorerPhase2.refresh(ui); } catch (e) {}
       return true;
