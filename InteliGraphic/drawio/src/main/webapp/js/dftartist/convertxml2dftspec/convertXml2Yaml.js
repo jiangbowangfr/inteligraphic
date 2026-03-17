@@ -808,7 +808,7 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
         }
 
         function parseAllOCC(ctx) {
-            const { objectsById, childrenByParent, edges, getPrettyLabel } = ctx;
+            const { objectsById, childrenByParent, edges, getPrettyLabel, getType } = ctx;
 
             function findSignal(objId, token) {
                 const tok = String(token || "").toLowerCase();
@@ -836,13 +836,14 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
 
             Object.keys(objectsById).forEach((oid) => {
                 const at = objectsById[oid];
-                const occType = (at.type || "").toLowerCase();
+                const occType = String((getType && getType(oid)) || at.type || "").toLowerCase();
+                const flatOccAttrs = collectPrefixedAttrs(at, ['occ_']);
 
                 // 检查是否是需要检查的 OCC 类型
-                if (occTypesToCheck.includes(occType)) {
+                if (occTypesToCheck.includes(occType) || Object.keys(flatOccAttrs).length) {
                     occObjectsToCheck.push({ oid, at });
 
-                    const currentValue = at.static_clock_control !== undefined ? at.static_clock_control : "undefined";
+                    const currentValue = at.occ_static_clock_control !== undefined ? at.occ_static_clock_control : (at.static_clock_control !== undefined ? at.static_clock_control : "undefined");
                     const objName = ctx.getPrettyLabel(oid) || oid;
 
                     if (!valueToObjectsMap[currentValue]) {
@@ -902,13 +903,14 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
             // 处理所有 OCC 对象，但只将需要检查的类型添加到输出
             Object.keys(objectsById).forEach((oid) => {
                 const at = objectsById[oid];
-                const occType = (at.type || "").toLowerCase();
-                if (!occType.includes("_occ")) return;
+                const occType = String((getType && getType(oid)) || at.type || "").toLowerCase();
+                const flatOccAttrs = collectPrefixedAttrs(at, ['occ_']);
+                if (!(occType.includes("occ") || Object.keys(flatOccAttrs).length)) return;
 
                 const name = ctx.getPrettyLabel(oid) || (at.label || occType).trim();
 
                 // 只将需要检查的OCC类型添加到主输出（排除 mini_occ）
-                if (occTypesToCheck.includes(occType)) {
+                if (occTypesToCheck.includes(occType) || Object.keys(flatOccAttrs).length) {
                     const { panels, id2title } = collectPanels(childrenByParent, oid);
                     const nested = buildHierarchyByEdges(panels, id2title, edges);
 
@@ -939,6 +941,10 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
                         }
                     });
 
+                    Object.keys(flatOccAttrs).forEach((k) => {
+                        occctrl[k] = flatOccAttrs[k];
+                    });
+
                     out[name] = occctrl;
                 }
             });
@@ -967,6 +973,11 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
                     const name = ctx.getPrettyLabel(oid) || (at.label || at.type).trim();
                     delete out[name];
                 });
+            }
+
+            if (!out.MGC_OCC_INS_SPEC && Object.keys(out).length) {
+                const firstName = Object.keys(out)[0];
+                if (firstName) out.MGC_OCC_INS_SPEC = out[firstName];
             }
 
             return out;
