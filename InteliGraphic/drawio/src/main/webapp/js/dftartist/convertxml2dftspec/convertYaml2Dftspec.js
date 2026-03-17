@@ -134,6 +134,39 @@ function convertEDTYamlToDftspec(spec) {
         return out;
     }
 
+    function emitScanHostDetails(node, indentLevel) {
+        const indent = ' '.repeat(indentLevel);
+        const params = Object.assign({}, (node && node.params) || {});
+        let out = '';
+        const cgId = params.cg_id;
+        const connCgId = params.conn_cg_id;
+        const csmModuleName = params.csm_module_name;
+        delete params.cg_id;
+        delete params.conn_cg_id;
+        delete params.csm_module_name;
+        if (cgId !== undefined && cgId !== '') {
+            out += `\n${indent}ChainGroup {`;
+            out += `\n${indent}  id : ${formatValue(cgId)};`;
+            out += `\n${indent}}`;
+        }
+        if (csmModuleName !== undefined && csmModuleName !== '') {
+            out += `\n${indent}Interface {`;
+            out += `\n${indent}  ClockSignalModule {`;
+            out += `\n${indent}    module_name : ${formatValue(csmModuleName)};`;
+            out += `\n${indent}  }`;
+            out += `\n${indent}}`;
+        }
+        if (connCgId !== undefined && connCgId !== '') {
+            out += `\n${indent}Connections {`;
+            out += `\n${indent}  ChainGroup {`;
+            out += `\n${indent}    id : ${formatValue(connCgId)};`;
+            out += `\n${indent}  }`;
+            out += `\n${indent}}`;
+        }
+        if (Object.keys(params).length) out += emitParams(params, indentLevel);
+        return out;
+    }
+
     function emitSmuxSecondary(smuxSecondary, indentLevel) {
         const indent = ' '.repeat(indentLevel);
         let out = '';
@@ -146,7 +179,7 @@ function convertEDTYamlToDftspec(spec) {
             if (!isRenderableSsnType(t)) return;
             const blockName = typeToSsnBlockName(t);
             out += `\n${indent}${blockName}(${instName}) {`;
-            out += emitParams(node.params, indentLevel + 2);
+            out += t === 'ssn_scanhost' ? emitScanHostDetails(node, indentLevel + 2) : emitParams(node.params, indentLevel + 2);
             out += `\n${indent}}`;
         });
         return out;
@@ -154,9 +187,8 @@ function convertEDTYamlToDftspec(spec) {
 
     function emitExtraOutputPath(extraValue, indentLevel) {
         const indent = ' '.repeat(indentLevel);
-        let out = '';
-        if (extraValue === undefined || extraValue === null) return out;
-        out += `\n${indent}ExtraOutputPath {`;
+        if (extraValue === undefined || extraValue === null) return '';
+        let body = '';
         const paths = Array.isArray(extraValue) ? extraValue : [extraValue];
         paths.forEach((pathObj) => {
             if (!pathObj || typeof pathObj !== 'object') return;
@@ -168,9 +200,9 @@ function convertEDTYamlToDftspec(spec) {
                         const t = String(node.type || '').toLowerCase();
                         if (!isRenderableSsnType(t)) return;
                         const blockName = typeToSsnBlockName(t);
-                        out += `\n${indent}  ${blockName}(${instName}) {`;
-                        out += emitParams(node.params, indentLevel + 4);
-                        out += `\n${indent}  }`;
+                        body += `\n${indent}  ${blockName}(${instName}) {`;
+                        body += t === 'ssn_scanhost' ? emitScanHostDetails(node, indentLevel + 4) : emitParams(node.params, indentLevel + 4);
+                        body += `\n${indent}  }`;
                     });
                 });
             } else {
@@ -179,14 +211,14 @@ function convertEDTYamlToDftspec(spec) {
                     const t = String(node.type || '').toLowerCase();
                     if (!isRenderableSsnType(t)) return;
                     const blockName = typeToSsnBlockName(t);
-                    out += `\n${indent}  ${blockName}(${instName}) {`;
-                    out += emitParams(node.params, indentLevel + 4);
-                    out += `\n${indent}  }`;
+                    body += `\n${indent}  ${blockName}(${instName}) {`;
+                    body += t === 'ssn_scanhost' ? emitScanHostDetails(node, indentLevel + 4) : emitParams(node.params, indentLevel + 4);
+                    body += `\n${indent}  }`;
                 });
             }
         });
-        out += `\n${indent}}`;
-        return out;
+        if (!body) return '';
+        return `\n${indent}ExtraOutputPath {${body}\n${indent}}`;
     }
 
     function emitOrderAsSsnBlocks(order, indentLevel) {
@@ -199,14 +231,15 @@ function convertEDTYamlToDftspec(spec) {
             if (!isRenderableSsnType(t)) return;
             const blockName = typeToSsnBlockName(t);
             out += `\n${indent}${blockName}(${instName}) {`;
-            out += emitParams(node.params, indentLevel + 2);
+            out += t === 'ssn_scanhost' ? emitScanHostDetails(node, indentLevel + 2) : emitParams(node.params, indentLevel + 2);
             if (node.smux_secondary) {
                 out += `\n${indent}  smux_secondary {`;
                 out += emitSmuxSecondary(node.smux_secondary, indentLevel + 4);
                 out += `\n${indent}  }`;
             }
-            if (node.ExtraOutputPath !== undefined) {
-                out += emitExtraOutputPath(node.ExtraOutputPath, indentLevel + 2);
+            const extraOut = emitExtraOutputPath(node.ExtraOutputPath, indentLevel + 2);
+            if (extraOut) {
+                out += extraOut;
             }
             out += `\n${indent}}`;
         });

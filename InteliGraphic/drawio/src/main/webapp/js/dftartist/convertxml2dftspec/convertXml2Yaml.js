@@ -2473,13 +2473,33 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
                 return out;
             }
 
-            function followBranchFromOutputEdge(startOutputPin, firstNode, maxSteps) {
+            function isSsnRenderableType(typeName) {
+                const t = String(typeName || '').toLowerCase();
+                return t === 'ssn_outputpipeline' || t === 'ssn_scanhost' || t === 'ssn_multiplexer' || t === 'ssn_receiver1xpipeline' || t === 'ssn_pipeline';
+            }
+
+            function followBranchFromOutputEdge(startOutputPin, firstNode, maxSteps, mainIpSet) {
                 const chain = [];
+                let reachedSlave = false;
+                let slaveIpId = '';
                 let cur = firstNode;
                 const visited = {};
+                const startIpId = pins[startOutputPin] ? pins[startOutputPin].ip_id : '';
                 visited[startOutputPin] = true;
                 visited[firstNode] = true;
-                if (String(pins[cur].role || '').indexOf('slave_') !== 0) chain.push(pins[cur].ip_id);
+                const firstPin = pins[cur];
+                const firstIpId = firstPin.ip_id;
+                if (String(firstPin.role || '').indexOf('slave_') === 0) {
+                    if (String(firstPin.ip_type || '').toLowerCase() === 'ssn_slave_interface') {
+                        reachedSlave = true;
+                        slaveIpId = firstIpId;
+                    }
+                    return { chain, reachedSlave, slaveIpId };
+                }
+                if ((mainIpSet && mainIpSet[firstIpId] && firstIpId !== startIpId) || !isSsnRenderableType(pins[cur].ip_type)) {
+                    return { chain, reachedSlave, slaveIpId };
+                }
+                chain.push(firstIpId);
                 let steps = 0;
                 while (steps < maxSteps) {
                     steps += 1;
@@ -2488,36 +2508,47 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
                     const nxt = nxts[0];
                     if (visited[nxt]) break;
                     visited[nxt] = true;
-                    if (String(pins[nxt].role || '').indexOf('slave_') === 0) break;
+                    if (String(pins[nxt].role || '').indexOf('slave_') === 0) {
+                        if (String(pins[nxt].ip_type || '').toLowerCase() === 'ssn_slave_interface') {
+                            reachedSlave = true;
+                            slaveIpId = pins[nxt].ip_id;
+                        }
+                        break;
+                    }
+                    if ((mainIpSet && mainIpSet[pins[nxt].ip_id] && pins[nxt].ip_id !== startIpId) || !isSsnRenderableType(pins[nxt].ip_type)) break;
                     const ipId = pins[nxt].ip_id;
                     if (!chain.length || chain[chain.length - 1] !== ipId) chain.push(ipId);
                     cur = nxt;
                 }
-                return chain;
+                return { chain, reachedSlave, slaveIpId };
             }
 
-            function buildSmuxSecondary(ipId) {
+            function buildSmuxSecondary(ipId, mainIpSet) {
                 const ip = ips[ipId];
                 if (!ip || String(ip.ip_type || '').toLowerCase() !== 'ssn_multiplexer') return null;
                 const secPin = findPinByKey(ipId, 'secondary_bus_data_in');
                 if (!secPin) return null;
                 const chain = chainIpIdsFromInputPinBackward(secPin.id, ['ssn_slave_interface'], 128);
-                if (!chain.length) return null;
+                const filtered = chain.filter((cid) => !(mainIpSet && mainIpSet[cid]));
+                if (!filtered.length) return null;
                 const out = {};
-                chain.forEach((cid) => { out[ips[cid].inst] = makeNode(cid); });
+                filtered.forEach((cid) => { out[ips[cid].inst] = makeNode(cid); });
                 return Object.keys(out).length ? out : null;
             }
 
             function buildExtraOutputPaths(ipId, mainPinPath) {
                 const used = {};
+                const mainIpSet = {};
+                pinsToIpPath(mainPinPath).forEach(([mid]) => { mainIpSet[mid] = true; });
                 for (let i = 0; i < mainPinPath.length - 1; i++) used[mainPinPath[i] + '::' + mainPinPath[i + 1]] = true;
                 const outputPins = Object.keys(pins).filter((pid) => pins[pid].ip_id === ipId && pins[pid].direction === 'output' && isDataPinType(pins[pid].pin_type));
                 const extraList = [];
                 outputPins.forEach((op) => {
                     (adj[op] || []).forEach((v) => {
                         if (used[op + '::' + v]) return;
-                        const branch = followBranchFromOutputEdge(op, v, 256);
-                        if (!branch.length) return;
+                        const branchRes = followBranchFromOutputEdge(op, v, 256, mainIpSet);
+                        if (!branchRes || !branchRes.reachedSlave || !branchRes.chain.length) return;
+                        const branch = branchRes.chain;
                         const branchObj = {};
                         branch.forEach((cid) => {
                             const inst = ips[cid].inst;
@@ -2531,9 +2562,11 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
 
             function buildMainOrder(ipPath, mainPinPath) {
                 const order = {};
+                const mainIpSet = {};
+                orderedUniqueReversedIpIds(ipPath).forEach((mid) => { mainIpSet[mid] = true; });
                 orderedUniqueReversedIpIds(ipPath).forEach((ipId) => {
                     const node = makeNode(ipId);
-                    const smuxSecondary = buildSmuxSecondary(ipId);
+                    const smuxSecondary = buildSmuxSecondary(ipId, mainIpSet);
                     if (smuxSecondary) node.smux_secondary = smuxSecondary;
                     const extra = buildExtraOutputPaths(ipId, mainPinPath);
                     if (extra) node.ExtraOutputPath = extra;
