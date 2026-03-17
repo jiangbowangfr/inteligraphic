@@ -13,6 +13,7 @@ const DEFAULT_WIDTH_PCT = 0.25;
 const RIGHT_MARGIN = 5;
 const BOTTOM_MARGIN = 34;
 const TOP_MARGIN_FALLBACK = 60;
+const WINDOW_Z_INDEX = 2000;
 
 const KEY_W = 'DFT_PREVIEW_DOCK_W';
 const KEY_BOUNDS = 'DFT_PREVIEW_LAST_BOUNDS';
@@ -251,6 +252,10 @@ function ensureWindow(){
   // 位置夹紧
   wrapSetLocationClamp(_wnd);
 
+  if (_wnd.div) {
+    _wnd.div.style.zIndex = String(WINDOW_Z_INDEX);
+  }
+
   // React
   _root = createRoot(_host);
   _root.render(React.createElement(CodePanel));
@@ -399,7 +404,9 @@ const API = {
     }
 
     _wnd.setVisible(true);
+    if (_wnd.div) _wnd.div.style.zIndex = String(WINDOW_Z_INDEX);
     _wnd.activate && _wnd.activate();
+    if (_wnd.div) _wnd.div.style.zIndex = String(WINDOW_Z_INDEX);
   },
 
   close(){
