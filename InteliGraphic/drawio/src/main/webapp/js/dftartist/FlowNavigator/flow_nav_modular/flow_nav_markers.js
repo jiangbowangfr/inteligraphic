@@ -201,4 +201,18 @@
     }
     return { created: created, plan: plan };
   };
+
+  Markers.deleteInterfaceMarkers = function deleteInterfaceMarkers(ui, analysis) {
+    analysis = analysis || Analysis.analyzeDataflow(ui);
+    var graph = Shared.graphOf(ui);
+    if (!graph) throw new Error('Graph is not ready.');
+    var removed = 0;
+    graph.getModel().beginUpdate();
+    try {
+      removed = removeExistingMarkers(ui, analysis);
+    } finally {
+      graph.getModel().endUpdate();
+    }
+    return { removed: removed, analysis: analysis };
+  };
 })(typeof globalThis !== 'undefined' ? globalThis : (typeof window !== 'undefined' ? window : this));

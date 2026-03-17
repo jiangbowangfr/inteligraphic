@@ -96,9 +96,11 @@
       ? { state: 'blocked', text: 'Open page first' }
       : !Shared.isFloorplanPageOpen(ui)
         ? { state: 'blocked', text: 'Open floorplan page first' }
-        : (analysis.interfacePlan.markers.length
-            ? { state: 'ready', text: analysis.interfacePlan.markers.length + ' planned marker(s)' }
-            : { state: 'warning', text: 'No interface plan found' });
+        : (analysis.interfaces.length
+            ? { state: 'success', text: analysis.interfaces.length + ' existing marker(s)' }
+            : (analysis.interfacePlan.markers.length
+                ? { state: 'ready', text: analysis.interfacePlan.markers.length + ' planned marker(s)' }
+                : { state: 'warning', text: 'No interface plan found' }));
     out.generateDesigns = !Shared.getActivePageReady(ui)
       ? { state: 'blocked', text: 'Open page first' }
       : !Shared.isFloorplanPageOpen(ui)
@@ -136,12 +138,16 @@
     return analysis;
   }
 
-  function previewInterfaceGeneration(ui) {
-    if (!Shared.getActivePageReady(ui)) throw new Error('Open a page before previewing interface generation.');
+  function runDeleteInterface(ui) {
+    if (!Shared.getActivePageReady(ui)) throw new Error('Open a page before deleting interfaces.');
+    if (!Shared.isFloorplanPageOpen(ui)) throw new Error('Open a floorplan page before deleting interfaces.');
     var analysis = Analysis.analyzeDataflow(ui);
-    Shared.logDock(ui, 'Preview: ' + analysis.interfacePlan.markers.length + ' marker(s), ' + analysis.interfacePlan.chains.length + ' chain(s).', analysis.interfacePlan.markers.length ? 'info' : 'warning');
-    Shared.setReports(ui, [{ title: 'Interface Preview', items: { markers: analysis.interfacePlan.markers.length, chains: analysis.interfacePlan.chains.length, modules: analysis.modules.length } }]);
-    return analysis;
+    var result = Markers.deleteInterfaceMarkers(ui, analysis);
+    Shared.ensureState(ui).lastInterfaceReport = result;
+    Shared.logDock(ui, 'Deleted ' + result.removed + ' floorplan interface marker(s).', result.removed ? 'success' : 'warning');
+    Shared.setReports(ui, [{ title: 'Delete Interface', items: { markersDeleted: result.removed, modules: analysis.modules.length } }]);
+    Shared.setJobs(ui, [{ name: 'delete_interface', status: result.removed ? 'success' : 'warning', detail: result.removed + ' marker(s)', progress: 100 }]);
+    return result;
   }
 
   function runGenerateInterface(ui) {
@@ -713,8 +719,8 @@
       { key: 'dataflow', label: 'Dataflow Check', desc: 'Validate SSN loop, module coverage, and host uniqueness.', actions: [
         { label: 'Check', key: 'dataflow:check', primary: true }
       ] },
-      { key: 'generateInterface', label: 'Generate Interface', desc: 'Generate floorplan HI/HO/SI/SO interface markers after dataflow check passes.', actions: [
-        { label: 'Preview', key: 'ifgen:preview' },
+      { key: 'generateInterface', label: 'Generate Interface', desc: 'Generate floorplan HI/HO/SI/SO interface markers after dataflow check passes, or delete existing markers from the floorplan page.', actions: [
+        { label: 'Delete', key: 'ifgen:delete' },
         { label: 'Generate', key: 'ifgen:run', primary: true }
       ] },
       { key: 'generateDesigns', label: 'Generate Module Designs', desc: 'Create top-level designs and materialize real SSN interface IPs on each module page.', actions: [
@@ -858,7 +864,7 @@ async function execute(ui, cmd) {
     if (cmd === 'project:save') return runProjectManager(ui, 'save');
     if (cmd === 'floorplan:open') return ensureFloorplanPage(ui);
     if (cmd === 'dataflow:check') return checkDataflow(ui);
-    if (cmd === 'ifgen:preview') return previewInterfaceGeneration(ui);
+    if (cmd === 'ifgen:delete') return runDeleteInterface(ui);
     if (cmd === 'ifgen:run') return runGenerateInterface(ui);
     if (cmd === 'designs:run') return runGenerateDesigns(ui);
     if (cmd === 'dftspec:preview') return runPreviewDftspec(ui);
