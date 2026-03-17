@@ -106,12 +106,41 @@ function PolygonTool(graph, ui) {
 // ===== 关键：把鼠标 event 转成图纸上的坐标 =====
 PolygonTool.prototype.getPoint = function (me) {
     var evt = me.getEvent();
-    var p = this.graph.getPointForEvent(evt);
-    return new mxPoint(p.x, p.y);
+    var graph = this.graph;
+    var p = mxUtils.convertPoint(graph.container, mxEvent.getClientX(evt), mxEvent.getClientY(evt));
+    var s = graph.view && graph.view.scale ? graph.view.scale : 1;
+    var tr = graph.view && graph.view.translate ? graph.view.translate : { x: 0, y: 0 };
+    return this.snapPoint(new mxPoint(
+        p.x / s - tr.x,
+        p.y / s - tr.y
+    ));
+};
+
+PolygonTool.prototype.snapPoint = function (pt) {
+    if (!pt) return pt;
+
+    var graph = this.graph;
+    if (!graph) return pt;
+
+    var x = Number(pt.x || 0);
+    var y = Number(pt.y || 0);
+
+    // 画 polygon 时统一吸附到图纸网格，保证起点和后续点都落在精确网格点上。
+    if (typeof graph.snap === 'function') {
+        x = graph.snap(x);
+        y = graph.snap(y);
+    } else {
+        var gridSize = Math.max(1, Number(graph.gridSize || 10));
+        x = Math.round(x / gridSize) * gridSize;
+        y = Math.round(y / gridSize) * gridSize;
+    }
+
+    return new mxPoint(x, y);
 };
 
 PolygonTool.prototype.getConstrainedPoint = function (rawPt, evt) {
     if (!rawPt) return rawPt;
+    rawPt = this.snapPoint(rawPt);
     if (!evt || !evt.shiftKey) return rawPt;
     if (!this.points || this.points.length === 0) return rawPt;
 
@@ -121,10 +150,10 @@ PolygonTool.prototype.getConstrainedPoint = function (rawPt, evt) {
 
     // Shift 锁 90°：仅允许水平或垂直
     if (Math.abs(dx) >= Math.abs(dy)) {
-        return new mxPoint(rawPt.x, last.y);
+        return this.snapPoint(new mxPoint(rawPt.x, last.y));
     }
 
-    return new mxPoint(last.x, rawPt.y);
+    return this.snapPoint(new mxPoint(last.x, rawPt.y));
 };
 
 PolygonTool.prototype.isCloseToFirst = function (pt) {
