@@ -234,6 +234,7 @@
 
   function emitLog(level, message, meta) {
     try {
+      if (level === 'info') return;
       var prefix = '[PageSession]';
       var fn = level === 'error' ? 'error' : (level === 'warn' ? 'warn' : 'log');
       if (global.console && typeof console[fn] === 'function') {

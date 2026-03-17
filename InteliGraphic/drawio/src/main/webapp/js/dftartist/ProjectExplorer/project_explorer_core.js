@@ -484,14 +484,6 @@
     } catch (e) {}
   }
 
-  function logScrollDebug(stage, detail) {
-    try {
-      if (global.console && typeof global.console.debug === 'function') {
-        global.console.debug('[ProjectExplorerScroll]', stage, detail || {});
-      }
-    } catch (e) {}
-  }
-
   async function maybeSaveActivePage(ui, reason) {
     if (global.DFTPageSessionManager && typeof global.DFTPageSessionManager.saveActivePage === 'function') {
       return global.DFTPageSessionManager.saveActivePage(ui, { reason: reason, silentIfUnmapped: true });
@@ -1662,25 +1654,9 @@
 
   async function openPage(ui, designRef, pageName) {
     if (!ui || !designRef || !pageName) return;
-    var state = getState(ui);
-    var root = ui._phase2ProjectExplorer;
-    logScrollDebug('openPage:begin', {
-      pageName: pageName,
-      designName: designRef && designRef.name ? designRef.name : '',
-      activeTab: state.activeTab,
-      selectedKey: state.selectedKey,
-      bodyScrollTop: root && root.dom && root.dom.body ? root.dom.body.scrollTop : null,
-      savedScrollTop: state.scrollTopByTab && state.scrollTopByTab[state.activeTab]
-    });
     if (global.DFTPageSessionManager && typeof global.DFTPageSessionManager.openPage === 'function') {
       try {
         await global.DFTPageSessionManager.openPage(ui, designRef, pageName, { source: 'project-explorer' });
-        logScrollDebug('openPage:after-session-manager', {
-          pageName: pageName,
-          activeTab: state.activeTab,
-          bodyScrollTop: root && root.dom && root.dom.body ? root.dom.body.scrollTop : null,
-          savedScrollTop: state.scrollTopByTab && state.scrollTopByTab[state.activeTab]
-        });
         NS.refresh(ui);
         return;
       } catch (e) {
@@ -2019,11 +1995,6 @@
   }
 
   async function openEnv(ui, designRef) {
-    console.log('[env-open:project-explorer] click', {
-      designName: designRef && designRef.name,
-      envFile: designRef && designRef.env_file,
-      dirRel: designRef && designRef._dirRel
-    });
     if (!ui || !designRef) return;
     try {
       if (global.DFTPageSessionManager && typeof global.DFTPageSessionManager.captureActiveViewState === 'function') {
@@ -2031,24 +2002,23 @@
       }
     } catch (captureErr) {}
     if (isFloorplanDesign(designRef) || isIpconfigDesign(designRef)) {
-      console.log('[env-open:project-explorer] branch=ipconfig-dialog');
       showTextDialog(ui, 'ip_config', JSON.stringify({ file: ensureModel(ui).ip_config_file || 'ip_config.json' }, null, 2));
       return;
     }
     var rootPath = getProjectStorageRoot(ui) || '';
     var designBase = getDesignAbsDir(ui, designRef);
-    var abs = pathWithinRoot(rootPath, designBase) ? joinPath(rootPath, designRef.env_file) : joinPath(designBase, 'env.json');
-    console.log('[env-open:project-explorer] resolved', {
-      openWorkspaceEmbedTab: typeof global.dftArtistOpenWorkspaceEmbedTab === 'function',
-      buildHtml: typeof global.dftArtistBuildLoadEmbedHtml === 'function',
-      abs: abs,
-      designBase: designBase
-    });
+    var envRef = text(designRef && designRef.env_file || '').trim();
+    var abs = '';
+    if (envRef) {
+      abs = pathWithinRoot(rootPath, designBase) ? joinPath(rootPath, envRef) : joinPath(designBase, envRef);
+    } else {
+      abs = joinPath(designBase, 'env.json');
+    }
+    if (!/\.[A-Za-z0-9]+$/.test(abs)) abs = joinPath(abs, 'env.json');
     if (typeof global.dftArtistOpenWorkspaceEmbedTab === 'function' && typeof global.dftArtistMountLoadPanel === 'function') {
       var tabKey = 'env:' + normalizePath(abs || designRef.env_file || designRef.name || 'design');
       var tabLabel = 'Flow: ' + (designRef.name || 'design');
       var frameTitle = tabLabel;
-      console.log('[env-open:project-explorer] branch=workspace-dom-tab', { tabKey: tabKey, frameTitle: frameTitle });
       try {
         ui._activeEnvCtx = {
           designKey: getDesignKey(designRef),
@@ -2074,7 +2044,6 @@
       if (typeof ui.refreshProjectExplorer === 'function') ui.refreshProjectExplorer();
       return;
     }
-    console.warn('[env-open:project-explorer] branch=fallback-text-dialog');
     var content = 'env_file: ' + (designRef.env_file || 'env.json');
     try {
       var txt = await readTextFile(abs);
@@ -2551,13 +2520,6 @@
     var hasPendingRestore = Object.prototype.hasOwnProperty.call(state.pendingRestoreByTab, state.activeTab);
     if (ui._phase1 && ui._phase1.state) ui._phase1.state.projectTab = state.activeTab;
     if (!hasPendingSaveSkip && root.dom.body) state.scrollTopByTab[previousTab] = root.dom.body.scrollTop || 0;
-    logScrollDebug('renderActiveTab:save', {
-      previousTab: previousTab,
-      activeTab: state.activeTab,
-      previousScrollTop: state.scrollTopByTab[previousTab],
-      selectedKey: state.selectedKey,
-      pendingRestoreTop: hasPendingRestore ? state.pendingRestoreByTab[state.activeTab] : null
-    });
     var tabs = root.dom.tabBar.querySelectorAll('.phase2-project-tab');
     for (var i = 0; i < tabs.length; i++) tabs[i].className = tabs[i].getAttribute('data-key') === state.activeTab ? 'phase2-project-tab active' : 'phase2-project-tab';
     root.dom.search.value = state.searchText || '';
@@ -2577,7 +2539,7 @@
       delete state.pendingRestoreByTab[state.activeTab];
     }
     var restoreKey = state.selectedKey || '';
-    function applyScrollRestore(source) {
+    function applyScrollRestore() {
       root.dom.body.scrollTop = restoreTop;
       var selectedNode = null;
       if (!restoreTop && restoreKey) {
@@ -2592,19 +2554,12 @@
           selectedNode.scrollIntoView({ block: 'nearest' });
         }
       }
-      logScrollDebug('renderActiveTab:restore:' + source, {
-        activeTab: state.activeTab,
-        restoreTop: restoreTop,
-        actualScrollTop: root.dom.body.scrollTop,
-        restoreKey: restoreKey,
-        selectedNodeFound: !!selectedNode
-      });
     }
-    applyScrollRestore('immediate');
+    applyScrollRestore();
     if (typeof requestAnimationFrame === 'function') {
-      requestAnimationFrame(function () { applyScrollRestore('raf'); });
+      requestAnimationFrame(function () { applyScrollRestore(); });
     } else {
-      setTimeout(function () { applyScrollRestore('timeout'); }, 0);
+      setTimeout(function () { applyScrollRestore(); }, 0);
     }
   }
 
@@ -2979,11 +2934,6 @@
       var state = getState(ui);
       state.scrollTopByTab = state.scrollTopByTab || {};
       state.scrollTopByTab[state.activeTab] = body.scrollTop || 0;
-      logScrollDebug('body:scroll', {
-        activeTab: state.activeTab,
-        scrollTop: body.scrollTop,
-        selectedKey: state.selectedKey
-      });
     };
     host.appendChild(body);
     root.dom = { titlebar: titlebar, tabBar: tabBar, toolbar: toolbar, search: search, body: body };

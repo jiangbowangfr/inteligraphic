@@ -76,24 +76,6 @@
       return await fn();
     } finally {
       try {
-        var graph = Shared.graphOf(ui);
-        var parent = Shared.getDefaultParent(ui);
-        var childCount = 0;
-        if (graph && parent && typeof graph.getModel === 'function') {
-          childCount = graph.getModel().getChildCount(parent);
-        }
-        if (global.console && typeof global.console.log === 'function') {
-          console.log('[FlowNavDesigns] save-before', {
-            pageName: pageName,
-            designName: design && design.name ? design.name : '',
-            activeCtx: ui && ui._activeProjectPageCtx ? {
-              name: ui._activeProjectPageCtx.name,
-              abs: ui._activeProjectPageCtx.abs || '',
-              designKey: ui._activeProjectPageCtx.designKey || ''
-            } : null,
-            childCount: childCount
-          });
-        }
         if (typeof global.DFTPageSessionManager.saveActivePage === 'function') {
           await global.DFTPageSessionManager.saveActivePage(ui, { reason: 'flow-nav-materialize-save' });
         }
