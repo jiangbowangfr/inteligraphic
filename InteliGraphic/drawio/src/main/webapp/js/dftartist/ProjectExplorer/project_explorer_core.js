@@ -517,6 +517,7 @@
 
   function isActiveDesignPage(ui, designRef, pageName) {
     if (!ui || !designRef || !pageName) return false;
+    if (ui._activeEnvCtx) return false;
     var activeName = activePageName(ui);
     var ctx = activePageCtx(ui);
 
@@ -1997,6 +1998,11 @@
       dirRel: designRef && designRef._dirRel
     });
     if (!ui || !designRef) return;
+    try {
+      if (global.DFTPageSessionManager && typeof global.DFTPageSessionManager.captureActiveViewState === 'function') {
+        global.DFTPageSessionManager.captureActiveViewState(ui);
+      }
+    } catch (captureErr) {}
     if (isFloorplanDesign(designRef) || isIpconfigDesign(designRef)) {
       console.log('[env-open:project-explorer] branch=ipconfig-dialog');
       showTextDialog(ui, 'ip_config', JSON.stringify({ file: ensureModel(ui).ip_config_file || 'ip_config.json' }, null, 2));
@@ -2013,9 +2019,16 @@
     });
     if (typeof global.dftArtistOpenWorkspaceEmbedTab === 'function' && typeof global.dftArtistMountLoadPanel === 'function') {
       var tabKey = 'env:' + normalizePath(abs || designRef.env_file || designRef.name || 'design');
-      var tabLabel = 'Env: ' + (designRef.name || 'design');
-      var frameTitle = tabLabel + ' · dft-load';
+      var tabLabel = 'Flow: ' + (designRef.name || 'design');
+      var frameTitle = tabLabel;
       console.log('[env-open:project-explorer] branch=workspace-dom-tab', { tabKey: tabKey, frameTitle: frameTitle });
+      try {
+        ui._activeEnvCtx = {
+          designKey: getDesignKey(designRef),
+          designRef: designRef,
+          abs: abs || null
+        };
+      } catch (ctxErr) {}
       global.dftArtistOpenWorkspaceEmbedTab({
         ui: ui,
         key: tabKey,
@@ -2031,6 +2044,7 @@
           });
         }
       });
+      if (typeof ui.refreshProjectExplorer === 'function') ui.refreshProjectExplorer();
       return;
     }
     console.warn('[env-open:project-explorer] branch=fallback-text-dialog');
@@ -2039,7 +2053,49 @@
       var txt = await readTextFile(abs);
       content = txt || content;
     } catch (e) {}
-    showTextDialog(ui, 'Env: ' + designRef.name, content);
+    try {
+      ui._activeEnvCtx = {
+        designKey: getDesignKey(designRef),
+        designRef: designRef,
+        abs: abs || null
+      };
+    } catch (ctxErr2) {}
+    if (typeof ui.refreshProjectExplorer === 'function') ui.refreshProjectExplorer();
+    showTextDialog(ui, 'Flow: ' + designRef.name, content);
+  }
+
+  function openDesignSpec(ui) {
+    if (!ui) return;
+    try {
+      if (global.DFTPageSessionManager && typeof global.DFTPageSessionManager.captureActiveViewState === 'function') {
+        global.DFTPageSessionManager.captureActiveViewState(ui);
+      }
+    } catch (captureErr) {}
+    if (typeof global.dftArtistOpenWorkspaceEmbedTab === 'function' && typeof global.dftArtistMountStatusPanel === 'function') {
+      global.dftArtistOpenWorkspaceEmbedTab({
+        ui: ui,
+        key: 'project:dft_design_spec',
+        label: 'DFT_Design_Spec',
+        title: 'DFT_Design_Spec',
+        closable: true,
+        render: function (panel) {
+          global.dftArtistMountStatusPanel(panel, {
+            title: 'DFT_Design_Spec',
+            subtitle: ensureModel(ui).name || 'project'
+          });
+        }
+      });
+      return;
+    }
+    if (typeof global.dftArtistAnalysis === 'function') {
+      global.dftArtistAnalysis();
+      return;
+    }
+    if (global.DFTAnalysis && typeof global.DFTAnalysis.open === 'function') {
+      global.DFTAnalysis.open();
+      return;
+    }
+    showTextDialog(ui, 'DFT_Design_Spec', 'DFT_Design_Spec is unavailable.');
   }
 
   function designMatchesQuery(design, query) {
@@ -2115,7 +2171,7 @@
     var state = getState(ui);
     var row = createEl('div', 'phase2-node');
     row.style.paddingLeft = (6 + (config.depth || 0) * 16) + 'px';
-    if (config.key && state.selectedKey === config.key) row.className += ' selected';
+    if (config.key && (state.selectedKey === config.key || (ui && ui._activeWorkspaceKey === config.key))) row.className += ' selected';
     if (config.activePage) row.className += ' active-page';
     if (config.dim) row.className += ' dim';
 
@@ -2223,8 +2279,7 @@
           key: designKey + ':env',
           depth: depth + 1,
           icon: '⚙',
-          label: 'env',
-          meta: envPath,
+          label: 'Flow',
           onClick: function () { state.selectedKey = designKey + ':env'; openEnv(ui, design); },
           menuItems: [{ label: 'Open env', handler: function () { openEnv(ui, design); } }]
         }));
@@ -2313,11 +2368,23 @@
 
   function renderSources(ui, panel) {
     var model = ensureModel(ui);
-    var query = getState(ui).searchText;
+    var state = getState(ui);
+    var query = state.searchText;
     panel.appendChild(createEl('div', 'phase2-section-title', 'Project'));
     renderProjectSummary(panel, model, ui);
     if (!isProjectReady(ui)) return;
     var rendered = false;
+    if (!query || contains('dft_design_spec', query) || contains('design spec', query)) {
+      panel.appendChild(createNode(ui, {
+        key: 'project:dft_design_spec',
+        depth: 0,
+        icon: '▣',
+        label: 'dft_design_spec',
+        onClick: function () { state.selectedKey = 'project:dft_design_spec'; openDesignSpec(ui); },
+        menuItems: [{ label: 'Open', handler: function () { openDesignSpec(ui); } }]
+      }));
+      rendered = true;
+    }
     for (var i = 0; i < model.designs.length; i++) rendered = renderDesignBranch(ui, panel, model.designs[i], 0, query) || rendered;
     if (!rendered) renderEmpty(panel, 'No source items match "' + query + '".');
   }
@@ -2415,7 +2482,7 @@
     function walk(design) {
       if (!design) return;
       var base = getDesignAbsDir(ui, design) || joinPath.apply(null, design._dirRel || []);
-      if (!isFloorplanDesign(design) && !isIpconfigDesign(design)) files.push({ icon: '⚙', label: (design.name || 'design') + ' / env.json', path: pathWithinRoot(getProjectStorageRoot(ui), base) ? joinPath(getProjectStorageRoot(ui), design.env_file) : joinPath(base, 'env.json') });
+      if (!isFloorplanDesign(design) && !isIpconfigDesign(design)) files.push({ icon: '⚙', label: (design.name || 'design') + ' / Flow', path: pathWithinRoot(getProjectStorageRoot(ui), base) ? joinPath(getProjectStorageRoot(ui), design.env_file) : joinPath(base, 'env.json') });
       if (isIpconfigDesign(design)) {
         files.push({ icon: '🗂', label: 'ipconfig / yaml', path: joinPath(base, 'yaml') });
         if (flowState && flowState.lastIpconfigPath) files.push({ icon: '📄', label: basenamePath(flowState.lastIpconfigPath), path: flowState.lastIpconfigPath });

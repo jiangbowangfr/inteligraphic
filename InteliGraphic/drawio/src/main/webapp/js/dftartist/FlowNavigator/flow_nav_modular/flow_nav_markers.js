@@ -27,6 +27,8 @@
       node.setAttribute('module', meta.moduleName || '');
       node.setAttribute('pairId', meta.pairId || '');
       node.setAttribute('chainId', meta.chainId || '');
+      node.setAttribute('interfaceType', meta.interfaceType || '');
+      node.setAttribute('layerName', meta.layerName || '');
       node.setAttribute('side', meta.side || '');
       node.setAttribute('offset', String(meta.offset == null ? '' : meta.offset));
       node.setAttribute('orientation', meta.orientation || '');
@@ -35,6 +37,8 @@
       node.setAttribute('bundleSpan', String(meta.bundleSpan == null ? '' : meta.bundleSpan));
       node.setAttribute('bundleCenterOffset', String(meta.bundleCenterOffset == null ? '' : meta.bundleCenterOffset));
       node.setAttribute('layoutSlot', meta.layoutSlot || '');
+      node.setAttribute('sideStackIndex', String(meta.sideStackIndex == null ? '' : meta.sideStackIndex));
+      node.setAttribute('sideStackCount', String(meta.sideStackCount == null ? '' : meta.sideStackCount));
       node.setAttribute('peerRole', meta.peerRole || '');
       node.setAttribute('peerModule', meta.peerModule || '');
       return node;
@@ -48,15 +52,24 @@
     return (meta && (meta.side === 'left' || meta.side === 'right')) ? 'vertical' : 'horizontal';
   }
 
+  function markerPalette(meta) {
+    var type = String(meta && meta.interfaceType || meta && meta.role || '').toUpperCase();
+    if (type === 'HI') return { stroke: '#b45309', fill: '#fef3c7' };
+    if (type === 'HO') return { stroke: '#92400e', fill: '#fde68a' };
+    if (type === 'SI') return { stroke: '#1d4ed8', fill: '#dbeafe' };
+    if (type === 'SO') return { stroke: '#0369a1', fill: '#cffafe' };
+    return meta && meta.role === 'host'
+      ? { stroke: '#7c3aed', fill: '#ede9fe' }
+      : { stroke: '#2563eb', fill: '#dbeafe' };
+  }
+
   function createMarkerStyle(meta) {
     var vertical = markerVisualOrientation(meta) === 'vertical';
-    var isHost = meta.role === 'host';
-    var stroke = isHost ? '#7c3aed' : '#2563eb';
-    var fill = isHost ? '#ede9fe' : '#dbeafe';
+    var palette = markerPalette(meta);
     return [
       'rounded=1','whiteSpace=wrap','html=1','fontSize=9','fontStyle=1',
-      'strokeColor=' + stroke,'fillColor=' + fill,
-      'flowMarker=1','flowRole=' + meta.role,'flowModule=' + Shared.sanitizeName(meta.moduleName || ''),
+      'strokeColor=' + palette.stroke,'fillColor=' + palette.fill,
+      'flowMarker=1','flowRole=' + meta.role,'flowInterfaceType=' + (meta.interfaceType || ''),'flowLayer=' + (meta.layerName || ''),'flowModule=' + Shared.sanitizeName(meta.moduleName || ''),
       'flowPair=' + Shared.sanitizeName(meta.pairId || ''),'flowSide=' + (meta.side || ''),
       'verticalLabelPosition=middle','verticalAlign=middle',
       vertical ? 'rotation=90' : 'rotation=0'
@@ -79,17 +92,15 @@
     var geometry = size.geometry;
     var cx = Number(meta.bundleCenterX != null ? meta.bundleCenterX : (meta.anchorX || 0));
     var cy = Number(meta.bundleCenterY != null ? meta.bundleCenterY : (meta.anchorY || 0));
-    var slot = String(meta.layoutSlot || '');
-    var isInner = slot ? slot === 'inner' : (meta.role === 'host');
 
     if (meta.side === 'left') {
-      cx += isInner ? visual.width / 2 : -visual.width / 2;
+      cx += visual.width / 2;
     } else if (meta.side === 'right') {
-      cx += isInner ? -visual.width / 2 : visual.width / 2;
+      cx += -visual.width / 2;
     } else if (meta.side === 'top') {
-      cy += isInner ? visual.height / 2 : -visual.height / 2;
+      cy += visual.height / 2;
     } else {
-      cy += isInner ? -visual.height / 2 : visual.height / 2;
+      cy += -visual.height / 2;
     }
 
     return {
@@ -102,13 +113,27 @@
 
   function removeExistingMarkers(ui, analysis) {
     var graph = Shared.graphOf(ui);
-    var vertices = Shared.getChildVertices(ui);
+    var vertices = [];
+    var layers = Shared.getTopLevelLayers(ui);
+    for (var l = 0; l < layers.length; l++) {
+      var layerVertices = Shared.getLayerVertices(ui, layers[l]);
+      for (var i = 0; i < layerVertices.length; i++) vertices.push(layerVertices[i]);
+    }
     var doomed = [];
-    for (var i = 0; i < vertices.length; i++) if (isMarkerCell(graph, vertices[i])) doomed.push(vertices[i]);
+    for (var j = 0; j < vertices.length; j++) if (isMarkerCell(graph, vertices[j])) doomed.push(vertices[j]);
     if (!doomed.length) return 0;
     try { graph.removeCells(doomed, false); } catch (e) {}
     if (analysis && analysis.interfaces) analysis.interfaces = analysis.interfaces.filter(function (c) { return doomed.indexOf(c) < 0; });
     return doomed.length;
+  }
+
+  function findLayerParent(ui, layerName) {
+    var layers = Shared.getTopLevelLayers(ui);
+    var normalized = Shared.trim(layerName).toLowerCase();
+    for (var i = 0; i < layers.length; i++) {
+      if (Shared.trim(Shared.getLayerName(layers[i])).toLowerCase() === normalized) return layers[i];
+    }
+    return Shared.getDefaultParent(ui);
   }
 
   Markers.extractMarkerMeta = function extractMarkerMeta(cell) {
@@ -120,7 +145,9 @@
           label: cell.value.getAttribute('label') || '', role: cell.value.getAttribute('role') || '',
           moduleName: cell.value.getAttribute('module') || '', pairId: cell.value.getAttribute('pairId') || '',
           chainId: cell.value.getAttribute('chainId') || '', side: cell.value.getAttribute('side') || '',
+          interfaceType: cell.value.getAttribute('interfaceType') || '', layerName: cell.value.getAttribute('layerName') || '',
           offset: Number(cell.value.getAttribute('offset') || 0), orientation: cell.value.getAttribute('orientation') || '',
+          sideStackIndex: Number(cell.value.getAttribute('sideStackIndex') || 0), sideStackCount: Number(cell.value.getAttribute('sideStackCount') || 1),
           sourceInstance: cell.value.getAttribute('sourceInstance') || '', bundleId: cell.value.getAttribute('bundleId') || '',
           bundleSpan: Number(cell.value.getAttribute('bundleSpan') || 0), bundleCenterOffset: Number(cell.value.getAttribute('bundleCenterOffset') || 0),
           layoutSlot: cell.value.getAttribute('layoutSlot') || '',
@@ -135,8 +162,8 @@
     opts = opts || {};
     analysis = analysis || Analysis.analyzeDataflow(ui);
     var graph = Shared.graphOf(ui);
-    var parent = Shared.getDefaultParent(ui);
-    if (!graph || !parent) throw new Error('Graph is not ready.');
+    var defaultParent = Shared.getDefaultParent(ui);
+    if (!graph || !defaultParent) throw new Error('Graph is not ready.');
     var plan = analysis.interfacePlan || { markers: [], bundles: [], pairs: [] };
     if (!plan.bundles || !plan.bundles.length) throw new Error('No floorplan interface markers are planned from the current dataflow.');
     var markerById = {};
@@ -163,6 +190,7 @@
           meta.offset = bundle.centerOffset;
           meta.orientation = bundle.orientation;
           var bounds = computeBounds(meta, bundle, j, members.length);
+          var parent = findLayerParent(ui, meta.layerName);
           var cell = graph.insertVertex(parent, null, createMarkerValue(meta), bounds.x, bounds.y, bounds.width, bounds.height, createMarkerStyle(meta));
           cell.__flowNavMarker = meta;
           created.push({ meta: meta, cell: cell });

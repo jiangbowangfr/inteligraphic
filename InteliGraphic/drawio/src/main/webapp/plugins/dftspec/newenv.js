@@ -7,8 +7,9 @@
         }
         return new URL('.', (document.baseURI || location.href)).href.replace(/\/$/, '');
     }
-    var BASE = here();         // 比如：file:///.../dftartist_release
-    var DIST = BASE + '/dftartist_flow_process'; // 你的构建产物所在目录
+    var BASE = here();         // 比如：file:///.../plugins/dftspec
+    var ROOT = new URL('../../', BASE).href.replace(/\/$/, '');
+    var DIST = ROOT + '/js/dftartist/dftartist_flow_process';
 
     // 提供给前端：让 Yosys 路径跟着走（见 B 节）
     window.DFT_BASE = DIST;    // => Yosys 资源在 `${DFT_BASE}/web_yosys`
@@ -34,7 +35,7 @@
 
     window._showEnvPageDialog = function (ui, envName) {
         ensureCss(DIST + '/style.css');
-        ensureScript('/Users/jiangbowang/YO/Parttimejob/drawio/drawio-desktop/drawio/src/main/webapp/js/dftartist/dftMenu/dftartist_flow_process/dft-status.iife.js', function () {
+        ensureScript(DIST + '/dft-status.iife.js', function () {
             if (window.DFTStatus?.open) window.DFTStatus.open();
             else alert('DFTStatus 未就绪');
         });

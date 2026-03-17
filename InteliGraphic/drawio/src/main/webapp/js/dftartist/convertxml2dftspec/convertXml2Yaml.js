@@ -1825,6 +1825,15 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
             const objectsById = ctx.objectsById || {};
             const cellsById = ctx.cellsById || {};
             const edgeCells = ctx.edges || [];
+            const dftsNs = (typeof globalThis !== 'undefined' && globalThis.DftsIP) ? globalThis.DftsIP : ((typeof window !== 'undefined' && window.DftsIP) ? window.DftsIP : null);
+            const childrenByParent = ctx.childrenByParent || {};
+            const DP_DEBUG = true;
+            function dpLog() {
+                if (!DP_DEBUG || typeof console === 'undefined' || !console.log) return;
+                const args = Array.prototype.slice.call(arguments);
+                args.unshift('[parseDatapathV2]');
+                console.log.apply(console, args);
+            }
 
             function parseStyle(style) {
                 const out = {};
@@ -1870,6 +1879,215 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
                 return t === 'data_in' || t === 'data_out' || t.indexOf('data') >= 0;
             }
 
+            function isClockPinType(pinType) {
+                return String(pinType || '').toLowerCase().indexOf('clock') >= 0;
+            }
+
+            function flattenPins(raw) {
+                if (!raw) return [];
+                if (Array.isArray(raw)) return raw.slice();
+                let out = [];
+                ['west', 'east', 'north', 'south'].forEach((side) => {
+                    if (Array.isArray(raw[side])) {
+                        out = out.concat(raw[side].map((pin) => Object.assign({ side: side }, pin || {})));
+                    }
+                });
+                return out;
+            }
+
+            function tryParseJson(raw) {
+                if (!raw) return null;
+                const tries = [String(raw)];
+                try { tries.push(decodeURIComponent(String(raw))); } catch (e) {}
+                for (let i = 0; i < tries.length; i++) {
+                    try {
+                        return JSON.parse(tries[i]);
+                    } catch (e2) {}
+                }
+                return null;
+            }
+
+            function readSymbolModel(obj, cell, styleMap) {
+                const raw = (obj && (obj.dftsIP_symbolModel || obj.__cell_dftsIP_symbolModel)) ||
+                    (styleMap && styleMap.dftsIP_symbolModel) ||
+                    (cell && cell.dftsIP_symbolModel) || '';
+                const parsed = tryParseJson(raw);
+                if (parsed && Array.isArray(parsed.pins)) return parsed;
+                return null;
+            }
+
+            function inferTypeFromTitle(title) {
+                const t = String(title || '').trim().toUpperCase();
+                if (!t) return '';
+                const map = {
+                    'SSN_PP': 'ssn_pipeline',
+                    'SSN_RPPL': 'ssn_receiver1xpipeline',
+                    'SSN_OP': 'ssn_outputpipeline',
+                    'SSN_SSH': 'ssn_scanhost',
+                    'SSN_MUX': 'ssn_multiplexer',
+                    'SSN_BFD': 'ssn_busfrequencydivider',
+                    'SSN_BFM': 'ssn_busfrequencymultiplier',
+                    'SSN_FIFO': 'ssn_fifo',
+                    'SSN_HI': 'ssn_host_interface',
+                    'SSN_HO': 'ssn_host_interface',
+                    'SSN_SI': 'ssn_slave_interface',
+                    'SSN_SO': 'ssn_slave_interface',
+                    'IJTAG_HI': 'ijtag_host_interface',
+                    'IJTAG_HO': 'ijtag_host_interface',
+                    'IJTAG_SI': 'ijtag_slave_interface',
+                    'IJTAG_SO': 'ijtag_slave_interface',
+                    'BISR_HI': 'bisr_host_interface',
+                    'BISR_HO': 'bisr_host_interface',
+                    'BISR_SI': 'bisr_slave_interface',
+                    'BISR_SO': 'bisr_slave_interface',
+                };
+                return map[t] || '';
+            }
+
+            function getDefinitionPins(defKey, opt) {
+                if (!dftsNs || !dftsNs._defsByKey || !defKey) return [];
+                const def = dftsNs._defsByKey[defKey];
+                if (!def) return [];
+                let raw = null;
+                try {
+                    if (typeof def.pinsFactory === 'function') raw = def.pinsFactory(opt || {}, def);
+                } catch (e) {
+                    raw = null;
+                }
+                return flattenPins(raw);
+            }
+
+            function getEdgeStyleMap(edgeId) {
+                const cell = edgeId ? (cellsById[edgeId] || objectsById[edgeId] || {}) : {};
+                return parseStyle(cell.style || cell.__cell_style || '');
+            }
+
+            function getEdgeChildLabel(edgeId) {
+                const kids = childrenByParent[edgeId] || [];
+                for (let i = 0; i < kids.length; i++) {
+                    const ch = kids[i] || {};
+                    if (ch.vertex !== '1') continue;
+                    const txt = normText(ch.value || '');
+                    if (txt) return txt;
+                }
+                return '';
+            }
+
+            function inferInterfaceRole(defKey) {
+                const key = String(defKey || '');
+                if (/HostOutputInterface$/i.test(key)) return 'host_output';
+                if (/HostInputInterface$/i.test(key)) return 'host_input';
+                if (/SlaveOutputInterface$/i.test(key)) return 'slave_output';
+                if (/SlaveInputInterface$/i.test(key)) return 'slave_input';
+                return '';
+            }
+
+            function inferRoleFromTitle(title) {
+                const t = String(title || '').trim().toUpperCase();
+                if (/[_-]HO$/.test(t)) return 'host_output';
+                if (/[_-]HI$/.test(t)) return 'host_input';
+                if (/[_-]SO$/.test(t)) return 'slave_output';
+                if (/[_-]SI$/.test(t)) return 'slave_input';
+                return '';
+            }
+
+            function collectSymbolChildMeta(bodyId) {
+                const kids = childrenByParent[bodyId] || [];
+                const meta = { title: '', instance: '', pins: {} };
+                kids.forEach((ch) => {
+                    const kind = String(ch.__dftsSymbolKind || '').trim();
+                    const key = String(ch.__dftsSymbolKey || '').trim();
+                    if (kind === 'title') {
+                        const v = normText(ch.value || '');
+                        if (v) meta.title = v;
+                        return;
+                    }
+                    if (kind === 'instance') {
+                        const v = normText(ch.value || '');
+                        if (v) meta.instance = v;
+                        return;
+                    }
+                    if (!key) return;
+                    const entry = meta.pins[key] || (meta.pins[key] = { pinKey: key, name: '', direction: '', pin_type: '', side: '' });
+                    const style = parseStyle(ch.style || '');
+                    const side = String(ch.__dftsSymbolSide || style.dftsIP_symbolSide || style.portConstraint || '').trim().toLowerCase();
+                    if (side && !entry.side) entry.side = side;
+                    if (kind === 'label') {
+                        const name = normText(ch.value || '');
+                        if (name) entry.name = name;
+                    }
+                });
+                Object.keys(meta.pins).forEach((key) => {
+                    const pin = meta.pins[key];
+                    const side = String(pin.side || '').toLowerCase();
+                    pin.direction = (side === 'east' || side === 'south') ? 'output' : 'input';
+                    const k = String(pin.pinKey || '').toLowerCase();
+                    if (k.indexOf('clock') >= 0 || k === 'tck' || k === 'clk') pin.pin_type = 'clock_in';
+                    else if (k.indexOf('data') >= 0 || /\bsi\b|\bso\b/.test(k) || k.indexOf('scan') >= 0) pin.pin_type = pin.direction === 'output' ? 'data_out' : 'data_in';
+                    else pin.pin_type = pin.direction === 'output' ? 'data_out' : 'data_in';
+                    if (!pin.name) pin.name = pin.pinKey;
+                });
+                meta.pinList = Object.keys(meta.pins).map((k) => meta.pins[k]);
+                return meta;
+            }
+
+            function pinPriority(pin, preferredDir, peerPin) {
+                let score = 0;
+                const key = String(pin.pinKey || '').toLowerCase();
+                const name = String(pin.name || '').toLowerCase();
+                const type = String(pin.pin_type || '').toLowerCase();
+                if (pin.direction === preferredDir) score += 100;
+                if (isDataPinType(type)) score += 40;
+                if (preferredDir === 'output' && (/data_out|bus_data_out|scan_out|\bso\b/.test(key + ' ' + name))) score += 30;
+                if (preferredDir === 'input' && (/data_in|bus_data_in|scan_in|\bsi\b/.test(key + ' ' + name))) score += 30;
+                if (preferredDir === 'input' && /master_bus_data_in/.test(key + ' ' + name)) score += 26;
+                if (preferredDir === 'input' && /secondary_bus_data_in/.test(key + ' ' + name)) score += 18;
+                if (peerPin) {
+                    const peerType = String(peerPin.pin_type || '').toLowerCase();
+                    if (peerType && peerType === type) score += 12;
+                    if ((peerPin.busWidth || 1) === (pin.busWidth || 1)) score += 8;
+                }
+                if (pin.role && /host_output|slave_output/.test(pin.role) && preferredDir === 'output') score += 50;
+                if (pin.role && /host_input|slave_input/.test(pin.role) && preferredDir === 'input') score += 50;
+                return score;
+            }
+
+            function normalizeInterfacePin(ip, pin) {
+                if (!ip || !pin) return pin;
+                const ipType = String(ip.ip_type || '').toLowerCase();
+                const role = String(ip.role || '').toLowerCase();
+                if (ipType.indexOf('_interface') < 0 || !role) return pin;
+
+                const out = Object.assign({}, pin);
+                const pinKey = String(out.key || out.pinKey || '').toLowerCase();
+                const pinName = String(out.name || out.label || '').toLowerCase();
+                const pinType = String(out.type || out.pinType || out.pin_type || '').toLowerCase();
+                const token = [pinKey, pinName, pinType].join(' ');
+                const isDataIn = /(^|[\s_])data_in($|[\s_])|bus_data_in|\bsi\b|scan_in/.test(token);
+                const isDataOut = /(^|[\s_])data_out($|[\s_])|bus_data_out|\bso\b|scan_out/.test(token);
+                const isClock = /clock|tck|\bclk\b/.test(token);
+
+                if (/input$/.test(role)) {
+                    if (isDataIn || isClock) out.direction = 'output';
+                } else if (/output$/.test(role)) {
+                    if (isDataOut) out.direction = 'input';
+                }
+                return out;
+            }
+
+            function pickBestPin(pinList, preferredDir, peerPin, forcedKey) {
+                const cands = (pinList || []).filter((p) => p && p.pinKey);
+                if (!cands.length) return null;
+                if (forcedKey) {
+                    for (let i = 0; i < cands.length; i++) {
+                        if (String(cands[i].pinKey) === String(forcedKey)) return cands[i];
+                    }
+                }
+                const ranked = cands.map((pin) => ({ pin, score: pinPriority(pin, preferredDir, peerPin) }))
+                    .sort((a, b) => b.score - a.score);
+                return ranked.length ? ranked[0].pin : null;
+            }
+
             const DIRECT_PASS_TYPES = new Set([
                 'ssn_pipeline',
                 'ssn_fifo',
@@ -1889,108 +2107,175 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
             });
 
             const ips = {};
-            Object.keys(objectsById).forEach((oid) => {
-                const obj = objectsById[oid] || {};
-                const st = parseStyle(obj.__cell_style || obj.style || '');
-                const ipType = String(obj.dftsIP_type || st.dftsIP_type || '').trim();
-                const isBody = isTruthy(obj.dftsIP_chipBody || st.dftsIP_chipBody) || !!ipType;
+
+            function addIp(oid, obj, cell) {
+                const st = parseStyle((obj && (obj.__cell_style || obj.style)) || (cell && cell.style) || '');
+                const childMeta = collectSymbolChildMeta(oid);
+                const symbolModel = readSymbolModel(obj || {}, cell || {}, st);
+                const childTitle = childMeta.title || '';
+                const ipType = String((obj && obj.dftsIP_type) || st.dftsIP_type || inferTypeFromTitle((symbolModel && symbolModel.title) || childTitle) || '').trim();
+                const isBody = isTruthy((obj && obj.dftsIP_chipBody) || st.dftsIP_chipBody) || !!ipType;
                 if (!isBody || !ipType) return;
-                const label = normText(obj.label || obj.__cell_value || '');
-                const inst = instMap[oid] || label || oid;
+                const label = normText((obj && (obj.label || obj.__cell_value)) || (cell && cell.value) || childTitle || '');
                 const params = {};
-                Object.keys(obj).forEach((k) => {
+                Object.keys(obj || {}).forEach((k) => {
                     if (k === 'id' || k === 'label' || k === 'dftsIP_type') return;
                     if (k.indexOf('__cell_') === 0) return;
                     params[k] = obj[k];
                 });
-                ips[oid] = { id: oid, ip_type: ipType, inst, params };
-            });
+                const defKey = String((obj && obj.dftsIP_defKey) || st.dftsIP_defKey || '');
+                ips[oid] = {
+                    id: oid,
+                    ip_type: ipType,
+                    inst: instMap[oid] || childMeta.instance || (symbolModel && symbolModel.instanceName) || label || oid,
+                    label: childTitle || (symbolModel && symbolModel.title) || label || oid,
+                    params,
+                    def_key: defKey,
+                    symbol_model: symbolModel,
+                    role: inferInterfaceRole(defKey) || inferRoleFromTitle(childTitle || (symbolModel && symbolModel.title) || label),
+                    child_pins: childMeta.pinList || [],
+                };
+            }
 
-            Object.keys(cellsById).forEach((cid) => {
-                if (ips[cid]) return;
-                const c = cellsById[cid];
-                if (!c || c.vertex !== '1') return;
-                const st = parseStyle(c.style || '');
-                const obj = objectsById[cid] || {};
-                const ipType = String(obj.dftsIP_type || st.dftsIP_type || '').trim();
-                const isBody = isTruthy(st.dftsIP_chipBody) || !!ipType;
-                if (!isBody || !ipType) return;
-                const label = normText(obj.label || c.value || '');
-                const inst = instMap[cid] || label || cid;
-                const params = {};
-                Object.keys(obj).forEach((k) => {
-                    if (k === 'id' || k === 'label' || k === 'dftsIP_type') return;
-                    if (k.indexOf('__cell_') === 0) return;
-                    params[k] = obj[k];
-                });
-                ips[cid] = { id: cid, ip_type: ipType, inst, params };
-            });
-
-            const pinLabelMap = {};
-            Object.keys(cellsById).forEach((cid) => {
-                const c = cellsById[cid];
-                if (!c || c.vertex !== '1') return;
-                const st = parseStyle(c.style || '');
-                if (!isTruthy(st.dftsIP_pin_label)) return;
-                if (c.parent) pinLabelMap[c.parent] = normText(c.value || '');
-            });
+            Object.keys(objectsById).forEach((oid) => addIp(oid, objectsById[oid] || {}, cellsById[oid] || null));
+            Object.keys(cellsById).forEach((cid) => { if (!ips[cid]) addIp(cid, objectsById[cid] || {}, cellsById[cid] || {}); });
+            dpLog('ip_count', Object.keys(ips).length, Object.keys(ips).map((id) => ({
+                id: id,
+                type: ips[id].ip_type,
+                label: ips[id].label,
+                inst: ips[id].inst,
+                role: ips[id].role,
+                def_key: ips[id].def_key
+            })));
 
             const pins = {};
-            Object.keys(cellsById).forEach((cid) => {
-                const c = cellsById[cid];
-                if (!c || c.vertex !== '1') return;
-                const st = parseStyle(c.style || '');
-                if (!isTruthy(st.dftsIP_pin)) return;
-                const ipId = c.parent;
-                if (!ipId || !ips[ipId]) return;
-                const ip = ips[ipId];
-                const obj = objectsById[cid] || {};
-                const pinType = st.dftsIP_pinType || obj.dftsIP_pinType || '';
-                const direction = normDir(st.dftsIP_pin_direction || obj.dftsIP_pin_direction || '');
-                const name = normText(pinLabelMap[cid] || obj.label || c.value || st.dftsIP_pinKey || cid);
-                pins[cid] = {
-                    id: cid,
-                    name,
-                    direction,
-                    pin_type: pinType,
-                    ip_id: ipId,
+            const byIp = {};
+
+            function addPin(ip, pin, idx) {
+                if (!pin) return;
+                const pinKey = String(pin.key || pin.pinKey || '').trim();
+                if (!pinKey) return;
+                const pid = ip.id + '::' + pinKey;
+                pins[pid] = {
+                    id: pid,
+                    name: normText(pin.name || pin.label || pinKey),
+                    direction: normDir(pin.dir || pin.direction || ''),
+                    pin_type: String(pin.type || pin.pinType || pin.pin_type || ''),
+                    pinKey: pinKey,
+                    ip_id: ip.id,
                     ip_inst: ip.inst,
                     ip_type: ip.ip_type,
+                    role: ip.role || '',
+                    busWidth: parseInt(pin.busWidth, 10) || 1,
+                    order: typeof pin.order === 'number' ? pin.order : idx,
                 };
-            });
+                (byIp[ip.id] || (byIp[ip.id] = [])).push(pid);
+            }
 
-            const pinEdges = [];
-            edgeCells.forEach((e) => {
-                const s = e.source;
-                const t = e.target;
-                if (!s || !t || !pins[s] || !pins[t]) return;
-                pinEdges.push([s, t]);
+            Object.keys(ips).forEach((ipId) => {
+                const ip = ips[ipId];
+                let pinDefs = [];
+                if (ip.symbol_model && Array.isArray(ip.symbol_model.pins) && ip.symbol_model.pins.length) {
+                    pinDefs = ip.symbol_model.pins.slice();
+                } else if (ip.child_pins && ip.child_pins.length) {
+                    pinDefs = ip.child_pins.slice();
+                } else {
+                    pinDefs = getDefinitionPins(ip.def_key, Object.assign({}, ip.params || {}, {
+                        bodyLabel: ip.label,
+                        instanceName: ip.inst,
+                        label: ip.label,
+                    }));
+                }
+                pinDefs.forEach((pin, idx) => addPin(ip, normalizeInterfacePin(ip, pin), idx));
             });
+            dpLog('pin_count', Object.keys(pins).length, Object.keys(byIp).map((ipId) => ({
+                ip: ips[ipId] ? ips[ipId].label : ipId,
+                type: ips[ipId] ? ips[ipId].ip_type : '',
+                pins: (byIp[ipId] || []).map((pid) => ({
+                    key: pins[pid].pinKey,
+                    name: pins[pid].name,
+                    dir: pins[pid].direction,
+                    type: pins[pid].pin_type,
+                    role: pins[pid].role
+                }))
+            })));
+
+            if (!Object.keys(pins).length) return {};
 
             const adj = {};
             const radj = {};
             function addEdge(a, b) {
+                if (!a || !b || !pins[a] || !pins[b]) return;
                 (adj[a] || (adj[a] = [])).push(b);
                 (radj[b] || (radj[b] = [])).push(a);
             }
 
-            pinEdges.forEach(([a, b]) => {
-                const pa = pins[a], pb = pins[b];
-                let src = a, dst = b;
-                if (pa.direction === 'output' && pb.direction === 'input') { src = a; dst = b; }
-                else if (pb.direction === 'output' && pa.direction === 'input') { src = b; dst = a; }
-                addEdge(src, dst);
+            function findPinsByIp(ipId, predicate) {
+                return (byIp[ipId] || []).filter((pid) => predicate(pins[pid]));
+            }
+
+            function findPinByKey(ipId, pinKey) {
+                const plist = byIp[ipId] || [];
+                for (let i = 0; i < plist.length; i++) {
+                    const p = pins[plist[i]];
+                    if (String(p.pinKey) === String(pinKey)) return p;
+                }
+                return null;
+            }
+
+            function getLinkRecord(edge) {
+                const st = getEdgeStyleMap(edge && edge.id);
+                const label = getEdgeChildLabel(edge && edge.id);
+                return {
+                    srcBodyId: String(st.dftLink_srcBodyId || ''),
+                    srcPinKey: String(st.dftLink_srcPinKey || ''),
+                    dstBodyId: String(st.dftLink_dstBodyId || ''),
+                    dstPinKey: String(st.dftLink_dstPinKey || ''),
+                    edgeLabel: String(label || ''),
+                };
+            }
+
+            edgeCells.forEach((e) => {
+                const s = e.source;
+                const t = e.target;
+                if (!s || !t || !ips[s] || !ips[t]) return;
+
+                const link = getLinkRecord(e);
+                const srcPins = findPinsByIp(s, () => true).map((pid) => pins[pid]);
+                const dstPins = findPinsByIp(t, () => true).map((pid) => pins[pid]);
+                const hintedKey = String(link.edgeLabel || '').trim();
+                const srcPin = findPinByKey(link.srcBodyId || s, link.srcPinKey) || pickBestPin(srcPins, 'output', null, link.srcPinKey);
+                const dstPin = findPinByKey(link.dstBodyId || t, link.dstPinKey) ||
+                    findPinByKey(link.dstBodyId || t, hintedKey) ||
+                    pickBestPin(dstPins, 'input', srcPin, link.dstPinKey || hintedKey);
+                dpLog('edge_resolve', {
+                    edge: e.id,
+                    source: ips[s] ? ips[s].label : s,
+                    target: ips[t] ? ips[t].label : t,
+                    srcPinKey: link.srcPinKey,
+                    dstPinKey: link.dstPinKey,
+                    edgeLabel: link.edgeLabel,
+                    chosenSrc: srcPin ? srcPin.pinKey : '',
+                    chosenDst: dstPin ? dstPin.pinKey : ''
+                });
+                if (srcPin && dstPin) addEdge(srcPin.id, dstPin.id);
             });
 
             function findByName(cands, name) {
-                for (let i = 0; i < cands.length; i++) if (pins[cands[i]] && pins[cands[i]].name === name) return cands[i];
+                for (let i = 0; i < cands.length; i++) {
+                    const pin = pins[cands[i]];
+                    if (!pin) continue;
+                    if (pin.name === name || pin.pinKey === name) return cands[i];
+                }
                 return null;
             }
 
             function buildVirtualEdgesForIp(ipType, inPins, outPins) {
                 const ipt = String(ipType || '').toLowerCase();
                 const out = [];
-                if (ipt === 'ssn_slave_interface' || ipt === 'ssn_host_interface') return out;
+                if (ipt === 'ssn_slave_interface' || ipt === 'ssn_host_interface' || ipt === 'ijtag_host_interface' || ipt === 'ijtag_slave_interface' || ipt === 'bisr_host_interface' || ipt === 'bisr_slave_interface') {
+                    return out;
+                }
                 if (ipt === 'ssn_scanhost') {
                     const a = findByName(inPins, 'bus_data_in');
                     const b = findByName(outPins, 'bus_data_out');
@@ -2009,17 +2294,16 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
                 return out;
             }
 
-            const byIp = {};
-            Object.keys(pins).forEach((pid) => {
-                const ipId = pins[pid].ip_id;
-                (byIp[ipId] || (byIp[ipId] = [])).push(pid);
-            });
             Object.keys(byIp).forEach((ipId) => {
                 const plist = byIp[ipId] || [];
                 const inPins = plist.filter((pid) => pins[pid].direction === 'input' && isDataPinType(pins[pid].pin_type));
                 const outPins = plist.filter((pid) => pins[pid].direction === 'output' && isDataPinType(pins[pid].pin_type));
                 buildVirtualEdgesForIp(ips[ipId].ip_type, inPins, outPins).forEach(([i, o]) => addEdge(i, o));
             });
+            dpLog('graph_edges', Object.keys(adj).map((pid) => ({
+                from: pins[pid] ? (pins[pid].ip_inst + '.' + pins[pid].pinKey) : pid,
+                to: (adj[pid] || []).map((nid) => pins[nid] ? (pins[nid].ip_inst + '.' + pins[nid].pinKey) : nid)
+            })));
 
             function pinsToIpPath(pinPath) {
                 const out = [];
@@ -2046,7 +2330,7 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
                     for (let i = 0; i < nexts.length; i++) {
                         const v = nexts[i];
                         if (Object.prototype.hasOwnProperty.call(prev, v)) continue;
-                        if (v !== goal && String(pins[v].ip_type || '').toLowerCase() === 'ssn_slave_interface') continue;
+                        if (v !== goal && String(pins[v].role || '').indexOf('slave_') === 0) continue;
                         prev[v] = u;
                         q.push(v);
                     }
@@ -2073,8 +2357,10 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
                     for (let i = 0; i < nexts.length; i++) {
                         const v = nexts[i];
                         if (Object.prototype.hasOwnProperty.call(prev, v)) continue;
+                        const role = String(pins[v].role || '');
                         const midType = String(pins[v].ip_type || '').toLowerCase();
-                        if (v !== goal && !DIRECT_PASS_TYPES.has(midType)) continue;
+                        if (v !== goal && role.indexOf('slave_') === 0) continue;
+                        if (v !== goal && !DIRECT_PASS_TYPES.has(midType) && midType !== 'ssn_outputpipeline' && midType !== 'ssn_scanhost' && midType !== 'ssn_multiplexer') continue;
                         prev[v] = u;
                         q.push(v);
                     }
@@ -2111,6 +2397,24 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
                 };
             }
 
+            function chooseBackwardPred(cur, stopTypes, visited) {
+                const preds = (radj[cur] || []).filter((pid) => !visited[pid]);
+                if (!preds.length) return null;
+                preds.sort((a, b) => {
+                    const ap = pins[a], bp = pins[b];
+                    const as = pinPriority(ap, 'output', pins[cur]);
+                    const bs = pinPriority(bp, 'output', pins[cur]);
+                    return bs - as;
+                });
+                for (let i = 0; i < preds.length; i++) {
+                    const pid = preds[i];
+                    const p = pins[pid];
+                    if (stopTypes[String(p.ip_type || '').toLowerCase()]) continue;
+                    return pid;
+                }
+                return preds[0] || null;
+            }
+
             function chainIpIdsFromInputPinBackward(startInputPin, stopTypes, maxSteps) {
                 const stop = {};
                 (stopTypes || []).forEach((t) => { stop[String(t || '').toLowerCase()] = true; });
@@ -2121,13 +2425,13 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
                 let steps = 0;
                 while (steps < maxSteps) {
                     steps += 1;
-                    const preds = radj[cur] || [];
-                    if (!preds.length) break;
-                    const nxt = preds[0];
-                    if (visited[nxt]) break;
+                    const nxt = chooseBackwardPred(cur, stop, visited);
+                    if (!nxt) break;
                     visited[nxt] = true;
-                    if (stop[String(pins[nxt].ip_type || '').toLowerCase()]) break;
-                    const ipId = pins[nxt].ip_id;
+                    const np = pins[nxt];
+                    if (stop[String(np.ip_type || '').toLowerCase()]) break;
+                    if (String(np.role || '').indexOf('slave_') === 0) break;
+                    const ipId = np.ip_id;
                     if (!out.length || out[out.length - 1] !== ipId) out.push(ipId);
                     cur = nxt;
                 }
@@ -2140,7 +2444,7 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
                 const visited = {};
                 visited[startOutputPin] = true;
                 visited[firstNode] = true;
-                if (String(pins[cur].ip_type || '').toLowerCase() !== 'ssn_slave_interface') chain.push(pins[cur].ip_id);
+                if (String(pins[cur].role || '').indexOf('slave_') !== 0) chain.push(pins[cur].ip_id);
                 let steps = 0;
                 while (steps < maxSteps) {
                     steps += 1;
@@ -2149,7 +2453,7 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
                     const nxt = nxts[0];
                     if (visited[nxt]) break;
                     visited[nxt] = true;
-                    if (String(pins[nxt].ip_type || '').toLowerCase() === 'ssn_slave_interface') break;
+                    if (String(pins[nxt].role || '').indexOf('slave_') === 0) break;
                     const ipId = pins[nxt].ip_id;
                     if (!chain.length || chain[chain.length - 1] !== ipId) chain.push(ipId);
                     cur = nxt;
@@ -2160,13 +2464,9 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
             function buildSmuxSecondary(ipId) {
                 const ip = ips[ipId];
                 if (!ip || String(ip.ip_type || '').toLowerCase() !== 'ssn_multiplexer') return null;
-                let secPin = null;
-                Object.keys(pins).forEach((pid) => {
-                    if (secPin) return;
-                    if (pins[pid].ip_id === ipId && pins[pid].name === 'secondary_bus_data_in') secPin = pid;
-                });
+                const secPin = findPinByKey(ipId, 'secondary_bus_data_in');
                 if (!secPin) return null;
-                const chain = chainIpIdsFromInputPinBackward(secPin, ['ssn_slave_interface'], 128);
+                const chain = chainIpIdsFromInputPinBackward(secPin.id, ['ssn_slave_interface'], 128);
                 if (!chain.length) return null;
                 const out = {};
                 chain.forEach((cid) => { out[ips[cid].inst] = makeNode(cid); });
@@ -2234,34 +2534,36 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
             }
 
             function findClockPinNameByIp(ipId) {
-                const cands = Object.keys(pins).filter((pid) => pins[pid].ip_id === ipId);
+                const cands = byIp[ipId] || [];
                 for (let i = 0; i < cands.length; i++) {
                     const p = pins[cands[i]];
                     const pt = String(p.pin_type || '').toLowerCase();
                     const nm = String(p.name || '').toLowerCase();
-                    if (pt.indexOf('clock') >= 0 || nm.indexOf('clock') >= 0) return p.name;
+                    if (isClockPinType(pt) || nm.indexOf('clock') >= 0) return p.name;
                 }
                 return '';
             }
 
+            function outDegree(pid) {
+                return (adj[pid] || []).length;
+            }
+
+            function inDegree(pid) {
+                return (radj[pid] || []).length;
+            }
+
             function isHostEntryPin(p) {
                 if (!p) return false;
-                const nm = String(p.name || '').toLowerCase();
                 const pt = String(p.pin_type || '').toLowerCase();
-                if (nm.indexOf('ssn_bus_data_in') >= 0 && p.direction === 'output') return true;
-                if (pt === 'data_in' && p.direction === 'output') return true;
-                if (nm.indexOf('bus_data_in') >= 0 && p.direction === 'output') return true;
-                return false;
+                if (!isDataPinType(pt)) return false;
+                return outDegree(p.id) > 0;
             }
 
             function isHostExitPin(p) {
                 if (!p) return false;
-                const nm = String(p.name || '').toLowerCase();
                 const pt = String(p.pin_type || '').toLowerCase();
-                if (nm.indexOf('ssn_bus_data_out') >= 0 && p.direction === 'input') return true;
-                if (pt === 'data_out' && p.direction === 'input') return true;
-                if (nm.indexOf('bus_data_out') >= 0 && p.direction === 'input') return true;
-                return false;
+                if (!isDataPinType(pt)) return false;
+                return inDegree(p.id) > 0;
             }
 
             const entryPins = [];
@@ -2272,11 +2574,46 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
                 if (isHostEntryPin(p)) entryPins.push(pid);
                 if (isHostExitPin(p)) exitPins.push(pid);
             });
+            dpLog('host_entry_pins', entryPins.map((pid) => ({
+                pin: pid,
+                label: pins[pid].name,
+                inst: pins[pid].ip_inst,
+                indeg: inDegree(pid),
+                outdeg: outDegree(pid),
+                role: pins[pid].role
+            })));
+            dpLog('host_exit_pins', exitPins.map((pid) => ({
+                pin: pid,
+                label: pins[pid].name,
+                inst: pins[pid].ip_inst,
+                indeg: inDegree(pid),
+                outdeg: outDegree(pid),
+                role: pins[pid].role
+            })));
             if (!entryPins.length || !exitPins.length) return {};
 
-            const ep = entryPins[0];
-            const xp = exitPins[0];
-            const mainPinPath = findShortestPathBlockingSlaves(ep, xp);
+            let ep = entryPins[0];
+            let xp = exitPins[0];
+            let mainPinPath = findShortestPathBlockingSlaves(ep, xp);
+            let bestScore = mainPinPath && mainPinPath.length ? mainPinPath.length : 0;
+            entryPins.forEach((entryPid) => {
+                exitPins.forEach((exitPid) => {
+                    if (entryPid === exitPid) return;
+                    const cand = findShortestPathBlockingSlaves(entryPid, exitPid);
+                    if (!cand || !cand.length) return;
+                    if (cand.length > bestScore) {
+                        ep = entryPid;
+                        xp = exitPid;
+                        mainPinPath = cand;
+                        bestScore = cand.length;
+                    }
+                });
+            });
+            dpLog('main_path', {
+                entry: ep,
+                exit: xp,
+                path: (mainPinPath || []).map((pid) => pins[pid] ? (pins[pid].ip_inst + '.' + pins[pid].pinKey) : pid)
+            });
             if (!mainPinPath || !mainPinPath.length) return {};
 
             const out = {};
@@ -2284,17 +2621,35 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
             out.DATAPATH0.connections.bus_data_in = pins[ep].name;
             out.DATAPATH0.connections.bus_data_out = pins[xp].name;
             out.DATAPATH0.connections.bus_clock_in = findClockPinNameByIp(pins[ep].ip_id) || findClockPinNameByIp(pins[xp].ip_id);
-            out.DATAPATH0.output_bus_width = widthFromName(pins[xp].name);
+            out.DATAPATH0.output_bus_width = widthFromName(pins[xp].name) || widthFromName(pins[ep].name);
 
             const slaveIn = [];
             const slaveOut = [];
             Object.keys(pins).forEach((pid) => {
                 const p = pins[pid];
                 if (String(p.ip_type || '').toLowerCase() !== 'ssn_slave_interface') return;
-                const nm = String(p.name || '');
-                if (nm.indexOf('ssn_to_bus_data_in') >= 0 && p.direction === 'input') slaveIn.push(pid);
-                if (nm.indexOf('ssn_from_bus_data_out') >= 0 && p.direction === 'output') slaveOut.push(pid);
+                const pt = String(p.pin_type || '').toLowerCase();
+                if (inDegree(pid) > 0 && isDataPinType(pt)) slaveIn.push(pid);
+                else if (p.role === 'slave_input') slaveIn.push(pid);
+                if (outDegree(pid) > 0 && isDataPinType(pt)) slaveOut.push(pid);
+                else if (p.role === 'slave_output') slaveOut.push(pid);
             });
+            dpLog('slave_in_pins', slaveIn.map((pid) => ({
+                pin: pid,
+                label: pins[pid].name,
+                inst: pins[pid].ip_inst,
+                indeg: inDegree(pid),
+                outdeg: outDegree(pid),
+                role: pins[pid].role
+            })));
+            dpLog('slave_out_pins', slaveOut.map((pid) => ({
+                pin: pid,
+                label: pins[pid].name,
+                inst: pins[pid].ip_inst,
+                indeg: inDegree(pid),
+                outdeg: outDegree(pid),
+                role: pins[pid].role
+            })));
 
             const segCandidates = [];
             slaveOut.forEach((so) => {
@@ -2331,9 +2686,12 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
                 dp.connections.bus_data_in = pins[x.so].name;
                 dp.connections.bus_data_out = pins[x.si].name;
                 dp.connections.bus_clock_in = findClockPinNameByIp(pins[x.so].ip_id) || findClockPinNameByIp(pins[x.si].ip_id);
-                dp.output_bus_width = widthFromName(pins[x.si].name);
+                dp.output_bus_width = widthFromName(pins[x.si].name) || widthFromName(pins[x.so].name);
                 out[key] = dp;
             });
+
+            dpLog('datapath_keys', Object.keys(out));
+            dpLog('datapath_out', out);
 
             return out;
         }
@@ -2446,10 +2804,13 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
 
             const MGC_SCAN_DATA_SPEC = {};
             let dp = parseDatapathV2(ctx);
+            console.log('[parseDrawio] parseDatapathV2 keys:', dp ? Object.keys(dp) : []);
             if (!dp || !Object.keys(dp).length) dp = parseDatapath(ctx);
+            console.log('[parseDrawio] fallback parseDatapath keys:', dp ? Object.keys(dp) : []);
             if (dp && Object.keys(dp).length) MGC_SCAN_DATA_SPEC.DATAPATH = dp;
 
             const instr = parseEdtAndScanhost(ctx);
+            console.log('[parseDrawio] parseEdtAndScanhost keys:', instr ? Object.keys(instr) : []);
             if ((instr.EDT && Object.keys(instr.EDT).length) || (instr.SCAN_HOST && Object.keys(instr.SCAN_HOST).length) || (instr.SCAN_HOST && Object.keys(instr.FIFO).length) || (instr.SCAN_HOST && Object.keys(instr.BFM).length) || (instr.SCAN_HOST && Object.keys(instr.BFD).length)) {
                 MGC_SCAN_DATA_SPEC.INSTRUMENTS = {};
                 if (instr.EDT && Object.keys(instr.EDT).length) MGC_SCAN_DATA_SPEC.INSTRUMENTS.EDT = instr.EDT;
@@ -2459,6 +2820,7 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
                 if (instr.SCAN_HOST && Object.keys(instr.SCAN_HOST).length) MGC_SCAN_DATA_SPEC.INSTRUMENTS.SCAN_HOST = instr.SCAN_HOST;
             }
 
+            console.log('[parseDrawio] MGC_SCAN_DATA_SPEC keys:', Object.keys(MGC_SCAN_DATA_SPEC));
             if (Object.keys(MGC_SCAN_DATA_SPEC).length) out.MGC_SCAN_DATA_SPEC = MGC_SCAN_DATA_SPEC;
 
             return out;
