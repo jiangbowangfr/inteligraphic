@@ -462,7 +462,10 @@ PolygonTool.prototype.buildFloorplanPolygonStyle = function (polyStr, label) {
         'dftsIP_type=floorplan_module',
         'dftsFloorplan_moduleName=' + String(label || ''),
         'dftsFloorplan_instanceName=',
-        'dftsFloorplan_designLevel='
+        'dftsFloorplan_designLevel=physical_block',
+        'dftsFloorplan_logicOnly=off',
+        'dftsFloorplan_designFilelist=',
+        'dftsFloorplan_designType=hierarchical'
     ].join(';') + ';';
 };
 

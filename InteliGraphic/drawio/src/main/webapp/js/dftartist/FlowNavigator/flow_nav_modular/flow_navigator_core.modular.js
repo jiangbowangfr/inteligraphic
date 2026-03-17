@@ -166,7 +166,22 @@
     Shared.logDock(ui, 'Generated ' + result.created.length + ' floorplan interface marker(s) from ' + result.plan.chains.length + ' chain(s).', result.created.length ? 'success' : 'warning');
     Shared.setReports(ui, [{ title: 'Generate Interface', items: { markersCreated: result.created.length, chains: result.plan.chains.length } }]);
     Shared.setJobs(ui, [{ name: 'generate_interface', status: 'success', detail: result.created.length + ' marker(s)', progress: 100 }]);
-    return result;
+    if (!(global.DFTFloorplanModuleYaml && typeof global.DFTFloorplanModuleYaml.generateFromCurrentPage === 'function')) {
+      return result;
+    }
+    return Promise.resolve(global.DFTFloorplanModuleYaml.generateFromCurrentPage(ui)).then(function (yamlResult) {
+      var st = Shared.ensureState(ui);
+      st.lastFloorplanModuleYaml = yamlResult && yamlResult.text ? yamlResult.text : '';
+      st.lastFloorplanModuleYamlPath = yamlResult && yamlResult.target ? yamlResult.target : '';
+      if (yamlResult && yamlResult.target) {
+        Shared.logDock(ui, 'Saved floorplan module YAML: ' + yamlResult.target, 'success');
+        notifyFloorplanModuleYamlGenerated(ui, yamlResult.target);
+      }
+      try {
+        if (ui && typeof ui.refreshProjectExplorer === 'function') ui.refreshProjectExplorer();
+      } catch (e) {}
+      return result;
+    });
   }
 
   async function runGenerateDesigns(ui) {
@@ -318,6 +333,23 @@
     try {
       if (ui && typeof ui.showTemporaryMessage === 'function') {
         ui.showTemporaryMessage('IPCONFIG generated', 1800);
+        return;
+      }
+    } catch (e) {}
+    try {
+      if (typeof global.mxUtils !== 'undefined' && global.mxUtils && typeof global.mxUtils.alert === 'function') {
+        global.mxUtils.alert(msg + (targetAbs ? '\n' + targetAbs : ''));
+        return;
+      }
+    } catch (e2) {}
+    try { alert(msg + (targetAbs ? '\n' + targetAbs : '')); } catch (e3) {}
+  }
+
+  function notifyFloorplanModuleYamlGenerated(ui, targetAbs) {
+    var msg = 'Floorplan module YAML generated successfully.';
+    try {
+      if (ui && typeof ui.showTemporaryMessage === 'function') {
+        ui.showTemporaryMessage('Floorplan YAML generated', 1800);
         return;
       }
     } catch (e) {}
