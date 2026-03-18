@@ -14,7 +14,7 @@
         bodyPaddingY: 12,
         titlePadding: 12,
         pinRowPitch: 32,
-        pinStub: 26,
+        pinStub: 18,
         labelGap: 8,
         instanceGap: 10,
         minBodyWidth: 40,
@@ -366,7 +366,7 @@
         var bodyPaddingX = Math.max(4, Math.round(l.bodyPaddingX * scale));
         var bodyPaddingY = Math.max(3, Math.round(l.bodyPaddingY * scale));
         var titlePadding = Math.max(4, Math.round(l.titlePadding * scale));
-        var pinStub = Math.max(8, Math.round(l.pinStub * scale));
+        var pinStub = Math.max(6, Math.round(l.pinStub * scale));
         var labelGap = Math.max(3, Math.round(l.labelGap * scale));
         var instanceGap = Math.max(3, Math.round(l.instanceGap * scale));
         var fontSize = Math.max(3, Math.round(l.fontSize * scale));
@@ -570,12 +570,12 @@
 
         return [
             'shape=rectangle',
-            'fillOpacity=0',
-            'fillColor=none',
-            'strokeColor=#111111',
-            'strokeWidth=' + (isBus(pin) ? 3 : 1),
-            'connectable=1',
-            'pointerEvents=1',
+            'fillOpacity=100',
+            'fillColor=#111111',
+            'strokeColor=none',
+            'strokeWidth=1',
+            'connectable=0',
+            'pointerEvents=0',
             'resizable=0',
             'movable=0',
             'rotatable=0',
@@ -600,6 +600,7 @@
             'strokeColor=none',
             'fillColor=none',
             'pointerEvents=1',
+            'connectable=1',
             'resizable=0',
             'movable=0',
             'rotatable=0',
@@ -1102,16 +1103,17 @@
                 var text = pinText(pin);
                 var labelW = Math.max(8, side === 'west' ? layout.leftTextW : (side === 'east' ? layout.rightTextW : estimateTextWidth(text, layout.fontSize)));
                 var labelH = Math.max(8, Math.ceil(layout.fontSize * 1.08));
-                var thickness = isBus(pin) ? 3 : 1;
+                // Keep a tiny rectangular terminal for stable routing, but render it as a thin line.
+                var thickness = isBus(pin) ? 4 : 1;
 
                 var stub = ensureChild(graph, body, 'stub', pin.key, stubStyle(side, pin), '');
                 var port = ensureChild(graph, body, 'port', pin.key, portStyle(side), '');
                 var label = ensureChild(graph, body, 'label', pin.key, textStyle(layout.fontSize, (side === 'west' ? 'left' : (side === 'east' ? 'right' : 'center')), false, 0, 'visible'), text);
-                stub.connectable = true;
-                port.connectable = false;
+                stub.connectable = false;
+                port.connectable = true;
                 label.connectable = false;
                 stub.visible = shown;
-                port.visible = false;
+                port.visible = shown;
                 label.visible = shown && !model.hidePinLabels;
                 valid['stub:' + pin.key] = true;
                 valid['port:' + pin.key] = true;
