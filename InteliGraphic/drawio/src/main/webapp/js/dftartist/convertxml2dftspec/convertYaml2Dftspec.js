@@ -41,8 +41,7 @@ function convertEDTYamlToDftspec(spec) {
     }
 
     const scanDataSpec = spec.MGC_SCAN_DATA_SPEC;
-    let result = `read_config_data -in $dftspec -from_string {
-  EDT {`;
+    let result = '';
 
     // 递归处理配置对象
     const processConfig = (config, indentLevel) => {
@@ -117,6 +116,10 @@ function convertEDTYamlToDftspec(spec) {
         return map[t] || null;
     }
 
+    function isRenderableSsnType(typeName) {
+        return !!typeToSsnBlockName(typeName);
+    }
+
     function emitParams(params, indentLevel) {
         const indent = ' '.repeat(indentLevel);
         let out = '';
@@ -131,6 +134,39 @@ function convertEDTYamlToDftspec(spec) {
         return out;
     }
 
+    function emitScanHostDetails(node, indentLevel) {
+        const indent = ' '.repeat(indentLevel);
+        const params = Object.assign({}, (node && node.params) || {});
+        let out = '';
+        const cgId = params.cg_id;
+        const connCgId = params.conn_cg_id;
+        const csmModuleName = params.csm_module_name;
+        delete params.cg_id;
+        delete params.conn_cg_id;
+        delete params.csm_module_name;
+        if (cgId !== undefined && cgId !== '') {
+            out += `\n${indent}ChainGroup {`;
+            out += `\n${indent}  id : ${formatValue(cgId)};`;
+            out += `\n${indent}}`;
+        }
+        if (csmModuleName !== undefined && csmModuleName !== '') {
+            out += `\n${indent}Interface {`;
+            out += `\n${indent}  ClockSignalModule {`;
+            out += `\n${indent}    module_name : ${formatValue(csmModuleName)};`;
+            out += `\n${indent}  }`;
+            out += `\n${indent}}`;
+        }
+        if (connCgId !== undefined && connCgId !== '') {
+            out += `\n${indent}Connections {`;
+            out += `\n${indent}  ChainGroup {`;
+            out += `\n${indent}    id : ${formatValue(connCgId)};`;
+            out += `\n${indent}  }`;
+            out += `\n${indent}}`;
+        }
+        if (Object.keys(params).length) out += emitParams(params, indentLevel);
+        return out;
+    }
+
     function emitSmuxSecondary(smuxSecondary, indentLevel) {
         const indent = ' '.repeat(indentLevel);
         let out = '';
@@ -140,10 +176,10 @@ function convertEDTYamlToDftspec(spec) {
         keys.forEach((instName) => {
             const node = smuxSecondary[instName] || {};
             const t = String(node.type || '').toLowerCase();
-            if (t === 'ssn_host_interface' || t === 'ssn_slave_interface') return;
-            const blockName = typeToSsnBlockName(t) || 'Pipeline';
+            if (!isRenderableSsnType(t)) return;
+            const blockName = typeToSsnBlockName(t);
             out += `\n${indent}${blockName}(${instName}) {`;
-            out += emitParams(node.params, indentLevel + 2);
+            out += t === 'ssn_scanhost' ? emitScanHostDetails(node, indentLevel + 2) : emitParams(node.params, indentLevel + 2);
             out += `\n${indent}}`;
         });
         return out;
@@ -151,9 +187,8 @@ function convertEDTYamlToDftspec(spec) {
 
     function emitExtraOutputPath(extraValue, indentLevel) {
         const indent = ' '.repeat(indentLevel);
-        let out = '';
-        if (extraValue === undefined || extraValue === null) return out;
-        out += `\n${indent}ExtraOutputPath {`;
+        if (extraValue === undefined || extraValue === null) return '';
+        let body = '';
         const paths = Array.isArray(extraValue) ? extraValue : [extraValue];
         paths.forEach((pathObj) => {
             if (!pathObj || typeof pathObj !== 'object') return;
@@ -163,27 +198,27 @@ function convertEDTYamlToDftspec(spec) {
                     Object.keys(seg).forEach((instName) => {
                         const node = seg[instName] || {};
                         const t = String(node.type || '').toLowerCase();
-                        if (t === 'ssn_host_interface' || t === 'ssn_slave_interface') return;
-                        const blockName = typeToSsnBlockName(t) || 'Pipeline';
-                        out += `\n${indent}  ${blockName}(${instName}) {`;
-                        out += emitParams(node.params, indentLevel + 4);
-                        out += `\n${indent}  }`;
+                        if (!isRenderableSsnType(t)) return;
+                        const blockName = typeToSsnBlockName(t);
+                        body += `\n${indent}  ${blockName}(${instName}) {`;
+                        body += t === 'ssn_scanhost' ? emitScanHostDetails(node, indentLevel + 4) : emitParams(node.params, indentLevel + 4);
+                        body += `\n${indent}  }`;
                     });
                 });
             } else {
                 Object.keys(pathObj).forEach((instName) => {
                     const node = pathObj[instName] || {};
                     const t = String(node.type || '').toLowerCase();
-                    if (t === 'ssn_host_interface' || t === 'ssn_slave_interface') return;
-                    const blockName = typeToSsnBlockName(t) || 'Pipeline';
-                    out += `\n${indent}  ${blockName}(${instName}) {`;
-                    out += emitParams(node.params, indentLevel + 4);
-                    out += `\n${indent}  }`;
+                    if (!isRenderableSsnType(t)) return;
+                    const blockName = typeToSsnBlockName(t);
+                    body += `\n${indent}  ${blockName}(${instName}) {`;
+                    body += t === 'ssn_scanhost' ? emitScanHostDetails(node, indentLevel + 4) : emitParams(node.params, indentLevel + 4);
+                    body += `\n${indent}  }`;
                 });
             }
         });
-        out += `\n${indent}}`;
-        return out;
+        if (!body) return '';
+        return `\n${indent}ExtraOutputPath {${body}\n${indent}}`;
     }
 
     function emitOrderAsSsnBlocks(order, indentLevel) {
@@ -193,21 +228,226 @@ function convertEDTYamlToDftspec(spec) {
         Object.keys(order).forEach((instName) => {
             const node = order[instName] || {};
             const t = String(node.type || '').toLowerCase();
-            if (t === 'ssn_host_interface' || t === 'ssn_slave_interface') return;
-            const blockName = typeToSsnBlockName(t) || 'Pipeline';
+            if (!isRenderableSsnType(t)) return;
+            const blockName = typeToSsnBlockName(t);
             out += `\n${indent}${blockName}(${instName}) {`;
-            out += emitParams(node.params, indentLevel + 2);
+            out += t === 'ssn_scanhost' ? emitScanHostDetails(node, indentLevel + 2) : emitParams(node.params, indentLevel + 2);
             if (node.smux_secondary) {
                 out += `\n${indent}  smux_secondary {`;
                 out += emitSmuxSecondary(node.smux_secondary, indentLevel + 4);
                 out += `\n${indent}  }`;
             }
-            if (node.ExtraOutputPath !== undefined) {
-                out += emitExtraOutputPath(node.ExtraOutputPath, indentLevel + 2);
+            const extraOut = emitExtraOutputPath(node.ExtraOutputPath, indentLevel + 2);
+            if (extraOut) {
+                out += extraOut;
             }
             out += `\n${indent}}`;
         });
         return out;
+    }
+
+    function setNestedValue(target, path, value) {
+        let cur = target;
+        for (let i = 0; i < path.length - 1; i++) {
+            const key = path[i];
+            if (!cur[key] || typeof cur[key] !== 'object' || Array.isArray(cur[key])) cur[key] = {};
+            cur = cur[key];
+        }
+        cur[path[path.length - 1]] = value;
+    }
+
+    function pruneEmptyObjects(obj) {
+        if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return obj;
+        Object.keys(obj).forEach((k) => {
+            const v = pruneEmptyObjects(obj[k]);
+            const emptyObj = v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0;
+            if (v === undefined || emptyObj) delete obj[k];
+            else obj[k] = v;
+        });
+        return obj;
+    }
+
+    function normalizeEdtConfig(raw) {
+        const cfg = Object.assign({}, raw || {});
+        const out = {};
+        const topMap = {
+            edt_top_ijtag_host_interface: ['ijtag_host_interface'],
+        };
+        const nestedMap = {
+            edt_lb_present: ['LogicBistOptions', 'present'],
+            edt_lb_capture_per_cycle: ['LogicBistOptions', 'capture_per_cycle'],
+            edt_lb_prpg_reference_seed: ['LogicBistOptions', 'prpg_reference_seed'],
+            edt_lb_self_test: ['LogicBistOptions', 'self_test'],
+            edt_lb_shiftcycles_max: ['LogicBistOptions', 'ShiftCycles', 'max'],
+            edt_lb_shiftcycles_hw_default: ['LogicBistOptions', 'ShiftCycles', 'hardware_default'],
+            edt_lb_warmup_max: ['LogicBistOptions', 'WarmupPatternCount', 'max'],
+            edt_lb_warmup_hw_default: ['LogicBistOptions', 'WarmupPatternCount', 'hardware_default'],
+
+            edt_cc_present: ['ControllerChain', 'present'],
+            edt_cc_clock: ['ControllerChain', 'clock'],
+            edt_cc_segment_per_instrument: ['ControllerChain', 'segment_per_instrument'],
+            edt_cc_max_segment_length: ['ControllerChain', 'max_segment_length'],
+            edt_cc_if_enable: ['ControllerChain', 'Interface', 'enable'],
+            edt_cc_if_scan_en: ['ControllerChain', 'Interface', 'scan_en'],
+            edt_cc_if_scan_in: ['ControllerChain', 'Interface', 'scan_in'],
+            edt_cc_if_scan_out: ['ControllerChain', 'Interface', 'scan_out'],
+            edt_cc_conn_scan_en: ['ControllerChain', 'Connections', 'scan_en'],
+            edt_cc_conn_controller_chain_enable: ['ControllerChain', 'Connections', 'controller_chain_enable'],
+            edt_cc_conn_controller_chain_scan_in: ['ControllerChain', 'Connections', 'controller_chain_scan_in'],
+            edt_cc_conn_controller_chain_scan_out: ['ControllerChain', 'Connections', 'controller_chain_scan_out'],
+
+            edt_conn_edt_clock: ['Connections', 'edt_clock'],
+            edt_conn_edt_slave_clock: ['Connections', 'edt_slave_clock'],
+            edt_conn_edt_update: ['Connections', 'edt_update'],
+            edt_conn_edt_reset: ['Connections', 'edt_reset'],
+            edt_conn_sec_edt_bypass: ['Connections', 'StaticExternalControls', 'edt_bypass'],
+            edt_conn_sec_edt_single_bypass_chain: ['Connections', 'StaticExternalControls', 'edt_single_bypass_chain'],
+            edt_conn_sec_edt_configuration: ['Connections', 'StaticExternalControls', 'edt_configuration'],
+            edt_conn_sec_edt_low_power_shift_enable: ['Connections', 'StaticExternalControls', 'edt_low_power_shift_enable'],
+
+            edt_ctrl_ijtag_host_interface: ['Controller', 'ijtag_host_interface'],
+            edt_ctrl_longest_chain_range: ['Controller', 'longest_chain_range'],
+            edt_ctrl_scan_chain_count: ['Controller', 'scan_chain_count'],
+            edt_ctrl_input_channel_count: ['Controller', 'input_channel_count'],
+            edt_ctrl_output_channel_count: ['Controller', 'output_channel_count'],
+            edt_ctrl_separate_control_data_channels: ['Controller', 'separate_control_data_channels'],
+            edt_ctrl_parent_instance: ['Controller', 'parent_instance'],
+            edt_ctrl_leaf_instance_name: ['Controller', 'leaf_instance_name'],
+            edt_ctrl_connect_bscan_segments_to_lsb_chains: ['Controller', 'connect_bscan_segments_to_lsb_chains'],
+            edt_ctrl_edt_bypass_change_edge_clock: ['Controller', 'edt_bypass_change_edge_clock'],
+            edt_ctrl_chain_output_masking_disable: ['Controller', 'chain_output_masking_disable'],
+            edt_ctrl_lvx_present: ['Controller', 'LVxMode', 'present'],
+            edt_ctrl_lvx_enable_one_chain: ['Controller', 'LVxMode', 'enable_one_chain'],
+
+            edt_ctrl_if_edt_clock: ['Controller', 'Interface', 'edt_clock'],
+            edt_ctrl_if_edt_slave_clock: ['Controller', 'Interface', 'edt_slave_clock'],
+            edt_ctrl_if_edt_update: ['Controller', 'Interface', 'edt_update'],
+            edt_ctrl_if_edt_reset: ['Controller', 'Interface', 'edt_reset'],
+            edt_ctrl_if_edt_channels_in_bus: ['Controller', 'Interface', 'edt_channels_in_bus'],
+            edt_ctrl_if_edt_channels_out_bus: ['Controller', 'Interface', 'edt_channels_out_bus'],
+            edt_ctrl_if_edt_bypass_change_edge_clock: ['Controller', 'Interface', 'edt_bypass_change_edge_clock'],
+            edt_ctrl_spo_min_switching_threshold_percentage: ['Controller', 'ShiftPowerOptions', 'min_switching_threshold_percentage'],
+            edt_ctrl_spo_present: ['Controller', 'ShiftPowerOptions', 'present'],
+            edt_ctrl_spo_full_control: ['Controller', 'ShiftPowerOptions', 'full_control'],
+
+            edt_ctrl_lbopt_present: ['Controller', 'LogicBistOptions', 'present'],
+            edt_ctrl_lbopt_misr_input_ratio: ['Controller', 'LogicBistOptions', 'misr_input_ratio'],
+            edt_ctrl_lbopt_chain_mask_register_ratio: ['Controller', 'LogicBistOptions', 'chain_mask_register_ratio'],
+            edt_ctrl_lbopt_prpg_seed: ['Controller', 'LogicBistOptions', 'prpg_seed'],
+            edt_ctrl_lbopt_spo_present: ['Controller', 'LogicBistOptions', 'ShiftPowerOptions', 'present'],
+            edt_ctrl_lbopt_spo_default_operation: ['Controller', 'LogicBistOptions', 'ShiftPowerOptions', 'default_operation'],
+            edt_ctrl_lbopt_spo_stp_hw_default: ['Controller', 'LogicBistOptions', 'ShiftPowerOptions', 'SwitchingThresholdPercentage', 'hardware_default'],
+
+            edt_ctrl_if_ijtag_static_signals_driven: ['Controller', 'Interface', 'IjtagScanInterface', 'static_signals_driven'],
+            edt_ctrl_if_ijtag_tck: ['Controller', 'Interface', 'IjtagScanInterface', 'tck'],
+            edt_ctrl_if_ijtag_reset: ['Controller', 'Interface', 'IjtagScanInterface', 'reset'],
+            edt_ctrl_if_ijtag_select: ['Controller', 'Interface', 'IjtagScanInterface', 'select'],
+            edt_ctrl_if_ijtag_capture_en: ['Controller', 'Interface', 'IjtagScanInterface', 'capture_en'],
+            edt_ctrl_if_ijtag_shift_en: ['Controller', 'Interface', 'IjtagScanInterface', 'shift_en'],
+            edt_ctrl_if_ijtag_update_en: ['Controller', 'Interface', 'IjtagScanInterface', 'update_en'],
+            edt_ctrl_if_ijtag_scan_in: ['Controller', 'Interface', 'IjtagScanInterface', 'scan_in'],
+            edt_ctrl_if_ijtag_scan_out: ['Controller', 'Interface', 'IjtagScanInterface', 'scan_out'],
+
+            edt_ctrl_if_sec_edt_bypass: ['Controller', 'Interface', 'StaticExternalControls', 'edt_bypass'],
+            edt_ctrl_if_sec_edt_single_bypass_chain: ['Controller', 'Interface', 'StaticExternalControls', 'edt_single_bypass_chain'],
+            edt_ctrl_if_sec_edt_configuration: ['Controller', 'Interface', 'StaticExternalControls', 'edt_configuration'],
+            edt_ctrl_if_sec_edt_low_power_shift_enable: ['Controller', 'Interface', 'StaticExternalControls', 'edt_low_power_shift_enable'],
+
+            edt_ctrl_if_lb_reset: ['Controller', 'Interface', 'LogicBist', 'reset'],
+            edt_ctrl_if_lb_enable: ['Controller', 'Interface', 'LogicBist', 'enable'],
+            edt_ctrl_if_lb_prpg_en: ['Controller', 'Interface', 'LogicBist', 'prpg_en'],
+            edt_ctrl_if_lb_misr_en: ['Controller', 'Interface', 'LogicBist', 'misr_en'],
+            edt_ctrl_if_lb_low_power_shift_en: ['Controller', 'Interface', 'LogicBist', 'low_power_shift_en'],
+            edt_ctrl_if_lb_self_test_en: ['Controller', 'Interface', 'LogicBist', 'self_test_en'],
+            edt_ctrl_if_lb_misr: ['Controller', 'Interface', 'LogicBist', 'misr'],
+
+            edt_ctrl_bc_present: ['Controller', 'BypassChains', 'present'],
+            edt_ctrl_bc_bypass_chain_count: ['Controller', 'BypassChains', 'bypass_chain_count'],
+            edt_ctrl_bc_single_bypass_chain: ['Controller', 'BypassChains', 'single_bypass_chain'],
+            edt_ctrl_bc_chain_id: ['Controller', 'BypassChains', 'BypassChain', 'id'],
+            edt_ctrl_bc_scan_chain_range_list: ['Controller', 'BypassChains', 'BypassChain', 'scan_chain_range_list'],
+
+            edt_ctrl_comp_type: ['Controller', 'Compactor', 'type'],
+            edt_ctrl_comp_pipeline_logic_levels: ['Controller', 'Compactor', 'pipeline_logic_levels_in_compactor'],
+            edt_ctrl_comp_change_edge: ['Controller', 'Compactor', 'change_edge_at_compactor_output'],
+            edt_ctrl_comp_conn_id: ['Controller', 'Compactor', 'CompactorConnection', 'id'],
+            edt_ctrl_comp_conn_scan_chain_range_list: ['Controller', 'Compactor', 'CompactorConnection', 'scan_chain_range_list'],
+
+            edt_ctrl_clocking_type: ['Controller', 'Clocking', 'type'],
+            edt_ctrl_clocking_lockup_cells: ['Controller', 'Clocking', 'lockup_cells'],
+            edt_ctrl_clocking_reset_signal: ['Controller', 'Clocking', 'reset_signal'],
+            edt_ctrl_clocking_reset_polarity: ['Controller', 'Clocking', 'reset_polarity'],
+
+            edt_ctrl_hcc_present: ['Controller', 'HighCompressionConfiguration', 'present'],
+            edt_ctrl_hcc_input_channel_count: ['Controller', 'HighCompressionConfiguration', 'input_channel_count'],
+            edt_ctrl_hcc_output_channel_count: ['Controller', 'HighCompressionConfiguration', 'output_channel_count'],
+
+            edt_ctrl_conn_edt_clock: ['Controller', 'Connections', 'edt_clock'],
+            edt_ctrl_conn_edt_slave_clock: ['Controller', 'Connections', 'edt_slave_clock'],
+            edt_ctrl_conn_edt_update: ['Controller', 'Connections', 'edt_update'],
+            edt_ctrl_conn_edt_reset: ['Controller', 'Connections', 'edt_reset'],
+            edt_ctrl_conn_ssh_chain_group: ['Controller', 'Connections', 'ssh_chain_group'],
+            edt_ctrl_conn_mode_enables: ['Controller', 'Connections', 'mode_enables'],
+            edt_ctrl_conn_edt_bypass_change_edge_clock: ['Controller', 'Connections', 'edt_bypass_change_edge_clock'],
+            edt_ctrl_conn_sec_edt_bypass: ['Controller', 'Connections', 'StaticExternalControls', 'edt_bypass'],
+            edt_ctrl_conn_sec_edt_single_bypass_chain: ['Controller', 'Connections', 'StaticExternalControls', 'edt_single_bypass_chain'],
+            edt_ctrl_conn_sec_edt_configuration: ['Controller', 'Connections', 'StaticExternalControls', 'edt_configuration'],
+            edt_ctrl_conn_sec_edt_low_power_shift_enable: ['Controller', 'Connections', 'StaticExternalControls', 'edt_low_power_shift_enable'],
+
+            edt_ctrl_conn_in_range: ['Controller', 'Connections', 'EdtChannelsIn', 'range'],
+            edt_ctrl_conn_in_port_pin_name: ['Controller', 'Connections', 'EdtChannelsIn', 'port_pin_name'],
+            edt_ctrl_conn_in_pipeline_clock: ['Controller', 'Connections', 'EdtChannelsIn', 'pipeline_clock'],
+            edt_ctrl_conn_in_insert_lockup_cell: ['Controller', 'Connections', 'EdtChannelsIn', 'insert_lockup_cell'],
+            edt_ctrl_conn_in_lockup_cell_type: ['Controller', 'Connections', 'EdtChannelsIn', 'lockup_cell_type'],
+            edt_ctrl_conn_in_ps_parent_instance: ['Controller', 'Connections', 'EdtChannelsIn', 'PipelineStage', 'parent_instance'],
+            edt_ctrl_conn_in_ps_leaf_instance_name: ['Controller', 'Connections', 'EdtChannelsIn', 'PipelineStage', 'leaf_instance_name'],
+            edt_ctrl_conn_in_ps_pipeline_clock: ['Controller', 'Connections', 'EdtChannelsIn', 'PipelineStage', 'pipeline_clock'],
+            edt_ctrl_conn_in_ps_insert_lockup_cell: ['Controller', 'Connections', 'EdtChannelsIn', 'PipelineStage', 'insert_lockup_cell'],
+            edt_ctrl_conn_in_ps_lockup_cell_type: ['Controller', 'Connections', 'EdtChannelsIn', 'PipelineStage', 'lockup_cell_type'],
+
+            edt_ctrl_conn_out_range: ['Controller', 'Connections', 'EdtChannelsOut', 'range'],
+            edt_ctrl_conn_out_port_pin_name: ['Controller', 'Connections', 'EdtChannelsOut', 'port_pin_name'],
+            edt_ctrl_conn_out_pipeline_clock: ['Controller', 'Connections', 'EdtChannelsOut', 'pipeline_clock'],
+            edt_ctrl_conn_out_insert_lockup_cell: ['Controller', 'Connections', 'EdtChannelsOut', 'insert_lockup_cell'],
+            edt_ctrl_conn_out_lockup_cell_type: ['Controller', 'Connections', 'EdtChannelsOut', 'lockup_cell_type'],
+            edt_ctrl_conn_out_ps_parent_instance: ['Controller', 'Connections', 'EdtChannelsOut', 'PipelineStage', 'parent_instance'],
+            edt_ctrl_conn_out_ps_leaf_instance_name: ['Controller', 'Connections', 'EdtChannelsOut', 'PipelineStage', 'leaf_instance_name'],
+            edt_ctrl_conn_out_ps_pipeline_clock: ['Controller', 'Connections', 'EdtChannelsOut', 'PipelineStage', 'pipeline_clock'],
+            edt_ctrl_conn_out_ps_insert_lockup_cell: ['Controller', 'Connections', 'EdtChannelsOut', 'PipelineStage', 'insert_lockup_cell'],
+            edt_ctrl_conn_out_ps_lockup_cell_type: ['Controller', 'Connections', 'EdtChannelsOut', 'PipelineStage', 'lockup_cell_type'],
+
+            edt_ctrl_dec_segments: ['Controller', 'Decompressor', 'segments'],
+            edt_ctrl_dec_max_chains_per_segment: ['Controller', 'Decompressor', 'max_chains_per_segment'],
+        };
+
+        Object.keys(topMap).forEach((k) => {
+            if (cfg[k] !== undefined && cfg[k] !== '') {
+                setNestedValue(out, topMap[k], cfg[k]);
+                delete cfg[k];
+            }
+        });
+
+        const controllerId = cfg.edt_ctrl_id;
+        if (controllerId !== undefined && controllerId !== '') {
+            setNestedValue(out, ['Controller', 'id'], controllerId);
+            delete cfg.edt_ctrl_id;
+        }
+
+        Object.keys(nestedMap).forEach((k) => {
+            if (cfg[k] !== undefined && cfg[k] !== '') {
+                setNestedValue(out, nestedMap[k], cfg[k]);
+                delete cfg[k];
+            }
+        });
+
+        Object.keys(cfg).forEach((k) => {
+            if (cfg[k] === undefined || cfg[k] === '') delete cfg[k];
+        });
+
+        if (Object.keys(cfg).length) {
+            out.Raw = cfg;
+        }
+        return pruneEmptyObjects(out) || {};
     }
 
     function emitDatapathBlock(dpName, dpCfg, indentLevel) {
@@ -226,62 +466,52 @@ function convertEDTYamlToDftspec(spec) {
         return out;
     }
 
-    // 先写 DATAPATH（新结构）
+    // 先写 SSN DATAPATH（新结构）
     if (scanDataSpec.DATAPATH && typeof scanDataSpec.DATAPATH === 'object') {
         const dpNames = Object.keys(scanDataSpec.DATAPATH || {});
         if (dpNames.length) {
-            result += `\n    SSN {`;
-            result += `\n      ijtag_host_interface : Sib(ssn);`;
+            let ssnBlock = `read_config_data -in $dftspec -from_string {\n  SSN {`;
+            ssnBlock += `\n    ijtag_host_interface : Sib(ssn);`;
             dpNames.forEach((dpName) => {
                 const dpCfg = scanDataSpec.DATAPATH[dpName];
-                result += emitDatapathBlock(dpName, dpCfg, 6);
+                ssnBlock += emitDatapathBlock(dpName, dpCfg, 4);
             });
-            result += `\n    }`;
+            ssnBlock += `\n  }\n}\n`;
+            result += ssnBlock;
         }
     }
 
     // 处理EDT配置
     if (scanDataSpec.INSTRUMENTS && scanDataSpec.INSTRUMENTS.EDT) {
         const edtConfigs = scanDataSpec.INSTRUMENTS.EDT;
+        const edtNames = Object.keys(edtConfigs || {});
+        if (edtNames.length) {
+            let edtBlock = `read_config_data -in $dftspec -from_string {\n  EDT {`;
 
-        for (const [edtName, edtConfig] of Object.entries(edtConfigs)) {
-            result += `\n    Controller(${edtName}) {`;
-
-            // 分离Controller属性和其他配置
-            const controllerProps = {};
-            const otherConfigs = {};
-
-            for (const [key, value] of Object.entries(edtConfig)) {
-                if (key === 'Controller') {
-                    Object.assign(controllerProps, value);
-                } else {
-                    otherConfigs[key] = value;
-                }
+            for (const [edtName, edtConfig] of Object.entries(edtConfigs)) {
+                const normalized = normalizeEdtConfig(edtConfig);
+                Object.entries(normalized).forEach(([key, value]) => {
+                    if (key === 'Controller' && value && typeof value === 'object' && !Array.isArray(value)) {
+                        edtBlock += `\n    Controller {`;
+                        edtBlock += processConfig(value, 6);
+                        edtBlock += `\n    }`;
+                        return;
+                    }
+                    if (typeof value === 'object' && !Array.isArray(value)) {
+                        edtBlock += `\n    ${key} {`;
+                        edtBlock += processConfig(value, 6);
+                        edtBlock += `\n    }`;
+                    } else {
+                        edtBlock += `\n    ${key} : ${formatValue(value)};`;
+                    }
+                });
             }
 
-            // 先处理Controller属性
-            for (const [key, value] of Object.entries(controllerProps)) {
-                const formattedValue = formatValue(value);
-                result += `\n      ${key} : ${formattedValue};`;
-            }
-
-            // 处理其他配置
-            for (const [key, value] of Object.entries(otherConfigs)) {
-                if (typeof value === 'object' && !Array.isArray(value)) {
-                    result += `\n      ${key} {`;
-                    result += processConfig(value, 8);
-                    result += `\n      }`;
-                } else {
-                    const formattedValue = formatValue(value);
-                    result += `\n      ${key} : ${formattedValue};`;
-                }
-            }
-
-            result += `\n    }`;
+            edtBlock += `\n  }\n}\n`;
+            result += edtBlock;
         }
     }
 
-    result += `\n  }\n}\n`;
     return result;
 }
 
@@ -289,16 +519,9 @@ function convertEDTYamlToDftspec(spec) {
 function formatValue(value) {
     if (value === null || value === undefined) return 'null';
     if (typeof value === 'boolean') return value ? 'on' : 'off';
-    if (typeof value === 'number') return value.toString();
-    if (Array.isArray(value)) return `[${value.join(', ')}]`;
-    if (typeof value === 'string') {
-        // 保持特殊格式不变
-        if (value.includes('[') && value.includes(']') || value.includes(',')) {
-            return value;
-        }
-        return `"${value}"`;
-    }
-    return JSON.stringify(value);
+    if (typeof value === 'number') return String(value);
+    if (Array.isArray(value)) return `[${value.map((v) => formatValue(v)).join(', ')}]`;
+    return String(value);
 }
 
 function convertSCANMC(spec) {
@@ -447,35 +670,238 @@ function convertOCCYamlToDftspec(spec) {
         return "";
     }
 
-    const occSpec = spec.MGC_OCC_INS_SPEC.MGC_OCC_INS_SPEC;
+    const occSpecRoot = spec.MGC_OCC_INS_SPEC || {};
+    const occSpec = occSpecRoot.MGC_OCC_INS_SPEC || occSpecRoot;
 
-    // 构建 OCC 配置
-    let result = `read_config_data -in $dftspec -from_string {
-  OCC {
-    ijtag_host_interface : Sib(occ);
-    static_clock_control : both;`;
-
-    // 遍历 MGC_OCC_INS_SPEC 的所有属性
-    for (const [key, value] of Object.entries(occSpec)) {
-        // 跳过 static_clock_control 属性
-        if (key === 'static_clock_control') continue;
-        // 检查是否为控制器配置（包含 Controller 对象）
-        if (value && typeof value === 'object' && value.Controller) {
-            const controller = value.Controller;
-            result += `
-    Controller(${controller.inst}) {
-       clock_intercept_node: ${controller.clock_intercept_node};
-       capture_window_size: ${controller.capture_window_size};
-       type: standard;
-    }`;
+    function setNestedValue(target, path, value) {
+        let cur = target;
+        for (let i = 0; i < path.length - 1; i++) {
+            const key = path[i];
+            if (!cur[key] || typeof cur[key] !== 'object' || Array.isArray(cur[key])) cur[key] = {};
+            cur = cur[key];
         }
+        cur[path[path.length - 1]] = value;
     }
 
-    result += `
-  }
-}\n`;
+    function pruneEmptyObjects(obj) {
+        if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return obj;
+        Object.keys(obj).forEach((k) => {
+            const v = pruneEmptyObjects(obj[k]);
+            const emptyObj = v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0;
+            if (v === undefined || emptyObj) delete obj[k];
+            else obj[k] = v;
+        });
+        return obj;
+    }
 
+    function normalizeOccConfig(raw) {
+        const cfg = Object.assign({}, raw || {});
+        const out = {};
+        const map = {
+            occ_ijtag_host_interface: ['ijtag_host_interface'],
+            occ_capture_trigger: ['capture_trigger'],
+            occ_static_clock_control: ['static_clock_control'],
+            occ_force_clock_gater_te_tied_off: ['force_clock_gater_te_tied_off'],
+            occ_capture_window_size: ['capture_window_size'],
+            occ_fast_capture_staggered_groups: ['fast_capture_staggered_groups'],
+            occ_internal_clock_gater: ['internal_clock_gater'],
+            occ_shift_only_mode: ['shift_only_mode'],
+            occ_kill_clock_mode: ['kill_clock_mode'],
+            occ_include_clocks_in_icl_model: ['include_clocks_in_icl_model'],
+            occ_leaf_instance_name: ['leaf_instance_name'],
+            occ_upstream_parent_occ: ['upstream_parent_occ'],
+            occ_parent_mode: ['parent_mode'],
+            occ_independent_divided_clocks: ['independent_divided_clocks'],
+
+            occ_if_scan_en: ['Interface', 'scan_en'],
+            occ_if_capture_en: ['Interface', 'capture_en'],
+            occ_if_slow_clock: ['Interface', 'slow_clock'],
+            occ_if_fast_clock: ['Interface', 'fast_clock'],
+            occ_if_clock: ['Interface', 'clock'],
+            occ_if_clock_out: ['Interface', 'clock_out'],
+            occ_if_clock_en_out: ['Interface', 'clock_en_out'],
+            occ_if_scan_in: ['Interface', 'scan_in'],
+            occ_if_scan_out: ['Interface', 'scan_out'],
+            occ_if_clock_sequence: ['Interface', 'clock_sequence'],
+            occ_if_pulse_to_align: ['Interface', 'pulse_to_align'],
+            occ_if_fast_capture_staggered_group: ['Interface', 'fast_capture_staggered_group'],
+            occ_if_ijtag_tck: ['Interface', 'IjtagScanInterface', 'tck'],
+            occ_if_ijtag_reset: ['Interface', 'IjtagScanInterface', 'reset'],
+            occ_if_ijtag_select: ['Interface', 'IjtagScanInterface', 'select'],
+            occ_if_ijtag_capture_en: ['Interface', 'IjtagScanInterface', 'capture_en'],
+            occ_if_ijtag_shift_en: ['Interface', 'IjtagScanInterface', 'shift_en'],
+            occ_if_ijtag_update_en: ['Interface', 'IjtagScanInterface', 'update_en'],
+            occ_if_ijtag_scan_in: ['Interface', 'IjtagScanInterface', 'scan_in'],
+            occ_if_ijtag_scan_out: ['Interface', 'IjtagScanInterface', 'scan_out'],
+            occ_if_ijtag_reset_polarity: ['Interface', 'IjtagScanInterface', 'reset_polarity'],
+            occ_if_sec_test_mode: ['Interface', 'StaticExternalControls', 'test_mode'],
+            occ_if_sec_fast_capture_mode: ['Interface', 'StaticExternalControls', 'fast_capture_mode'],
+            occ_if_sec_parent_mode: ['Interface', 'StaticExternalControls', 'parent_mode'],
+            occ_if_sec_capture_cycle_width: ['Interface', 'StaticExternalControls', 'capture_cycle_width'],
+            occ_if_sec_static_clock_control_mode: ['Interface', 'StaticExternalControls', 'static_clock_control_mode'],
+            occ_if_sec_shift_only_mode: ['Interface', 'StaticExternalControls', 'shift_only_mode'],
+            occ_if_sec_kill_clock_en: ['Interface', 'StaticExternalControls', 'kill_clock_en'],
+            occ_if_sec_independent_divided_clocks_en: ['Interface', 'StaticExternalControls', 'independent_divided_clocks_en'],
+
+            occ_conn_scan_en: ['Connections', 'scan_en'],
+            occ_conn_capture_en: ['Connections', 'capture_en'],
+            occ_conn_slow_clock: ['Connections', 'slow_clock'],
+            occ_conn_clock_sequence: ['Connections', 'clock_sequence'],
+            occ_conn_pulse_to_align: ['Connections', 'pulse_to_align'],
+            occ_conn_fast_capture_staggered_group: ['Connections', 'fast_capture_staggered_group'],
+            occ_conn_sec_test_mode: ['Connections', 'StaticExternalControls', 'test_mode'],
+            occ_conn_sec_fast_capture_mode: ['Connections', 'StaticExternalControls', 'fast_capture_mode'],
+            occ_conn_sec_parent_mode: ['Connections', 'StaticExternalControls', 'parent_mode'],
+            occ_conn_sec_capture_cycle_width: ['Connections', 'StaticExternalControls', 'capture_cycle_width'],
+            occ_conn_sec_static_clock_control_mode: ['Connections', 'StaticExternalControls', 'static_clock_control_mode'],
+            occ_conn_sec_shift_only_mode: ['Connections', 'StaticExternalControls', 'shift_only_mode'],
+            occ_conn_sec_kill_clock_en: ['Connections', 'StaticExternalControls', 'kill_clock_en'],
+            occ_conn_sec_independent_divided_clocks_en: ['Connections', 'StaticExternalControls', 'independent_divided_clocks_en'],
+
+            occ_ctrl_id: ['Controller', 'id'],
+            occ_ctrl_clock_intercept_nodes: ['Controller', 'clock_intercept_nodes'],
+            occ_ctrl_clock_port_count: ['Controller', 'clock_port_count'],
+            occ_ctrl_clock_enable_pin: ['Controller', 'clock_enable_pin'],
+            occ_ctrl_clock_enable_pin_polarity: ['Controller', 'clock_enable_pin_polarity'],
+            occ_ctrl_parent_instance: ['Controller', 'parent_instance'],
+            occ_ctrl_capture_window_size: ['Controller', 'capture_window_size'],
+            occ_ctrl_leaf_instance_name: ['Controller', 'leaf_instance_name'],
+            occ_ctrl_internal_clock_gater: ['Controller', 'internal_clock_gater'],
+            occ_ctrl_shift_only_mode: ['Controller', 'shift_only_mode'],
+            occ_ctrl_kill_clock_mode: ['Controller', 'kill_clock_mode'],
+            occ_ctrl_upstream_parent_occ: ['Controller', 'upstream_parent_occ'],
+            occ_ctrl_parent_mode: ['Controller', 'parent_mode'],
+            occ_ctrl_independent_divided_clocks: ['Controller', 'independent_divided_clocks'],
+            occ_ctrl_freq_ratio: ['Controller', 'FrequencyRatio', 'id'],
+            occ_ctrl_fr_clock_intercept_nodes: ['Controller', 'FrequencyRatio', 'clock_intercept_nodes'],
+            occ_ctrl_fr_clock_port_count: ['Controller', 'FrequencyRatio', 'clock_port_count'],
+
+            occ_ctrl_conn_scan_en: ['Controller', 'Connections', 'scan_en'],
+            occ_ctrl_conn_capture_en: ['Controller', 'Connections', 'capture_en'],
+            occ_ctrl_conn_slow_clock: ['Controller', 'Connections', 'slow_clock'],
+            occ_ctrl_conn_fast_clocks: ['Controller', 'Connections', 'fast_clocks'],
+            occ_ctrl_conn_clock: ['Controller', 'Connections', 'clock'],
+            occ_ctrl_conn_clock_sequence: ['Controller', 'Connections', 'clock_sequence'],
+            occ_ctrl_conn_pulse_to_align: ['Controller', 'Connections', 'pulse_to_align'],
+            occ_ctrl_conn_fast_capture_staggered_group: ['Controller', 'Connections', 'fast_capture_staggered_group'],
+            occ_ctrl_conn_fr_fast_clocks: ['Controller', 'Connections', 'FrequencyRatio', 'fast_clocks'],
+            occ_ctrl_conn_sec_test_mode: ['Controller', 'Connections', 'StaticExternalControls', 'test_mode'],
+            occ_ctrl_conn_sec_fast_capture_mode: ['Controller', 'Connections', 'StaticExternalControls', 'fast_capture_mode'],
+            occ_ctrl_conn_sec_parent_mode: ['Controller', 'Connections', 'StaticExternalControls', 'parent_mode'],
+            occ_ctrl_conn_sec_capture_cycle_width: ['Controller', 'Connections', 'StaticExternalControls', 'capture_cycle_width'],
+            occ_ctrl_conn_sec_static_clock_control_mode: ['Controller', 'Connections', 'StaticExternalControls', 'static_clock_control_mode'],
+            occ_ctrl_conn_sec_shift_only_mode: ['Controller', 'Connections', 'StaticExternalControls', 'shift_only_mode'],
+            occ_ctrl_conn_sec_kill_clock_en: ['Controller', 'Connections', 'StaticExternalControls', 'kill_clock_en'],
+            occ_ctrl_conn_sec_independent_divided_clocks_en: ['Controller', 'Connections', 'StaticExternalControls', 'independent_divided_clocks_en'],
+        };
+
+        Object.keys(map).forEach((k) => {
+            if (cfg[k] !== undefined && cfg[k] !== '') {
+                setNestedValue(out, map[k], cfg[k]);
+                delete cfg[k];
+            }
+        });
+
+        if (cfg.Controller && typeof cfg.Controller === 'object') {
+            Object.keys(cfg.Controller).forEach((k) => {
+                if (k === 'type') return;
+                if (cfg.Controller[k] !== undefined && cfg.Controller[k] !== '') {
+                    setNestedValue(out, ['Controller', k], cfg.Controller[k]);
+                }
+            });
+            delete cfg.Controller;
+        }
+        if (cfg.Connections && typeof cfg.Connections === 'object') {
+            out.Connections = Object.assign({}, out.Connections || {}, cfg.Connections);
+            delete cfg.Connections;
+        }
+
+        Object.keys(cfg).forEach((k) => {
+            if (cfg[k] === undefined || cfg[k] === '') delete cfg[k];
+        });
+        if (Object.keys(cfg).length) out.Raw = cfg;
+        const pruned = pruneEmptyObjects(out) || {};
+        if (pruned.Controller && pruned.Controller.FrequencyRatio && pruned.Controller.FrequencyRatio.id === 'none') {
+            delete pruned.Controller.FrequencyRatio;
+        }
+        if (pruned.Controller && pruned.Controller.Connections && pruned.Controller.Connections.FrequencyRatio && !pruned.Controller.FrequencyRatio) {
+            delete pruned.Controller.Connections.FrequencyRatio;
+        }
+        return pruneEmptyObjects(pruned) || {};
+    }
+
+    const normalized = normalizeOccConfig(occSpec);
+    let result = `read_config_data -in $dftspec -from_string {\n  OCC {`;
+    Object.entries(normalized).forEach(([key, value]) => {
+        if (key === 'Controller' && value && typeof value === 'object' && !Array.isArray(value)) {
+            result += `\n    Controller {`;
+            result += processGenericConfig(value, 6);
+            result += `\n    }`;
+        } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+            result += `\n    ${key} {`;
+            result += processGenericConfig(value, 6);
+            result += `\n    }`;
+        } else {
+            result += `\n    ${key} : ${formatValue(value)};`;
+        }
+    });
+    result += `\n  }\n}\n`;
     return result;
+}
+
+function processGenericConfig(config, indentLevel) {
+    let output = '';
+    const indent = ' '.repeat(indentLevel);
+    for (const [key, value] of Object.entries(config || {})) {
+        if (value === null || value === undefined) continue;
+        if (key === 'FrequencyRatio' && value && typeof value === 'object' && !Array.isArray(value)) {
+            const ratioObj = Object.assign({}, value);
+            const ratioId = ratioObj.id;
+            delete ratioObj.id;
+            if (!ratioId) continue;
+            output += `\n${indent}FrequencyRatio(${ratioId}) {`;
+            output += processGenericConfig(ratioObj, indentLevel + 2);
+            output += `\n${indent}}`;
+            continue;
+        }
+        if (key === 'BypassChain' && value && typeof value === 'object' && !Array.isArray(value)) {
+            const chainObj = Object.assign({}, value);
+            const chainId = chainObj.id;
+            delete chainObj.id;
+            output += `\n${indent}BypassChain${chainId ? `(${chainId})` : ''} {`;
+            output += processGenericConfig(chainObj, indentLevel + 2);
+            output += `\n${indent}}`;
+            continue;
+        }
+        if (key === 'CompactorConnection' && value && typeof value === 'object' && !Array.isArray(value)) {
+            const compObj = Object.assign({}, value);
+            const compId = compObj.id;
+            delete compObj.id;
+            output += `\n${indent}CompactorConnection${compId ? `(${compId})` : ''} {`;
+            output += processGenericConfig(compObj, indentLevel + 2);
+            output += `\n${indent}}`;
+            continue;
+        }
+        if ((key === 'EdtChannelsIn' || key === 'EdtChannelsOut') && value && typeof value === 'object' && !Array.isArray(value)) {
+            const chanObj = Object.assign({}, value);
+            const range = chanObj.range;
+            delete chanObj.range;
+            output += `\n${indent}${key}${range ? `(${range})` : ''} {`;
+            output += processGenericConfig(chanObj, indentLevel + 2);
+            output += `\n${indent}}`;
+            continue;
+        }
+        if (typeof value === 'object' && !Array.isArray(value)) {
+            output += `\n${indent}${key} {`;
+            output += processGenericConfig(value, indentLevel + 2);
+            output += `\n${indent}}`;
+        } else if (Array.isArray(value)) {
+            output += `\n${indent}${key} : [${value.map((v) => formatValue(v)).join(', ')}];`;
+        } else {
+            output += `\n${indent}${key} : ${formatValue(value)};`;
+        }
+    }
+    return output;
 }
 
 function convertLBISTYamlToDftspec(spec) {

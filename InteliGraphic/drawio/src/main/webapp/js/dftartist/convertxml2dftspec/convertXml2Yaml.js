@@ -177,8 +177,15 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
             }
 
             function getType(nodeId) {
-                const t = (getNodeAttr(nodeId).type || "").trim();
-                return t;
+                const at = getNodeAttr(nodeId);
+                const direct = String(at.type || "").trim();
+                if (direct) return direct;
+                const style = String(at.style || at.__cell_style || "");
+                if (style) {
+                    const m = style.match(/(?:^|;)dftsIP_type=([^;]+)/);
+                    if (m && m[1]) return String(m[1]).trim();
+                }
+                return "";
             }
 
             function getLabel(nodeId) {
@@ -801,7 +808,7 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
         }
 
         function parseAllOCC(ctx) {
-            const { objectsById, childrenByParent, edges, getPrettyLabel } = ctx;
+            const { objectsById, childrenByParent, edges, getPrettyLabel, getType } = ctx;
 
             function findSignal(objId, token) {
                 const tok = String(token || "").toLowerCase();
@@ -829,13 +836,14 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
 
             Object.keys(objectsById).forEach((oid) => {
                 const at = objectsById[oid];
-                const occType = (at.type || "").toLowerCase();
+                const occType = String((getType && getType(oid)) || at.type || "").toLowerCase();
+                const flatOccAttrs = collectPrefixedAttrs(at, ['occ_']);
 
                 // 检查是否是需要检查的 OCC 类型
-                if (occTypesToCheck.includes(occType)) {
+                if (occTypesToCheck.includes(occType) || Object.keys(flatOccAttrs).length) {
                     occObjectsToCheck.push({ oid, at });
 
-                    const currentValue = at.static_clock_control !== undefined ? at.static_clock_control : "undefined";
+                    const currentValue = at.occ_static_clock_control !== undefined ? at.occ_static_clock_control : (at.static_clock_control !== undefined ? at.static_clock_control : "undefined");
                     const objName = ctx.getPrettyLabel(oid) || oid;
 
                     if (!valueToObjectsMap[currentValue]) {
@@ -895,13 +903,14 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
             // 处理所有 OCC 对象，但只将需要检查的类型添加到输出
             Object.keys(objectsById).forEach((oid) => {
                 const at = objectsById[oid];
-                const occType = (at.type || "").toLowerCase();
-                if (!occType.includes("_occ")) return;
+                const occType = String((getType && getType(oid)) || at.type || "").toLowerCase();
+                const flatOccAttrs = collectPrefixedAttrs(at, ['occ_']);
+                if (!(occType.includes("occ") || Object.keys(flatOccAttrs).length)) return;
 
                 const name = ctx.getPrettyLabel(oid) || (at.label || occType).trim();
 
                 // 只将需要检查的OCC类型添加到主输出（排除 mini_occ）
-                if (occTypesToCheck.includes(occType)) {
+                if (occTypesToCheck.includes(occType) || Object.keys(flatOccAttrs).length) {
                     const { panels, id2title } = collectPanels(childrenByParent, oid);
                     const nested = buildHierarchyByEdges(panels, id2title, edges);
 
@@ -932,6 +941,10 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
                         }
                     });
 
+                    Object.keys(flatOccAttrs).forEach((k) => {
+                        occctrl[k] = flatOccAttrs[k];
+                    });
+
                     out[name] = occctrl;
                 }
             });
@@ -960,6 +973,11 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
                     const name = ctx.getPrettyLabel(oid) || (at.label || at.type).trim();
                     delete out[name];
                 });
+            }
+
+            if (!out.MGC_OCC_INS_SPEC && Object.keys(out).length) {
+                const firstName = Object.keys(out)[0];
+                if (firstName) out.MGC_OCC_INS_SPEC = out[firstName];
             }
 
             return out;
@@ -1085,13 +1103,24 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
 
         function isPlainObject(o) { return Object.prototype.toString.call(o) === "[object Object]"; }
 
+        function collectPrefixedAttrs(at, prefixes) {
+            const out = {};
+            const wanted = Array.isArray(prefixes) ? prefixes : [prefixes];
+            Object.keys(at || {}).forEach((k) => {
+                if (k === 'id' || k === 'label' || k === 'type') return;
+                if (k.indexOf('__cell_') === 0) return;
+                if (wanted.some((p) => String(k).indexOf(p) === 0)) out[k] = at[k];
+            });
+            return out;
+        }
+
         function parseEdtAndScanhost(ctx) {
             const { objectsById, childrenByParent, edges, getType, getLabel, getPrettyLabel } = ctx;
             const res = { EDT: {}, SCAN_HOST: {}, FIFO: {}, BFM: {}, BFD: {} };
 
             Object.keys(objectsById).forEach((oid) => {
                 const at = objectsById[oid];
-                const t = (at.type || "").toLowerCase();
+                const t = String((getType && getType(oid)) || at.type || "").toLowerCase();
 
                 // 识别不同类型的对象
                 let name, bucket;
@@ -1121,6 +1150,12 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
                 if (t === "edt" || t === "sh" || t === "scanhost") {
                     nested = postprocessTitlesChainGroups(nested);
                 }
+                if (t === "edt") {
+                    const flatAttrs = collectPrefixedAttrs(at, ['edt_']);
+                    if (Object.keys(flatAttrs).length) {
+                        nested = Object.assign({}, flatAttrs, nested || {});
+                    }
+                }
                 //else if (t === "fifo") {
                 //    nested = postprocessFifoConfig(nested, oid, ctx);
                 //} else if (t === "bfm" || t === "bfd") {
@@ -1145,12 +1180,12 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
         }
 
         function parseEdtAndScanhost1(ctx) {
-            const { objectsById, childrenByParent, edges } = ctx;
+            const { objectsById, childrenByParent, edges, getType } = ctx;
             const res = { EDT: {}, SCAN_HOST: {} };
 
             Object.keys(objectsById).forEach((oid) => {
                 const at = objectsById[oid];
-                const t = (at.type || "").toLowerCase();
+                const t = String((getType && getType(oid)) || at.type || "").toLowerCase();
                 if (["edt", "sh", "scanhost"].indexOf(t) < 0) return;
                 let name, bucket;
                 if (t === "edt") { name = (at.label || "EDT").toLowerCase(); bucket = res.EDT; }
@@ -2438,13 +2473,33 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
                 return out;
             }
 
-            function followBranchFromOutputEdge(startOutputPin, firstNode, maxSteps) {
+            function isSsnRenderableType(typeName) {
+                const t = String(typeName || '').toLowerCase();
+                return t === 'ssn_outputpipeline' || t === 'ssn_scanhost' || t === 'ssn_multiplexer' || t === 'ssn_receiver1xpipeline' || t === 'ssn_pipeline';
+            }
+
+            function followBranchFromOutputEdge(startOutputPin, firstNode, maxSteps, mainIpSet) {
                 const chain = [];
+                let reachedSlave = false;
+                let slaveIpId = '';
                 let cur = firstNode;
                 const visited = {};
+                const startIpId = pins[startOutputPin] ? pins[startOutputPin].ip_id : '';
                 visited[startOutputPin] = true;
                 visited[firstNode] = true;
-                if (String(pins[cur].role || '').indexOf('slave_') !== 0) chain.push(pins[cur].ip_id);
+                const firstPin = pins[cur];
+                const firstIpId = firstPin.ip_id;
+                if (String(firstPin.role || '').indexOf('slave_') === 0) {
+                    if (String(firstPin.ip_type || '').toLowerCase() === 'ssn_slave_interface') {
+                        reachedSlave = true;
+                        slaveIpId = firstIpId;
+                    }
+                    return { chain, reachedSlave, slaveIpId };
+                }
+                if ((mainIpSet && mainIpSet[firstIpId] && firstIpId !== startIpId) || !isSsnRenderableType(pins[cur].ip_type)) {
+                    return { chain, reachedSlave, slaveIpId };
+                }
+                chain.push(firstIpId);
                 let steps = 0;
                 while (steps < maxSteps) {
                     steps += 1;
@@ -2453,36 +2508,47 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
                     const nxt = nxts[0];
                     if (visited[nxt]) break;
                     visited[nxt] = true;
-                    if (String(pins[nxt].role || '').indexOf('slave_') === 0) break;
+                    if (String(pins[nxt].role || '').indexOf('slave_') === 0) {
+                        if (String(pins[nxt].ip_type || '').toLowerCase() === 'ssn_slave_interface') {
+                            reachedSlave = true;
+                            slaveIpId = pins[nxt].ip_id;
+                        }
+                        break;
+                    }
+                    if ((mainIpSet && mainIpSet[pins[nxt].ip_id] && pins[nxt].ip_id !== startIpId) || !isSsnRenderableType(pins[nxt].ip_type)) break;
                     const ipId = pins[nxt].ip_id;
                     if (!chain.length || chain[chain.length - 1] !== ipId) chain.push(ipId);
                     cur = nxt;
                 }
-                return chain;
+                return { chain, reachedSlave, slaveIpId };
             }
 
-            function buildSmuxSecondary(ipId) {
+            function buildSmuxSecondary(ipId, mainIpSet) {
                 const ip = ips[ipId];
                 if (!ip || String(ip.ip_type || '').toLowerCase() !== 'ssn_multiplexer') return null;
                 const secPin = findPinByKey(ipId, 'secondary_bus_data_in');
                 if (!secPin) return null;
                 const chain = chainIpIdsFromInputPinBackward(secPin.id, ['ssn_slave_interface'], 128);
-                if (!chain.length) return null;
+                const filtered = chain.filter((cid) => !(mainIpSet && mainIpSet[cid]));
+                if (!filtered.length) return null;
                 const out = {};
-                chain.forEach((cid) => { out[ips[cid].inst] = makeNode(cid); });
+                filtered.forEach((cid) => { out[ips[cid].inst] = makeNode(cid); });
                 return Object.keys(out).length ? out : null;
             }
 
             function buildExtraOutputPaths(ipId, mainPinPath) {
                 const used = {};
+                const mainIpSet = {};
+                pinsToIpPath(mainPinPath).forEach(([mid]) => { mainIpSet[mid] = true; });
                 for (let i = 0; i < mainPinPath.length - 1; i++) used[mainPinPath[i] + '::' + mainPinPath[i + 1]] = true;
                 const outputPins = Object.keys(pins).filter((pid) => pins[pid].ip_id === ipId && pins[pid].direction === 'output' && isDataPinType(pins[pid].pin_type));
                 const extraList = [];
                 outputPins.forEach((op) => {
                     (adj[op] || []).forEach((v) => {
                         if (used[op + '::' + v]) return;
-                        const branch = followBranchFromOutputEdge(op, v, 256);
-                        if (!branch.length) return;
+                        const branchRes = followBranchFromOutputEdge(op, v, 256, mainIpSet);
+                        if (!branchRes || !branchRes.reachedSlave || !branchRes.chain.length) return;
+                        const branch = branchRes.chain;
                         const branchObj = {};
                         branch.forEach((cid) => {
                             const inst = ips[cid].inst;
@@ -2496,9 +2562,11 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
 
             function buildMainOrder(ipPath, mainPinPath) {
                 const order = {};
+                const mainIpSet = {};
+                orderedUniqueReversedIpIds(ipPath).forEach((mid) => { mainIpSet[mid] = true; });
                 orderedUniqueReversedIpIds(ipPath).forEach((ipId) => {
                     const node = makeNode(ipId);
-                    const smuxSecondary = buildSmuxSecondary(ipId);
+                    const smuxSecondary = buildSmuxSecondary(ipId, mainIpSet);
                     if (smuxSecondary) node.smux_secondary = smuxSecondary;
                     const extra = buildExtraOutputPaths(ipId, mainPinPath);
                     if (extra) node.ExtraOutputPath = extra;

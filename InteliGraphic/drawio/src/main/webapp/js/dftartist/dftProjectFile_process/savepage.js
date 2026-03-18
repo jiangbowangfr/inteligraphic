@@ -260,12 +260,6 @@ window.DftSaveProjectIndividually = async function (editorUi, opts) {
     } else { alert('未识别的文档形态，已取消写入。'); return; }
 
     // 6) 写盘
-    console.log(debugPrefix, 'writing page xml', {
-        pageName: curPage,
-        targetAbs: targetAbs,
-        source: graphXml ? 'graphXml' : kind,
-        summary: summarizeXml(xmlToWrite)
-    });
     await requestSync({ action: 'writeFile', path: targetAbs, data: xmlToWrite, enc: 'utf-8' });
     ui.editor?.setStatus?.('Saved page: ' + curPage);
 

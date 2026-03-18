@@ -75,6 +75,20 @@
       host.querySelector &&
       host.querySelector('.phase2-project-host');
 
+    if (forceClear && ui && ui._phase2ProjectExplorer && ui._phase2ProjectExplorer.state) {
+      try {
+        var state = ui._phase2ProjectExplorer.state;
+        var body = ui._phase2ProjectExplorer.dom && ui._phase2ProjectExplorer.dom.body;
+        var activeTab = state.activeTab || 'sources';
+        state.scrollTopByTab = state.scrollTopByTab || {};
+        state.pendingRestoreByTab = state.pendingRestoreByTab || {};
+        if (body) {
+          state.scrollTopByTab[activeTab] = body.scrollTop || 0;
+          state.pendingRestoreByTab[activeTab] = body.scrollTop || 0;
+        }
+      } catch (captureErr) {}
+    }
+
     if (alreadyMounted && !forceClear) {
       try { global.DFTProjectExplorerPhase2.refresh(ui); } catch (e) {}
       return true;

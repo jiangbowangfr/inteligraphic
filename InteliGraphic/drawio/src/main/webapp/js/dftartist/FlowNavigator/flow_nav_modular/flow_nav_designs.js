@@ -76,22 +76,32 @@
       return await fn();
     } finally {
       try {
-        var graph = Shared.graphOf(ui);
-        var parent = Shared.getDefaultParent(ui);
-        var childCount = 0;
-        if (graph && parent && typeof graph.getModel === 'function') {
-          childCount = graph.getModel().getChildCount(parent);
-        }
-        if (global.console && typeof global.console.log === 'function') {
-          console.log('[FlowNavDesigns] save-before', {
-            pageName: pageName,
+        if (global.console && typeof global.console.debug === 'function') {
+          var graph = Shared.graphOf(ui);
+          var parent = Shared.getDefaultParent(ui);
+          var savedCells = [];
+          if (graph && parent && graph.getModel) {
+            var model = graph.getModel();
+            var count = model.getChildCount(parent);
+            for (var i = 0; i < count; i++) {
+              var cell = model.getChildAt(parent, i);
+              savedCells.push({
+                id: cell && cell.id ? cell.id : '',
+                value: cell && cell.value != null ? String(cell.value).slice(0, 80) : '',
+                style: cell && cell.style ? String(cell.style) : '',
+                geo: cell && cell.geometry ? {
+                  x: Number(cell.geometry.x || 0),
+                  y: Number(cell.geometry.y || 0),
+                  width: Number(cell.geometry.width || 0),
+                  height: Number(cell.geometry.height || 0)
+                } : null
+              });
+            }
+          }
+          global.console.debug('[FlowNavDesigns] before saveActivePage', {
             designName: design && design.name ? design.name : '',
-            activeCtx: ui && ui._activeProjectPageCtx ? {
-              name: ui._activeProjectPageCtx.name,
-              abs: ui._activeProjectPageCtx.abs || '',
-              designKey: ui._activeProjectPageCtx.designKey || ''
-            } : null,
-            childCount: childCount
+            pageName: pageName,
+            cells: savedCells
           });
         }
         if (typeof global.DFTPageSessionManager.saveActivePage === 'function') {
@@ -454,25 +464,54 @@
     return layer && type ? (layer + '_' + type) : (type || layer || '');
   }
 
-  function makeModuleShellStyle(style) {
+  function makeModuleShellStyle(style, opts) {
+    opts = opts || {};
+    var interactive = !!opts.interactive;
+    try {
+      if (global.console && typeof global.console.debug === 'function') {
+        global.console.debug('[FlowNavDesigns] makeModuleShellStyle', {
+          interactive: interactive,
+          before: String(style || '')
+        });
+      }
+    } catch (e) {}
     style = style || '';
     style = mxUtils.setStyle(style, 'fillColor', 'none');
     style = mxUtils.setStyle(style, 'opacity', '100');
     style = mxUtils.setStyle(style, 'strokeColor', '#111827');
     style = mxUtils.setStyle(style, 'strokeWidth', '2');
-    style = mxUtils.setStyle(style, 'movable', '0');
-    style = mxUtils.setStyle(style, 'resizable', '0');
+    style = mxUtils.setStyle(style, 'aspect', 'fixed');
+    style = mxUtils.setStyle(style, 'movable', interactive ? '1' : '0');
+    style = mxUtils.setStyle(style, 'resizable', interactive ? '1' : '0');
     style = mxUtils.setStyle(style, 'rotatable', '0');
     style = mxUtils.setStyle(style, 'connectable', '0');
     style = mxUtils.setStyle(style, 'dftsFlowNavGeneratedModule', '1');
+    try {
+      if (global.console && typeof global.console.debug === 'function') {
+        global.console.debug('[FlowNavDesigns] makeModuleShellStyle:after', {
+          interactive: interactive,
+          after: String(style || '')
+        });
+      }
+    } catch (e2) {}
     return style;
   }
 
-  function createFloorplanModuleCell(graph, moduleName, width, height, sourceModuleCell) {
+  function createFloorplanModuleCell(graph, moduleName, width, height, sourceModuleCell, opts) {
+    opts = opts || {};
+    try {
+      if (global.console && typeof global.console.debug === 'function') {
+        global.console.debug('[FlowNavDesigns] createFloorplanModuleCell', {
+          moduleName: moduleName,
+          interactive: !!opts.interactive,
+          hasSourceModuleCell: !!sourceModuleCell
+        });
+      }
+    } catch (e) {}
     if (sourceModuleCell && typeof sourceModuleCell.clone === 'function') {
       var cloned = sourceModuleCell.clone();
       resetCellTreeIds(cloned);
-      cloned.style = makeModuleShellStyle(cloned.style || '');
+      cloned.style = makeModuleShellStyle(cloned.style || '', opts);
       var srcGeo = sourceModuleCell.geometry || cloned.geometry || new mxGeometry(0, 0, width, height);
       cloned.geometry = new mxGeometry(0, 0, Number(srcGeo.width || width), Number(srcGeo.height || height));
       if (srcGeo.points && srcGeo.points.length) {
@@ -495,7 +534,7 @@
       instanceName: ''
     });
     cell.geometry = new mxGeometry(0, 0, width, height);
-    cell.style = makeModuleShellStyle(cell.style || '');
+    cell.style = makeModuleShellStyle(cell.style || '', opts);
     return cell;
   }
 
@@ -958,8 +997,8 @@
     style = mxUtils.setStyle(style, 'rounded', '0');
     style = mxUtils.setStyle(style, 'movable', '1');
     style = mxUtils.setStyle(style, 'resizable', '1');
-    style = mxUtils.setStyle(style, 'rotatable', '0');
     style = mxUtils.setStyle(style, 'aspect', 'fixed');
+    style = mxUtils.setStyle(style, 'rotatable', '0');
     style = mxUtils.setStyle(style, 'recursiveResize', '1');
     style = mxUtils.setStyle(style, 'connectable', '0');
     style = mxUtils.setStyle(style, 'flowModuleShell', '1');
@@ -1022,7 +1061,25 @@
 
     graph.getModel().beginUpdate();
     try {
-      var body = addCellAt(graph, parent, createFloorplanModuleCell(graph, moduleName, bodyRect.width, bodyRect.height, sourceModuleCell), bodyRect.x, bodyRect.y);
+      var body = addCellAt(graph, parent, createFloorplanModuleCell(graph, moduleName, bodyRect.width, bodyRect.height, sourceModuleCell, {
+        interactive: !includeInterfaces
+      }), bodyRect.x, bodyRect.y);
+      try {
+        if (global.console && typeof global.console.debug === 'function') {
+          global.console.debug('[FlowNavDesigns] materialize body', {
+            moduleName: moduleName,
+            pageName: ui && ui._activeProjectPageCtx ? ui._activeProjectPageCtx.name || '' : '',
+            includeInterfaces: includeInterfaces,
+            bodyStyle: body && body.style ? String(body.style) : '',
+            bodyGeo: body && body.geometry ? {
+              x: Number(body.geometry.x || 0),
+              y: Number(body.geometry.y || 0),
+              width: Number(body.geometry.width || 0),
+              height: Number(body.geometry.height || 0)
+            } : null
+          });
+        }
+      } catch (bodyLogErr) {}
       emitDesignLog('body-added', {
         moduleName: moduleName,
         pageName: ui && ui._activeProjectPageCtx ? ui._activeProjectPageCtx.name || '' : '',
@@ -1065,7 +1122,7 @@
         graph: currentGraphSummary(ui)
       });
       var shellChildren = [body].concat(addedInterfaces);
-      lockChildrenStyles(graph, shellChildren);
+      if (includeInterfaces && shellChildren.length > 1) lockChildrenStyles(graph, shellChildren);
       var shell = buildShellGroup(graph, moduleName, shellChildren);
       if (shell) fitShellToPage(graph, shell, metrics);
       emitDesignLog('shell-built', {

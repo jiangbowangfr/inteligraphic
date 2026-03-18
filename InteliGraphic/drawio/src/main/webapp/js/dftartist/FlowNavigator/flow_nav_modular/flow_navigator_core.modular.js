@@ -96,9 +96,11 @@
       ? { state: 'blocked', text: 'Open page first' }
       : !Shared.isFloorplanPageOpen(ui)
         ? { state: 'blocked', text: 'Open floorplan page first' }
-        : (analysis.interfacePlan.markers.length
-            ? { state: 'ready', text: analysis.interfacePlan.markers.length + ' planned marker(s)' }
-            : { state: 'warning', text: 'No interface plan found' });
+        : (analysis.interfaces.length
+            ? { state: 'success', text: analysis.interfaces.length + ' existing marker(s)' }
+            : (analysis.interfacePlan.markers.length
+                ? { state: 'ready', text: analysis.interfacePlan.markers.length + ' planned marker(s)' }
+                : { state: 'warning', text: 'No interface plan found' }));
     out.generateDesigns = !Shared.getActivePageReady(ui)
       ? { state: 'blocked', text: 'Open page first' }
       : !Shared.isFloorplanPageOpen(ui)
@@ -136,12 +138,16 @@
     return analysis;
   }
 
-  function previewInterfaceGeneration(ui) {
-    if (!Shared.getActivePageReady(ui)) throw new Error('Open a page before previewing interface generation.');
+  function runDeleteInterface(ui) {
+    if (!Shared.getActivePageReady(ui)) throw new Error('Open a page before deleting interfaces.');
+    if (!Shared.isFloorplanPageOpen(ui)) throw new Error('Open a floorplan page before deleting interfaces.');
     var analysis = Analysis.analyzeDataflow(ui);
-    Shared.logDock(ui, 'Preview: ' + analysis.interfacePlan.markers.length + ' marker(s), ' + analysis.interfacePlan.chains.length + ' chain(s).', analysis.interfacePlan.markers.length ? 'info' : 'warning');
-    Shared.setReports(ui, [{ title: 'Interface Preview', items: { markers: analysis.interfacePlan.markers.length, chains: analysis.interfacePlan.chains.length, modules: analysis.modules.length } }]);
-    return analysis;
+    var result = Markers.deleteInterfaceMarkers(ui, analysis);
+    Shared.ensureState(ui).lastInterfaceReport = result;
+    Shared.logDock(ui, 'Deleted ' + result.removed + ' floorplan interface marker(s).', result.removed ? 'success' : 'warning');
+    Shared.setReports(ui, [{ title: 'Delete Interface', items: { markersDeleted: result.removed, modules: analysis.modules.length } }]);
+    Shared.setJobs(ui, [{ name: 'delete_interface', status: result.removed ? 'success' : 'warning', detail: result.removed + ' marker(s)', progress: 100 }]);
+    return result;
   }
 
   function runGenerateInterface(ui) {
@@ -160,7 +166,50 @@
     Shared.logDock(ui, 'Generated ' + result.created.length + ' floorplan interface marker(s) from ' + result.plan.chains.length + ' chain(s).', result.created.length ? 'success' : 'warning');
     Shared.setReports(ui, [{ title: 'Generate Interface', items: { markersCreated: result.created.length, chains: result.plan.chains.length } }]);
     Shared.setJobs(ui, [{ name: 'generate_interface', status: 'success', detail: result.created.length + ' marker(s)', progress: 100 }]);
-    return result;
+    var st = Shared.ensureState(ui);
+    var exportChain = Promise.resolve(null);
+    var hasExporter = false;
+
+    if (global.DFTFloorplanModuleYaml && typeof global.DFTFloorplanModuleYaml.generateFromCurrentPage === 'function') {
+      hasExporter = true;
+      exportChain = exportChain.then(function () {
+        return global.DFTFloorplanModuleYaml.generateFromCurrentPage(ui, analysis);
+      }).then(function (yamlResult) {
+        st.lastFloorplanModuleYaml = yamlResult && yamlResult.text ? yamlResult.text : '';
+        st.lastFloorplanModuleYamlPath = yamlResult && yamlResult.target ? yamlResult.target : '';
+        if (yamlResult && yamlResult.target) {
+          Shared.logDock(ui, 'Saved floorplan module YAML: ' + yamlResult.target, 'success');
+          notifyFloorplanModuleYamlGenerated(ui, yamlResult.target);
+        }
+        return yamlResult;
+      });
+    }
+
+    if (global.DFTFloorplanInterfacePairYaml && typeof global.DFTFloorplanInterfacePairYaml.generateFromCurrentPage === 'function') {
+      hasExporter = true;
+      exportChain = exportChain.then(function () {
+        return global.DFTFloorplanInterfacePairYaml.generateFromCurrentPage(ui, analysis);
+      }).then(function (pairYamlResult) {
+        st.lastFloorplanInterfacePairYaml = pairYamlResult && pairYamlResult.text ? pairYamlResult.text : '';
+        st.lastFloorplanInterfacePairYamlPath = pairYamlResult && pairYamlResult.target ? pairYamlResult.target : '';
+        if (pairYamlResult && pairYamlResult.target) {
+          Shared.logDock(ui, 'Saved floorplan interface pair YAML: ' + pairYamlResult.target, 'success');
+          notifyFloorplanInterfacePairYamlGenerated(ui, pairYamlResult.target);
+        }
+        return pairYamlResult;
+      });
+    }
+
+    if (!hasExporter) {
+      return result;
+    }
+
+    return exportChain.then(function () {
+      try {
+        if (ui && typeof ui.refreshProjectExplorer === 'function') ui.refreshProjectExplorer();
+      } catch (e) {}
+      return result;
+    });
   }
 
   async function runGenerateDesigns(ui) {
@@ -324,6 +373,40 @@
     try { alert(msg + (targetAbs ? '\n' + targetAbs : '')); } catch (e3) {}
   }
 
+  function notifyFloorplanModuleYamlGenerated(ui, targetAbs) {
+    var msg = 'Floorplan module YAML generated successfully.';
+    try {
+      if (ui && typeof ui.showTemporaryMessage === 'function') {
+        ui.showTemporaryMessage('Floorplan YAML generated', 1800);
+        return;
+      }
+    } catch (e) {}
+    try {
+      if (typeof global.mxUtils !== 'undefined' && global.mxUtils && typeof global.mxUtils.alert === 'function') {
+        global.mxUtils.alert(msg + (targetAbs ? '\n' + targetAbs : ''));
+        return;
+      }
+    } catch (e2) {}
+    try { alert(msg + (targetAbs ? '\n' + targetAbs : '')); } catch (e3) {}
+  }
+
+  function notifyFloorplanInterfacePairYamlGenerated(ui, targetAbs) {
+    var msg = 'Floorplan interface pair YAML generated successfully.';
+    try {
+      if (ui && typeof ui.showTemporaryMessage === 'function') {
+        ui.showTemporaryMessage('Floorplan pair YAML generated', 1800);
+        return;
+      }
+    } catch (e) {}
+    try {
+      if (typeof global.mxUtils !== 'undefined' && global.mxUtils && typeof global.mxUtils.alert === 'function') {
+        global.mxUtils.alert(msg + (targetAbs ? '\n' + targetAbs : ''));
+        return;
+      }
+    } catch (e2) {}
+    try { alert(msg + (targetAbs ? '\n' + targetAbs : '')); } catch (e3) {}
+  }
+
   async function saveDftspecToCurrentDesign(ui, text) {
     if (typeof global.requestSync !== 'function') throw new Error('requestSync unavailable');
 
@@ -378,7 +461,7 @@
     var built = await buildDftspecUsingConverters(ui);
     var text = built.dftspec;
     Shared.ensureState(ui).lastDftspec = text;
-    if (showPreview !== false) Shared.showTextPreview('Generated DFTSPEC', text);
+    if (showPreview !== false) Shared.showDftspecPreview(ui, text);
     Shared.logDock(ui, saveAfterBuild ? 'Generated DFTSPEC.' : 'Generated DFTSPEC preview.', 'success');
     Shared.setReports(ui, [{ title: 'Generate DFTSPEC', items: { bytes: text.length, lines: text.split('\n').length, status: 'generated' } }]);
     Shared.setJobs(ui, [{ name: 'generate_dftspec', status: 'success', detail: 'Preview ready', progress: 100 }]);
@@ -713,8 +796,8 @@
       { key: 'dataflow', label: 'Dataflow Check', desc: 'Validate SSN loop, module coverage, and host uniqueness.', actions: [
         { label: 'Check', key: 'dataflow:check', primary: true }
       ] },
-      { key: 'generateInterface', label: 'Generate Interface', desc: 'Generate floorplan HI/HO/SI/SO interface markers after dataflow check passes.', actions: [
-        { label: 'Preview', key: 'ifgen:preview' },
+      { key: 'generateInterface', label: 'Generate Interface', desc: 'Generate floorplan HI/HO/SI/SO interface markers after dataflow check passes, or delete existing markers from the floorplan page.', actions: [
+        { label: 'Delete', key: 'ifgen:delete' },
         { label: 'Generate', key: 'ifgen:run', primary: true }
       ] },
       { key: 'generateDesigns', label: 'Generate Module Designs', desc: 'Create top-level designs and materialize real SSN interface IPs on each module page.', actions: [
@@ -858,7 +941,7 @@ async function execute(ui, cmd) {
     if (cmd === 'project:save') return runProjectManager(ui, 'save');
     if (cmd === 'floorplan:open') return ensureFloorplanPage(ui);
     if (cmd === 'dataflow:check') return checkDataflow(ui);
-    if (cmd === 'ifgen:preview') return previewInterfaceGeneration(ui);
+    if (cmd === 'ifgen:delete') return runDeleteInterface(ui);
     if (cmd === 'ifgen:run') return runGenerateInterface(ui);
     if (cmd === 'designs:run') return runGenerateDesigns(ui);
     if (cmd === 'dftspec:preview') return runPreviewDftspec(ui);

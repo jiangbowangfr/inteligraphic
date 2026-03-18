@@ -49,121 +49,174 @@ function _parseProjectYaml(text) {
     if (lines[0] && lines[0].startsWith('#yaml:')) lines.shift();
 
     let modelName = null, modelPath = '', designs = [];
-    const stack = []; // {type:'root'|'designs'|'sub_designs'|'design'|'pages'|'page_meta'|'page_meta_item', indent:number, obj?, list?, map?, meta?}
-
-    const isEmptyListLine = (s) => /\[\s*\]\s*$/.test(s);
     const normTabs = (s) => s.replace(/\t/g, '    ');
     const getIndent = (s) => (s.match(/^(\s*)/) || [, ''])[1].length;
+    const isEmptyListLine = (s) => /\[\s*\]\s*$/.test(s);
+    const isEmptyMapLine = (s) => /\{\s*\}\s*$/.test(s);
 
-    const popTo = (indent) => {
-        while (stack.length) {
-            const t = stack[stack.length - 1];
-            // 对“项上下文”（design / pages），缩进相等即应出栈；对容器（designs / sub_designs / root）保留
-            const mustPop = (indent <= t.indent) && !/^(root|designs|sub_designs)$/.test(t.type);
-            if (!mustPop) break;
-            stack.pop();
-        }
-        // 如果栈顶是 pages 且当前行和它同级/更浅，也要退出 pages 段
-        if (stack.length && stack[stack.length - 1].type === 'pages' &&
-            indent <= stack[stack.length - 1].indent) {
-            stack.pop();
-        }
-        if (stack.length && stack[stack.length - 1].type === 'page_meta' &&
-            indent <= stack[stack.length - 1].indent) {
-            stack.pop();
-        }
-        if (stack.length && stack[stack.length - 1].type === 'page_meta_item' &&
-            indent <= stack[stack.length - 1].indent) {
-            stack.pop();
-        }
-    };
+    const normalized = lines.map(normTabs);
+    let idx = 0;
 
-    for (let raw of lines) {
-        if (!raw || !raw.trim()) continue;
-        raw = normTabs(raw);
+    function nextMeaningful(start) {
+        for (let i = start; i < normalized.length; i++) {
+            if (normalized[i] && normalized[i].trim()) return i;
+        }
+        return normalized.length;
+    }
+
+    function parsePages(start, itemIndent) {
+        const pages = [];
+        let i = start;
+        while (i < normalized.length) {
+            const raw = normalized[i];
+            if (!raw || !raw.trim()) { i++; continue; }
+            const indent = getIndent(raw);
+            const s = raw.trim();
+            if (indent < itemIndent) break;
+            if (indent === itemIndent && s.startsWith('- ')) {
+                pages.push(_unq(s.slice(2).trim()));
+                i++;
+                continue;
+            }
+            break;
+        }
+        return { value: pages, next: i };
+    }
+
+    function parsePageMeta(start, pageIndent) {
+        const meta = {};
+        let i = start;
+        while (i < normalized.length) {
+            const raw = normalized[i];
+            if (!raw || !raw.trim()) { i++; continue; }
+            const indent = getIndent(raw);
+            const s = raw.trim();
+            if (indent < pageIndent) break;
+            if (indent !== pageIndent || !/:$/.test(s)) break;
+            const pageName = _unq(s.slice(0, -1).trim());
+            const pageMeta = {};
+            i++;
+            while (i < normalized.length) {
+                const raw2 = normalized[i];
+                if (!raw2 || !raw2.trim()) { i++; continue; }
+                const indent2 = getIndent(raw2);
+                const s2 = raw2.trim();
+                if (indent2 <= indent) break;
+                const fm = s2.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
+                if (fm) pageMeta[fm[1]] = _unq(fm[2].trim());
+                i++;
+            }
+            meta[pageName] = pageMeta;
+        }
+        return { value: meta, next: i };
+    }
+
+    function parseDesignList(start, itemIndent) {
+        const out = [];
+        let i = start;
+        while (i < normalized.length) {
+            i = nextMeaningful(i);
+            if (i >= normalized.length) break;
+            const raw = normalized[i];
+            const indent = getIndent(raw);
+            const s = raw.trim();
+            if (indent < itemIndent) break;
+            if (indent !== itemIndent || !s.startsWith('- name:')) break;
+
+            const design = { name: _unq(s.slice(7).trim()), env_file: '', pages: [], sub_designs: [], page_meta: {} };
+            i++;
+
+            while (i < normalized.length) {
+                i = nextMeaningful(i);
+                if (i >= normalized.length) break;
+                const raw2 = normalized[i];
+                const indent2 = getIndent(raw2);
+                const s2 = raw2.trim();
+                if (indent2 <= indent) break;
+                if (indent2 !== indent + 2) break;
+
+                if (s2.startsWith('env_file:')) {
+                    design.env_file = _unq(s2.slice(9).trim());
+                    i++;
+                    continue;
+                }
+                if (s2.startsWith('pages:')) {
+                    if (isEmptyListLine(s2)) {
+                        design.pages = [];
+                        i++;
+                    } else {
+                        const parsedPages = parsePages(i + 1, indent + 4);
+                        design.pages = parsedPages.value;
+                        i = parsedPages.next;
+                    }
+                    continue;
+                }
+                if (s2.startsWith('page_meta:')) {
+                    if (isEmptyMapLine(s2)) {
+                        design.page_meta = {};
+                        i++;
+                    } else {
+                        const parsedMeta = parsePageMeta(i + 1, indent + 4);
+                        design.page_meta = parsedMeta.value;
+                        i = parsedMeta.next;
+                    }
+                    continue;
+                }
+                if (s2.startsWith('sub_designs:')) {
+                    if (isEmptyListLine(s2)) {
+                        design.sub_designs = [];
+                        i++;
+                    } else {
+                        const parsedSubs = parseDesignList(i + 1, indent + 4);
+                        design.sub_designs = parsedSubs.value;
+                        i = parsedSubs.next;
+                    }
+                    continue;
+                }
+                i++;
+            }
+
+            out.push(design);
+        }
+        return { value: out, next: i };
+    }
+
+    while (idx < normalized.length) {
+        idx = nextMeaningful(idx);
+        if (idx >= normalized.length) break;
+        const raw = normalized[idx];
         const indent = getIndent(raw);
         const s = raw.trim();
 
-        popTo(indent);
-
-        // 根键： "<name>:"
         if (!modelName) {
             const m = s.match(/^(.+):\s*$/);
-            if (m) { modelName = _unq(m[1]); stack.push({ type: 'root', indent }); }
+            if (indent === 0 && m) modelName = _unq(m[1]);
+            idx++;
             continue;
         }
 
-        // path
-        if (s.startsWith('path:')) { modelPath = _unq(s.slice(5).trim()); continue; }
-
-        // 顶层 designs
-        if (s.startsWith('designs:')) {
-            designs = [];
-            if (!isEmptyListLine(s)) stack.push({ type: 'designs', indent, list: designs });
+        if (indent === 2 && s.startsWith('path:')) {
+            modelPath = _unq(s.slice(5).trim());
+            idx++;
             continue;
         }
 
-        // design 内的 sub_designs
-        if (s.startsWith('sub_designs:')) {
-            const owner = [...stack].reverse().find(x => x.type === 'design');
-            if (owner) {
-                owner.obj.sub_designs = [];
-                if (!isEmptyListLine(s)) stack.push({ type: 'sub_designs', indent, list: owner.obj.sub_designs });
+        if (indent === 2 && s.startsWith('designs:')) {
+            if (isEmptyListLine(s)) {
+                designs = [];
+                idx++;
+            } else {
+                const parsedDesigns = parseDesignList(idx + 1, 4);
+                designs = parsedDesigns.value;
+                idx = parsedDesigns.next;
             }
             continue;
         }
 
-        // 新设计项
-        if (s.startsWith('- name:')) {
-            const d = { name: _unq(s.slice(7).trim()), env_file: '', pages: [], sub_designs: [], page_meta: {} };
-            const ctx = stack[stack.length - 1];
-            if (!ctx || !ctx.list) throw new Error('YAML structure error near: ' + s);
-            ctx.list.push(d);
-            stack.push({ type: 'design', indent, obj: d });
-            continue;
-        }
-
-        // 设计项内字段
-        const top = stack[stack.length - 1];
-        if (top && top.type === 'design') {
-            if (s.startsWith('env_file:')) { top.obj.env_file = _unq(s.slice(9).trim()); continue; }
-            if (s.startsWith('pages:')) {
-                if (isEmptyListLine(s)) { top.obj.pages = []; }
-                else stack.push({ type: 'pages', indent, list: top.obj.pages });
-                continue;
-            }
-            if (s.startsWith('page_meta:')) {
-                top.obj.page_meta = {};
-                if (!/\{\s*\}\s*$/.test(s)) stack.push({ type: 'page_meta', indent, map: top.obj.page_meta });
-                continue;
-            }
-        }
-
-        // pages 列表项
-        if (top && top.type === 'pages' && s.startsWith('- ')) {
-            top.list.push(_unq(s.slice(2).trim()));
-            continue;
-        }
-        if (top && top.type === 'page_meta') {
-            const mm = raw.match(/^\s+(.+):\s*$/);
-            if (mm) {
-                const pageName = _unq(mm[1].trim());
-                top.map[pageName] = {};
-                stack.push({ type: 'page_meta_item', indent, meta: top.map[pageName] });
-                continue;
-            }
-        }
-        if (top && top.type === 'page_meta_item') {
-            const fm = s.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
-            if (fm) {
-                top.meta[fm[1]] = _unq(fm[2].trim());
-                continue;
-            }
-        }
-        // 其它未识别行可忽略（比如注释等）
+        idx++;
     }
 
-    return { name: modelName || 'project', path: modelPath || '', designs };
+    return { name: modelName || 'project', path: modelPath || '', designs: designs };
 }
 
 
@@ -201,6 +254,10 @@ function handleDftartProject(path, data) {
 
         (async () => {
             try {
+                if (window.DFTPageSessionManager && typeof window.DFTPageSessionManager.resetWorkspace === 'function') {
+                    try { window.DFTPageSessionManager.resetWorkspace(ui, 'Page-1'); } catch (_) { }
+                }
+
                 const model = (_parseProjectYaml(txt) || { name: 'project', path: '', designs: [] });
                 if (!Array.isArray(model.designs)) model.designs = [];
 

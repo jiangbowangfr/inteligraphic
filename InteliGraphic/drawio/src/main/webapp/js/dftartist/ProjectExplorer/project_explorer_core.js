@@ -467,6 +467,9 @@
       root.state = {
         activeTab: (ui._phase1 && ui._phase1.state && ui._phase1.state.projectTab) || 'sources',
         searchText: '',
+        scrollTopByTab: {},
+        pendingRestoreByTab: {},
+        renderedTab: '',
         expanded: {},
         selectedKey: '',
         menuBound: false
@@ -1096,6 +1099,9 @@
   }
 
   function clearProjectContext(ui) {
+    if (global.DFTPageSessionManager && typeof global.DFTPageSessionManager.resetWorkspace === 'function') {
+      try { global.DFTPageSessionManager.resetWorkspace(ui, 'Page-1'); } catch (e) {}
+    }
     ui.projectModel = { name: '', path: '', designs: [], __placeholder: true };
     ui._projectRootPath = '';
     ui._projectYamlDir = '';
@@ -1992,11 +1998,6 @@
   }
 
   async function openEnv(ui, designRef) {
-    console.log('[env-open:project-explorer] click', {
-      designName: designRef && designRef.name,
-      envFile: designRef && designRef.env_file,
-      dirRel: designRef && designRef._dirRel
-    });
     if (!ui || !designRef) return;
     try {
       if (global.DFTPageSessionManager && typeof global.DFTPageSessionManager.captureActiveViewState === 'function') {
@@ -2004,24 +2005,23 @@
       }
     } catch (captureErr) {}
     if (isFloorplanDesign(designRef) || isIpconfigDesign(designRef)) {
-      console.log('[env-open:project-explorer] branch=ipconfig-dialog');
       showTextDialog(ui, 'ip_config', JSON.stringify({ file: ensureModel(ui).ip_config_file || 'ip_config.json' }, null, 2));
       return;
     }
     var rootPath = getProjectStorageRoot(ui) || '';
     var designBase = getDesignAbsDir(ui, designRef);
-    var abs = pathWithinRoot(rootPath, designBase) ? joinPath(rootPath, designRef.env_file) : joinPath(designBase, 'env.json');
-    console.log('[env-open:project-explorer] resolved', {
-      openWorkspaceEmbedTab: typeof global.dftArtistOpenWorkspaceEmbedTab === 'function',
-      buildHtml: typeof global.dftArtistBuildLoadEmbedHtml === 'function',
-      abs: abs,
-      designBase: designBase
-    });
+    var envRef = text(designRef && designRef.env_file || '').trim();
+    var abs = '';
+    if (envRef) {
+      abs = pathWithinRoot(rootPath, designBase) ? joinPath(rootPath, envRef) : joinPath(designBase, envRef);
+    } else {
+      abs = joinPath(designBase, 'env.json');
+    }
+    if (!/\.[A-Za-z0-9]+$/.test(abs)) abs = joinPath(abs, 'env.json');
     if (typeof global.dftArtistOpenWorkspaceEmbedTab === 'function' && typeof global.dftArtistMountLoadPanel === 'function') {
       var tabKey = 'env:' + normalizePath(abs || designRef.env_file || designRef.name || 'design');
       var tabLabel = 'Flow: ' + (designRef.name || 'design');
       var frameTitle = tabLabel;
-      console.log('[env-open:project-explorer] branch=workspace-dom-tab', { tabKey: tabKey, frameTitle: frameTitle });
       try {
         ui._activeEnvCtx = {
           designKey: getDesignKey(designRef),
@@ -2047,7 +2047,6 @@
       if (typeof ui.refreshProjectExplorer === 'function') ui.refreshProjectExplorer();
       return;
     }
-    console.warn('[env-open:project-explorer] branch=fallback-text-dialog');
     var content = 'env_file: ' + (designRef.env_file || 'env.json');
     try {
       var txt = await readTextFile(abs);
@@ -2170,6 +2169,7 @@
   function createNode(ui, config) {
     var state = getState(ui);
     var row = createEl('div', 'phase2-node');
+    if (config.key) row.setAttribute('data-node-key', config.key);
     row.style.paddingLeft = (6 + (config.depth || 0) * 16) + 'px';
     if (config.key && (state.selectedKey === config.key || (ui && ui._activeWorkspaceKey === config.key))) row.className += ' selected';
     if (config.activePage) row.className += ' active-page';
@@ -2516,7 +2516,13 @@
     var root = ui._phase2ProjectExplorer;
     if (!root || !root.dom) return;
     var state = getState(ui);
+    var previousTab = state.renderedTab || state.activeTab;
+    state.scrollTopByTab = state.scrollTopByTab || {};
+    state.pendingRestoreByTab = state.pendingRestoreByTab || {};
+    var hasPendingSaveSkip = Object.prototype.hasOwnProperty.call(state.pendingRestoreByTab, previousTab);
+    var hasPendingRestore = Object.prototype.hasOwnProperty.call(state.pendingRestoreByTab, state.activeTab);
     if (ui._phase1 && ui._phase1.state) ui._phase1.state.projectTab = state.activeTab;
+    if (!hasPendingSaveSkip && root.dom.body) state.scrollTopByTab[previousTab] = root.dom.body.scrollTop || 0;
     var tabs = root.dom.tabBar.querySelectorAll('.phase2-project-tab');
     for (var i = 0; i < tabs.length; i++) tabs[i].className = tabs[i].getAttribute('data-key') === state.activeTab ? 'phase2-project-tab active' : 'phase2-project-tab';
     root.dom.search.value = state.searchText || '';
@@ -2527,6 +2533,37 @@
     else if (state.activeTab === 'hierarchy') renderHierarchy(ui, panel);
     else if (state.activeTab === 'runs') renderRuns(ui, panel);
     else renderFiles(ui, panel);
+    state.renderedTab = state.activeTab;
+    var restoreTop = hasPendingRestore
+      ? Number(state.pendingRestoreByTab[state.activeTab] || 0)
+      : Number(state.scrollTopByTab[state.activeTab] || 0);
+    if (hasPendingRestore) {
+      state.scrollTopByTab[state.activeTab] = restoreTop;
+      delete state.pendingRestoreByTab[state.activeTab];
+    }
+    var restoreKey = state.selectedKey || '';
+    function applyScrollRestore() {
+      root.dom.body.scrollTop = restoreTop;
+      var selectedNode = null;
+      if (!restoreTop && restoreKey) {
+        var candidates = root.dom.body.querySelectorAll('[data-node-key]');
+        for (var c = 0; c < candidates.length; c++) {
+          if (candidates[c].getAttribute('data-node-key') === restoreKey) {
+            selectedNode = candidates[c];
+            break;
+          }
+        }
+        if (selectedNode && typeof selectedNode.scrollIntoView === 'function') {
+          selectedNode.scrollIntoView({ block: 'nearest' });
+        }
+      }
+    }
+    applyScrollRestore();
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(function () { applyScrollRestore(); });
+    } else {
+      setTimeout(function () { applyScrollRestore(); }, 0);
+    }
   }
 
   async function openNewEntryDialog(ui, opts) {
@@ -2896,6 +2933,11 @@
     host.appendChild(toolbar);
 
     var body = createEl('div', 'phase2-project-body');
+    body.onscroll = function () {
+      var state = getState(ui);
+      state.scrollTopByTab = state.scrollTopByTab || {};
+      state.scrollTopByTab[state.activeTab] = body.scrollTop || 0;
+    };
     host.appendChild(body);
     root.dom = { titlebar: titlebar, tabBar: tabBar, toolbar: toolbar, search: search, body: body };
   }

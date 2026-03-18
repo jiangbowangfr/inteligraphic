@@ -324,10 +324,14 @@ function readInitialSpecialValues(
         ? parseStyle(getRawStyle(graph, cell), field.attr) ??
           getCellAttr(graph, cell, field.attr, field.defaultValue)
         : getCellAttr(graph, cell, field.attr, field.defaultValue);
+    const normalizedRaw =
+      field.attr.startsWith("dftsFloorplan_") && raw === ""
+        ? field.defaultValue
+        : raw;
     out[field.attr] =
       field.kind === "number"
-        ? toNumber(raw)
-        : (raw ?? field.defaultValue ?? "");
+        ? toNumber(normalizedRaw)
+        : (normalizedRaw ?? field.defaultValue ?? "");
   });
   return out;
 }

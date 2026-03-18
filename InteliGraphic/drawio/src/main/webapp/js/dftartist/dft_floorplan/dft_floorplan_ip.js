@@ -609,7 +609,10 @@
             'dftsFloorplan_moduleName=' + label,
             'dftsFloorplan_instanceName=' + instanceName,
             'dftsFloorplan_instanceAuto=' + (instanceName ? '1' : '0'),
-            'dftsFloorplan_designLevel='
+            'dftsFloorplan_designLevel=physical_block',
+            'dftsFloorplan_logicOnly=off',
+            'dftsFloorplan_designFilelist=',
+            'dftsFloorplan_designType=hierarchical'
         ].join(';') + ';';
         if (def.extraStyle) style += String(def.extraStyle);
 

@@ -25,6 +25,8 @@
       node.setAttribute('label', meta.label || '');
       node.setAttribute('role', meta.role || '');
       node.setAttribute('module', meta.moduleName || '');
+      node.setAttribute('moduleInstanceName', meta.moduleInstanceName || '');
+      node.setAttribute('name', meta.name || '');
       node.setAttribute('pairId', meta.pairId || '');
       node.setAttribute('chainId', meta.chainId || '');
       node.setAttribute('interfaceType', meta.interfaceType || '');
@@ -144,6 +146,8 @@
         return {
           label: cell.value.getAttribute('label') || '', role: cell.value.getAttribute('role') || '',
           moduleName: cell.value.getAttribute('module') || '', pairId: cell.value.getAttribute('pairId') || '',
+          moduleInstanceName: cell.value.getAttribute('moduleInstanceName') || '',
+          name: cell.value.getAttribute('name') || '',
           chainId: cell.value.getAttribute('chainId') || '', side: cell.value.getAttribute('side') || '',
           interfaceType: cell.value.getAttribute('interfaceType') || '', layerName: cell.value.getAttribute('layerName') || '',
           offset: Number(cell.value.getAttribute('offset') || 0), orientation: cell.value.getAttribute('orientation') || '',
@@ -200,5 +204,19 @@
       graph.getModel().endUpdate();
     }
     return { created: created, plan: plan };
+  };
+
+  Markers.deleteInterfaceMarkers = function deleteInterfaceMarkers(ui, analysis) {
+    analysis = analysis || Analysis.analyzeDataflow(ui);
+    var graph = Shared.graphOf(ui);
+    if (!graph) throw new Error('Graph is not ready.');
+    var removed = 0;
+    graph.getModel().beginUpdate();
+    try {
+      removed = removeExistingMarkers(ui, analysis);
+    } finally {
+      graph.getModel().endUpdate();
+    }
+    return { removed: removed, analysis: analysis };
   };
 })(typeof globalThis !== 'undefined' ? globalThis : (typeof window !== 'undefined' ? window : this));
