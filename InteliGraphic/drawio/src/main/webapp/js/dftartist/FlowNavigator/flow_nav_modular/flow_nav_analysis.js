@@ -561,9 +561,16 @@
     return String(interfaceType || '') + ' [' + String(layerName || '').toUpperCase() + ']';
   }
 
+  function readModuleInstanceName(moduleCell, fallback) {
+    var style = moduleCell && moduleCell.style ? String(moduleCell.style) : '';
+    var value = Shared.trim(Shared.styleValue(style, 'dftsFloorplan_instanceName', ''));
+    return value || Shared.trim(fallback || '');
+  }
+
   function createInterfaceMarker(evt, interfaceType, chainId, chainIndex, markerIndex, line, sourceModuleName) {
     var prefix = layerSignalPrefix(line.layerName);
     var sourceName = line.loopMatch && line.loopMatch.start ? line.loopMatch.start.bodyName : '';
+    var moduleInstanceName = readModuleInstanceName(evt.moduleCell, evt.moduleName);
     return {
       id: 'marker_' + chainId + '_' + markerIndex,
       chainId: chainId,
@@ -572,6 +579,7 @@
       interfaceType: interfaceType,
       layerName: line.layerName,
       moduleName: evt.moduleName,
+      moduleInstanceName: moduleInstanceName || evt.moduleName,
       moduleCell: evt.moduleCell,
       moduleId: evt.moduleCell && evt.moduleCell.id,
       point: evt.point,
@@ -592,7 +600,9 @@
       busWidthOut: null,
       sourceModule: sourceModuleName,
       peerMarkerId: '',
-      pairId: ''
+      pairId: '',
+      name: '',
+      interfaceIndex: 0
     };
   }
 
@@ -639,6 +649,80 @@
         items[j].sideStackCount = items.length;
       }
     });
+  }
+
+  function assignInterfaceNames(markers) {
+    var grouped = {};
+    var i;
+    for (i = 0; i < markers.length; i++) {
+      var marker = markers[i];
+      var key = [marker.moduleId || marker.moduleName || '', marker.side || ''].join('|');
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(marker);
+    }
+    Object.keys(grouped).forEach(function (key) {
+      var items = grouped[key];
+      items.sort(function (a, b) {
+        return Number(a.offset || 0) - Number(b.offset || 0) || Number(a.order || 0) - Number(b.order || 0);
+      });
+      for (var j = 0; j < items.length; j++) {
+        var marker = items[j];
+        marker.interfaceIndex = j + 1;
+        marker.name = String(marker.moduleInstanceName || marker.moduleName || 'module') +
+          '_' + String(marker.layerName || 'layer').toLowerCase() +
+          '_' + String(marker.side || 'side') +
+          '_' + String(j + 1);
+      }
+    });
+  }
+
+  function buildPairsForMarkers(chainId, layerName, markers) {
+    var out = [];
+    var ordered = markers.slice().sort(function (a, b) {
+      return Number(a.order || 0) - Number(b.order || 0);
+    });
+    var pairIndex = 1;
+    for (var i = 0; i < ordered.length - 1; i++) {
+      var from = ordered[i];
+      var to = ordered[i + 1];
+      if (!from || !to) continue;
+      if (String(from.moduleId || '') === String(to.moduleId || '')) continue;
+      if (from.direction !== 'exit' || to.direction !== 'entry') continue;
+      var pairId = chainId + '_pair_' + pairIndex;
+      pairIndex++;
+      from.pairId = pairId;
+      to.pairId = pairId;
+      from.peerMarkerId = to.id;
+      to.peerMarkerId = from.id;
+      from.peerModule = to.moduleName || '';
+      to.peerModule = from.moduleName || '';
+      from.peerRole = to.role || '';
+      to.peerRole = from.role || '';
+      out.push({
+        id: pairId,
+        chainId: chainId,
+        layerName: layerName || '',
+        fromMarkerId: from.id,
+        toMarkerId: to.id,
+        from: {
+          moduleName: from.moduleName || '',
+          moduleInstanceName: from.moduleInstanceName || '',
+          interfaceName: from.name || '',
+          interfaceType: from.interfaceType || '',
+          side: from.side || '',
+          sideIndex: from.interfaceIndex || 0
+        },
+        to: {
+          moduleName: to.moduleName || '',
+          moduleInstanceName: to.moduleInstanceName || '',
+          interfaceName: to.name || '',
+          interfaceType: to.interfaceType || '',
+          side: to.side || '',
+          sideIndex: to.interfaceIndex || 0
+        }
+      });
+    }
+    return out;
   }
 
   function classifyModuleInterfaces(moduleEvents, line, chainId, chainIndex, sourceModuleName, markerCounterRef, issues, opt) {
@@ -745,6 +829,8 @@
       bundles.push(buildMarkerBundle(markers[i], chainIndex + '_' + i));
     }
     assignSideStackMetadata(markers);
+    assignInterfaceNames(markers);
+    pairs = buildPairsForMarkers(chainId, line.layerName, markers);
     if (!markers.length && !issues.length) {
       issues.push({ level: 'error', text: 'No interface marker was generated for ' + String((line.layerName || 'flow').toUpperCase()) + ' chain #' + (chainIndex + 1) + '.', ruleKey: 'interface-empty-chain' });
     }

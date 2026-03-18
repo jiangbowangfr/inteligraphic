@@ -166,17 +166,45 @@
     Shared.logDock(ui, 'Generated ' + result.created.length + ' floorplan interface marker(s) from ' + result.plan.chains.length + ' chain(s).', result.created.length ? 'success' : 'warning');
     Shared.setReports(ui, [{ title: 'Generate Interface', items: { markersCreated: result.created.length, chains: result.plan.chains.length } }]);
     Shared.setJobs(ui, [{ name: 'generate_interface', status: 'success', detail: result.created.length + ' marker(s)', progress: 100 }]);
-    if (!(global.DFTFloorplanModuleYaml && typeof global.DFTFloorplanModuleYaml.generateFromCurrentPage === 'function')) {
+    var st = Shared.ensureState(ui);
+    var exportChain = Promise.resolve(null);
+    var hasExporter = false;
+
+    if (global.DFTFloorplanModuleYaml && typeof global.DFTFloorplanModuleYaml.generateFromCurrentPage === 'function') {
+      hasExporter = true;
+      exportChain = exportChain.then(function () {
+        return global.DFTFloorplanModuleYaml.generateFromCurrentPage(ui, analysis);
+      }).then(function (yamlResult) {
+        st.lastFloorplanModuleYaml = yamlResult && yamlResult.text ? yamlResult.text : '';
+        st.lastFloorplanModuleYamlPath = yamlResult && yamlResult.target ? yamlResult.target : '';
+        if (yamlResult && yamlResult.target) {
+          Shared.logDock(ui, 'Saved floorplan module YAML: ' + yamlResult.target, 'success');
+          notifyFloorplanModuleYamlGenerated(ui, yamlResult.target);
+        }
+        return yamlResult;
+      });
+    }
+
+    if (global.DFTFloorplanInterfacePairYaml && typeof global.DFTFloorplanInterfacePairYaml.generateFromCurrentPage === 'function') {
+      hasExporter = true;
+      exportChain = exportChain.then(function () {
+        return global.DFTFloorplanInterfacePairYaml.generateFromCurrentPage(ui, analysis);
+      }).then(function (pairYamlResult) {
+        st.lastFloorplanInterfacePairYaml = pairYamlResult && pairYamlResult.text ? pairYamlResult.text : '';
+        st.lastFloorplanInterfacePairYamlPath = pairYamlResult && pairYamlResult.target ? pairYamlResult.target : '';
+        if (pairYamlResult && pairYamlResult.target) {
+          Shared.logDock(ui, 'Saved floorplan interface pair YAML: ' + pairYamlResult.target, 'success');
+          notifyFloorplanInterfacePairYamlGenerated(ui, pairYamlResult.target);
+        }
+        return pairYamlResult;
+      });
+    }
+
+    if (!hasExporter) {
       return result;
     }
-    return Promise.resolve(global.DFTFloorplanModuleYaml.generateFromCurrentPage(ui)).then(function (yamlResult) {
-      var st = Shared.ensureState(ui);
-      st.lastFloorplanModuleYaml = yamlResult && yamlResult.text ? yamlResult.text : '';
-      st.lastFloorplanModuleYamlPath = yamlResult && yamlResult.target ? yamlResult.target : '';
-      if (yamlResult && yamlResult.target) {
-        Shared.logDock(ui, 'Saved floorplan module YAML: ' + yamlResult.target, 'success');
-        notifyFloorplanModuleYamlGenerated(ui, yamlResult.target);
-      }
+
+    return exportChain.then(function () {
       try {
         if (ui && typeof ui.refreshProjectExplorer === 'function') ui.refreshProjectExplorer();
       } catch (e) {}
@@ -350,6 +378,23 @@
     try {
       if (ui && typeof ui.showTemporaryMessage === 'function') {
         ui.showTemporaryMessage('Floorplan YAML generated', 1800);
+        return;
+      }
+    } catch (e) {}
+    try {
+      if (typeof global.mxUtils !== 'undefined' && global.mxUtils && typeof global.mxUtils.alert === 'function') {
+        global.mxUtils.alert(msg + (targetAbs ? '\n' + targetAbs : ''));
+        return;
+      }
+    } catch (e2) {}
+    try { alert(msg + (targetAbs ? '\n' + targetAbs : '')); } catch (e3) {}
+  }
+
+  function notifyFloorplanInterfacePairYamlGenerated(ui, targetAbs) {
+    var msg = 'Floorplan interface pair YAML generated successfully.';
+    try {
+      if (ui && typeof ui.showTemporaryMessage === 'function') {
+        ui.showTemporaryMessage('Floorplan pair YAML generated', 1800);
         return;
       }
     } catch (e) {}
