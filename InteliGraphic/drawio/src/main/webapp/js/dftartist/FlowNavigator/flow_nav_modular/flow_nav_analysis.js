@@ -733,7 +733,7 @@
     var forceSlaveOnly = !!opt.forceSlaveOnly;
     var i;
     for (i = 0; i < moduleEvents.length; i++) {
-      if (forceSlaveOnly) moduleEvents[i].direction = moduleEvents[i].role === 'slave' ? 'entry' : 'exit';
+      if (forceSlaveOnly) moduleEvents[i].direction = moduleEvents[i].role === 'host' ? 'entry' : 'exit';
       else moduleEvents[i].direction = moduleEvents[i].role === 'host' ? 'entry' : 'exit';
       if (moduleEvents[i].direction === 'entry') entryCount++;
       else exitCount++;
@@ -746,7 +746,12 @@
       issues.push({ level: 'error', text: 'Module "' + moduleEvents[0].moduleName + '" on layer "' + line.layerName + '" has an odd or unbalanced entry/exit count. Branch cases are not supported yet.', ruleKey: 'interface-branch-unsupported', moduleId: moduleEvents[0].moduleCell && moduleEvents[0].moduleCell.id });
       return markers;
     }
-    if (moduleEvents[0].direction !== 'entry' || moduleEvents[moduleEvents.length - 1].direction !== 'exit') {
+    if (forceSlaveOnly) {
+      if (moduleEvents[0].direction !== 'exit' || moduleEvents[moduleEvents.length - 1].direction !== 'entry') {
+        issues.push({ level: 'error', text: 'Datasource module "' + moduleEvents[0].moduleName + '" on layer "' + line.layerName + '" does not begin with an exit and end with an entry.', ruleKey: 'interface-direction-order-source', moduleId: moduleEvents[0].moduleCell && moduleEvents[0].moduleCell.id });
+        return markers;
+      }
+    } else if (moduleEvents[0].direction !== 'entry' || moduleEvents[moduleEvents.length - 1].direction !== 'exit') {
       issues.push({ level: 'error', text: 'Module "' + moduleEvents[0].moduleName + '" on layer "' + line.layerName + '" does not begin with an entry and end with an exit.', ruleKey: 'interface-direction-order', moduleId: moduleEvents[0].moduleCell && moduleEvents[0].moduleCell.id });
       return markers;
     }
