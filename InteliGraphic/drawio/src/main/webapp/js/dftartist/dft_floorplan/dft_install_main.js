@@ -3,6 +3,242 @@
 // 安装入口
 // =======================
 (function () {
+    function getPageDebugName(page) {
+        if (!page) return "(null)";
+        var name = "";
+        try {
+            name = typeof page.getName === "function" ? page.getName() : (page.name || "");
+        } catch (e) { }
+        var id = "";
+        try {
+            id = typeof page.getId === "function" ? page.getId() : (page.id || "");
+        } catch (e2) { }
+        return (name || "(unnamed)") + (id ? (" [" + id + "]") : "");
+    }
+
+    function summarizeUndoState(state) {
+        var history = (state && state.history) || [];
+        var edits = [];
+        for (var i = 0; i < history.length; i++) {
+            var edit = history[i];
+            var changes = edit && edit.changes ? edit.changes : [];
+            edits.push(changes.length);
+        }
+        return {
+            size: history.length,
+            indexOfNextAdd: state && typeof state.indexOfNextAdd === "number" ? state.indexOfNextAdd : 0,
+            changeCounts: edits
+        };
+    }
+
+    function logUndoDebug(stage, page, state, extra) {
+        var payload = {
+            stage: stage,
+            page: getPageDebugName(page),
+            summary: summarizeUndoState(state)
+        };
+        if (extra) {
+            for (var key in extra) {
+                if (Object.prototype.hasOwnProperty.call(extra, key)) payload[key] = extra[key];
+            }
+        }
+        console.log("[dft-undo-debug]", payload);
+    }
+
+    function summarizeEdit(edit) {
+        var changes = edit && edit.changes ? edit.changes : [];
+        var parts = [];
+        for (var i = 0; i < changes.length; i++) {
+            var change = changes[i];
+            var type = (change && change.constructor && change.constructor.name) || typeof change;
+            var cell = change && change.cell ? change.cell : null;
+            parts.push({
+                index: i,
+                type: type,
+                cellId: cell && cell.id ? cell.id : null,
+                cellValue: cell && cell.value != null ? String(cell.value) : null
+            });
+        }
+        return parts;
+    }
+
+    function isPageSwitchChange(change) {
+        if (!change) return false;
+        var ctorName = (change.constructor && change.constructor.name) || "";
+        return ctorName === "SelectPage";
+    }
+
+    function isPageSwitchEdit(edit) {
+        if (!edit) return false;
+        if (edit.ignoreEdit === true) return true;
+        var changes = edit.changes || [];
+        if (!changes.length) return false;
+        for (var i = 0; i < changes.length; i++) {
+            if (!isPageSwitchChange(changes[i])) return false;
+        }
+        return true;
+    }
+
+    function sanitizeUndoState(state) {
+        var next = state || { history: [], indexOfNextAdd: 0 };
+        var history = next.history || [];
+        var filtered = [];
+        var removedBeforeCursor = 0;
+        for (var i = 0; i < history.length; i++) {
+            if (isPageSwitchEdit(history[i])) {
+                if (i < (next.indexOfNextAdd || 0)) removedBeforeCursor++;
+                continue;
+            }
+            filtered.push(history[i]);
+        }
+        var nextIndex = (typeof next.indexOfNextAdd === "number" ? next.indexOfNextAdd : history.length) - removedBeforeCursor;
+        if (nextIndex < 0) nextIndex = 0;
+        if (nextIndex > filtered.length) nextIndex = filtered.length;
+        return {
+            history: filtered,
+            indexOfNextAdd: nextIndex
+        };
+    }
+
+    function cloneUndoState(undoManager) {
+        if (!undoManager) return { history: [], indexOfNextAdd: 0 };
+        return sanitizeUndoState({
+            history: (undoManager.history || []).slice(),
+            indexOfNextAdd: typeof undoManager.indexOfNextAdd === "number"
+                ? undoManager.indexOfNextAdd
+                : ((undoManager.history || []).length)
+        });
+    }
+
+    function applyUndoState(undoManager, state) {
+        if (!undoManager) return;
+        var next = sanitizeUndoState(state || { history: [], indexOfNextAdd: 0 });
+        undoManager.history = (next.history || []).slice();
+        undoManager.indexOfNextAdd = typeof next.indexOfNextAdd === "number"
+            ? next.indexOfNextAdd
+            : undoManager.history.length;
+        if (typeof mxEventObject !== "undefined" && typeof mxEvent !== "undefined") {
+            undoManager.fireEvent(new mxEventObject(mxEvent.CLEAR));
+        }
+    }
+
+    function installPerPageUndoIsolation(ui) {
+        if (!ui || ui.__dftPerPageUndoInstalled || !ui.editor || !ui.editor.undoManager || typeof ui.selectPage !== "function") {
+            return;
+        }
+
+        ui.__dftPerPageUndoInstalled = true;
+
+        var undoManager = ui.editor.undoManager;
+        if (ui.currentPage && !ui.currentPage.__dftUndoState) {
+            ui.currentPage.__dftUndoState = cloneUndoState(undoManager);
+            logUndoDebug("bootstrap-current-page", ui.currentPage, ui.currentPage.__dftUndoState);
+        }
+
+        var oldSelectPage = ui.selectPage;
+        ui.selectPage = function (page, noUndo, viewState) {
+            var prevPage = this.currentPage;
+
+            if (!page || page === prevPage) {
+                return oldSelectPage.apply(this, arguments);
+            }
+
+            if (prevPage) {
+                prevPage.__dftUndoState = cloneUndoState(this.editor.undoManager);
+                logUndoDebug("save-before-select", prevPage, prevPage.__dftUndoState, {
+                    targetPage: getPageDebugName(page),
+                    requestedNoUndo: !!noUndo
+                });
+            }
+
+            // Page switching should not be part of the undo history.
+            var result = oldSelectPage.call(this, page, true, viewState);
+
+            if (this.currentPage && !this.currentPage.__dftUndoState) {
+                this.currentPage.__dftUndoState = { history: [], indexOfNextAdd: 0 };
+                logUndoDebug("init-empty-target-state", this.currentPage, this.currentPage.__dftUndoState, {
+                    previousPage: getPageDebugName(prevPage)
+                });
+            }
+
+            applyUndoState(this.editor.undoManager, this.currentPage && this.currentPage.__dftUndoState);
+            logUndoDebug("restore-after-select", this.currentPage, this.currentPage && this.currentPage.__dftUndoState, {
+                previousPage: getPageDebugName(prevPage)
+            });
+            return result;
+        };
+
+        if (!ui.__dftUndoDebugWrapped) {
+            ui.__dftUndoDebugWrapped = true;
+
+            var oldUndoableEditHappened = undoManager.undoableEditHappened;
+            if (typeof oldUndoableEditHappened === "function") {
+                undoManager.undoableEditHappened = function (edit) {
+                    if (isPageSwitchEdit(edit)) {
+                        console.log("[dft-undo-debug]", {
+                            stage: "skip-page-switch-edit",
+                            page: getPageDebugName(ui.currentPage),
+                            details: summarizeEdit(edit)
+                        });
+                        return;
+                    }
+                    console.log("[dft-undo-debug]", {
+                        stage: "edit-pushed",
+                        page: getPageDebugName(ui.currentPage),
+                        details: summarizeEdit(edit),
+                        before: summarizeUndoState(cloneUndoState(this))
+                    });
+                    var result = oldUndoableEditHappened.apply(this, arguments);
+                    if (ui.currentPage) {
+                        ui.currentPage.__dftUndoState = cloneUndoState(this);
+                    }
+                    console.log("[dft-undo-debug]", {
+                        stage: "edit-pushed-after",
+                        page: getPageDebugName(ui.currentPage),
+                        after: summarizeUndoState(cloneUndoState(this))
+                    });
+                    return result;
+                };
+            }
+
+            var oldUndo = ui.undo;
+            if (typeof oldUndo === "function") {
+                ui.undo = function () {
+                    var currentPage = this.currentPage;
+                    if (currentPage && currentPage.__dftUndoState) {
+                        applyUndoState(this.editor.undoManager, currentPage.__dftUndoState);
+                        logUndoDebug("restore-current-page-before-undo", currentPage, currentPage.__dftUndoState);
+                    }
+                    logUndoDebug("before-undo", currentPage, cloneUndoState(this.editor.undoManager));
+                    var result = oldUndo.apply(this, arguments);
+                    if (currentPage) {
+                        currentPage.__dftUndoState = cloneUndoState(this.editor.undoManager);
+                    }
+                    logUndoDebug("after-undo", this.currentPage, cloneUndoState(this.editor.undoManager));
+                    return result;
+                };
+            }
+
+            var oldRedo = ui.redo;
+            if (typeof oldRedo === "function") {
+                ui.redo = function () {
+                    var currentPage = this.currentPage;
+                    if (currentPage && currentPage.__dftUndoState) {
+                        applyUndoState(this.editor.undoManager, currentPage.__dftUndoState);
+                        logUndoDebug("restore-current-page-before-redo", currentPage, currentPage.__dftUndoState);
+                    }
+                    logUndoDebug("before-redo", currentPage, cloneUndoState(this.editor.undoManager));
+                    var result = oldRedo.apply(this, arguments);
+                    if (currentPage) {
+                        currentPage.__dftUndoState = cloneUndoState(this.editor.undoManager);
+                    }
+                    logUndoDebug("after-redo", this.currentPage, cloneUndoState(this.editor.undoManager));
+                    return result;
+                };
+            }
+        }
+    }
+
     function getPhase1(ui) {
         return ui && ui._phase1 ? ui._phase1 : null;
     }
@@ -292,6 +528,7 @@
 
     function installAll(ui) {
         try {
+            installPerPageUndoIsolation(ui);
             installPanelRuntime(ui);
             installViewMenuPanelToggles();
             if (typeof installIPNameLockAndInstanceEditing === "function") {
