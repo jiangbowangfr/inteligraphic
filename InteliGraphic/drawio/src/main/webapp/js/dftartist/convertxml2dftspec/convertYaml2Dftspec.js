@@ -112,6 +112,9 @@ function convertEDTYamlToDftspec(spec) {
             'ssn_multiplexer': 'Multiplexer',
             'ssn_receiver1xpipeline': 'Reciever1xPipeline',
             'ssn_pipeline': 'Pipeline',
+            'ssn_fifo': 'Fifo',
+            'ssn_busfrequencymultiplier': 'BusFrequencyMultiplier',
+            'ssn_busfrequencydivider': 'BusFrequencyDivider',
         };
         return map[t] || null;
     }
@@ -134,6 +137,303 @@ function convertEDTYamlToDftspec(spec) {
         return out;
     }
 
+    function takeMapped(params, mapping) {
+        const out = {};
+        Object.entries(mapping || {}).forEach(([src, dst]) => {
+            if (params[src] === undefined || params[src] === '') return;
+            out[dst] = params[src];
+            delete params[src];
+        });
+        return out;
+    }
+
+    function emitSimpleFields(fields, indentLevel) {
+        const indent = ' '.repeat(indentLevel);
+        let out = '';
+        Object.entries(fields || {}).forEach(([k, v]) => {
+            if (v === undefined || v === '') return;
+            out += `\n${indent}${k} : ${formatValue(v)};`;
+        });
+        return out;
+    }
+
+    function emitNamedBlock(blockName, fields, indentLevel) {
+        const indent = ' '.repeat(indentLevel);
+        const entries = Object.entries(fields || {}).filter(([, v]) => !(v === undefined || v === ''));
+        if (!entries.length) return '';
+        let out = `\n${indent}${blockName} {`;
+        entries.forEach(([k, v]) => {
+            out += `\n${indent}  ${k} : ${formatValue(v)};`;
+        });
+        out += `\n${indent}}`;
+        return out;
+    }
+
+    function emitIjtagInterfaceBlock(ifaceFields, ijtagFields, indentLevel) {
+        const indent = ' '.repeat(indentLevel);
+        const hasIface = Object.keys(ifaceFields || {}).some((k) => ifaceFields[k] !== undefined && ifaceFields[k] !== '');
+        const hasIjtag = Object.keys(ijtagFields || {}).some((k) => ijtagFields[k] !== undefined && ijtagFields[k] !== '');
+        if (!hasIface && !hasIjtag) return '';
+        let out = `\n${indent}Interface {`;
+        Object.entries(ifaceFields || {}).forEach(([k, v]) => {
+            if (v === undefined || v === '') return;
+            out += `\n${indent}  ${k} : ${formatValue(v)};`;
+        });
+        if (hasIjtag) {
+            out += `\n${indent}  IjtagScanInterface {`;
+            Object.entries(ijtagFields || {}).forEach(([k, v]) => {
+                if (v === undefined || v === '') return;
+                out += `\n${indent}    ${k} : ${formatValue(v)};`;
+            });
+            out += `\n${indent}  }`;
+        }
+        out += `\n${indent}}`;
+        return out;
+    }
+
+    function emitConnectionsBlock(connFields, indentLevel) {
+        return emitNamedBlock('Connections', connFields, indentLevel);
+    }
+
+    function emitGenericSsnNodeDetails(node, indentLevel, spec) {
+        const params = Object.assign({}, (node && node.params) || {});
+        let out = '';
+        if (spec.idKey && params[spec.idKey] !== undefined && params[spec.idKey] !== '') {
+            out += emitSimpleFields({ id: params[spec.idKey] }, indentLevel);
+            delete params[spec.idKey];
+        }
+        out += emitSimpleFields(takeMapped(params, spec.topLevel || {}), indentLevel);
+        out += emitIjtagInterfaceBlock(
+            takeMapped(params, spec.interface || {}),
+            takeMapped(params, spec.ijtag || {}),
+            indentLevel
+        );
+        out += emitConnectionsBlock(takeMapped(params, spec.connections || {}), indentLevel);
+        if (Object.keys(params).length) out += emitParams(params, indentLevel);
+        return out;
+    }
+
+    const SSN_GENERIC_SPECS = {
+        ssn_outputpipeline: {
+            idKey: 'op_id',
+            topLevel: {
+                ijtag_host_interface: 'ijtag_host_interface',
+                ijtag_connection_order: 'ijtag_connection_order',
+                bus_clock_period: 'bus_clock_period',
+                frequency_ratio: 'frequency_ratio',
+                parent_instance: 'parent_instance',
+                leaf_instance_name: 'leaf_instance_name',
+            },
+            interface: {
+                if_bus_clock: 'bus_clock',
+                if_bus_data_in: 'bus_data_in',
+                if_bus_data_out: 'bus_data_out',
+            },
+            ijtag: {
+                if_ijtag_reset: 'reset',
+                if_ijtag_tck: 'tck',
+                if_ijtag_select: 'select',
+                if_ijtag_capture_en: 'capture_en',
+                if_ijtag_shift_en: 'shift_en',
+                if_ijtag_update_en: 'update_en',
+                if_ijtag_scan_in: 'scan_in',
+                if_ijtag_scan_out: 'scan_out',
+            },
+            connections: {
+                c_bus_clock_in: 'bus_clock_in',
+            }
+        },
+        ssn_multiplexer: {
+            idKey: 'mux_id',
+            topLevel: {
+                ijtag_host_interface: 'ijtag_host_interface',
+                ijtag_connection_order: 'ijtag_connection_order',
+                bus_clock_period: 'bus_clock_period',
+                frequency_ratio: 'frequency_ratio',
+                parent_instance: 'parent_instance',
+                leaf_instance_name: 'leaf_instance_name',
+                update_phase: 'update_phase',
+            },
+            interface: {
+                if_bus_clock: 'bus_clock',
+                if_bus_data_in: 'bus_data_in',
+                if_bus_data_out: 'bus_data_out',
+                if_secondary_bus_data_in: 'secondary_bus_data_in',
+            },
+            ijtag: {
+                if_ijtag_reset: 'reset',
+                if_ijtag_tck: 'tck',
+                if_ijtag_select: 'select',
+                if_ijtag_capture_en: 'capture_en',
+                if_ijtag_shift_en: 'shift_en',
+                if_ijtag_update_en: 'update_en',
+                if_ijtag_scan_in: 'scan_in',
+                if_ijtag_scan_out: 'scan_out',
+            },
+            connections: {
+                c_bus_clock_in: 'bus_clock_in',
+                c_secondary_bus_clock_in: 'secondary_bus_clock_in',
+            }
+        },
+        ssn_pipeline: {
+            idKey: 'pl_id',
+            topLevel: {
+                ijtag_host_interface: 'ijtag_host_interface',
+                ijtag_connection_order: 'ijtag_connection_order',
+                bus_clock_period: 'bus_clock_period',
+                frequency_ratio: 'frequency_ratio',
+                update_phase: 'update_phase',
+                parent_instance: 'parent_instance',
+                leaf_instance_name: 'leaf_instance_name',
+            },
+            interface: {
+                if_bus_clock: 'bus_clock',
+                if_bus_data_in: 'bus_data_in',
+                if_bus_data_out: 'bus_data_out',
+            },
+            ijtag: {
+                if_ijtag_reset: 'reset',
+                if_ijtag_tck: 'tck',
+                if_ijtag_select: 'select',
+                if_ijtag_capture_en: 'capture_en',
+                if_ijtag_shift_en: 'shift_en',
+                if_ijtag_update_en: 'update_en',
+                if_ijtag_scan_in: 'scan_in',
+                if_ijtag_scan_out: 'scan_out',
+            },
+            connections: {
+                c_bus_clock_in: 'bus_clock_in',
+            }
+        },
+        ssn_receiver1xpipeline: {
+            idKey: 'r1x_id',
+            topLevel: {
+                ijtag_host_interface: 'ijtag_host_interface',
+                ijtag_connection_order: 'ijtag_connection_order',
+                bus_clock_period: 'bus_clock_period',
+                parent_instance: 'parent_instance',
+                leaf_instance_name: 'leaf_instance_name',
+                input_retiming_cell_type: 'input_retiming_cell_type',
+            },
+            interface: {
+                if_bus_clock: 'bus_clock',
+                if_bus_data_in: 'bus_data_in',
+                if_bus_data_out: 'bus_data_out',
+            },
+            ijtag: {
+                if_ijtag_reset: 'reset',
+            },
+            connections: {
+                c_bus_clock_in: 'bus_clock_in',
+            }
+        },
+        ssn_fifo: {
+            idKey: 'fifo_id',
+            topLevel: {
+                ijtag_host_interface: 'ijtag_host_interface',
+                ijtag_connection_order: 'ijtag_connection_order',
+                bus_clock_period: 'bus_clock_period',
+                frequency_ratio: 'frequency_ratio',
+                input_retimed: 'input_retimed',
+                input_retiming_cell_type: 'input_retiming_cell_type',
+                in_clock_to_out_clock_skew: 'in_clock_to_out_clock_skew',
+                in_clock_to_out_clock_skew_programmable: 'in_clock_to_out_clock_skew_programmable',
+                parent_instance: 'parent_instance',
+                leaf_instance_name: 'leaf_instance_name',
+            },
+            interface: {
+                if_bus_in_clock: 'bus_in_clock',
+                if_bus_out_clock: 'bus_out_clock',
+                if_bus_data_in: 'bus_data_in',
+                if_bus_data_out: 'bus_data_out',
+            },
+            ijtag: {
+                if_ijtag_reset: 'reset',
+                if_ijtag_tck: 'tck',
+                if_ijtag_select: 'select',
+                if_ijtag_capture_en: 'capture_en',
+                if_ijtag_capture_shift_en: 'capture_shift_en',
+                if_ijtag_shift_en: 'shift_en',
+                if_ijtag_update_en: 'update_en',
+                if_ijtag_update_clock: 'update_clock',
+                if_ijtag_scan_in: 'scan_in',
+                if_ijtag_scan_out: 'scan_out',
+            },
+            connections: {
+                c_bus_in_clock_in: 'bus_in_clock_in',
+                c_bus_out_clock_in: 'bus_out_clock_in',
+            }
+        },
+        ssn_busfrequencymultiplier: {
+            idKey: 'bfm_id',
+            topLevel: {
+                use_clock_shaper_cell: 'use_clock_shaper_cell',
+                frequency_ratio: 'frequency_ratio',
+                update_phase: 'update_phase',
+                output_divided_clock: 'output_divided_clock',
+                ijtag_host_interface: 'ijtag_host_interface',
+                ijtag_connection_order: 'ijtag_connection_order',
+                bus_clock_period: 'bus_clock_period',
+                parent_instance: 'parent_instance',
+                leaf_instance_name: 'leaf_instance_name',
+            },
+            interface: {
+                if_bus_clock: 'bus_clock',
+                if_bus_clock_out: 'bus_clock_out',
+                if_bus_data_in: 'bus_data_in',
+                if_bus_data_out: 'bus_data_out',
+            },
+            ijtag: {
+                if_ijtag_reset: 'reset',
+                if_ijtag_tck: 'tck',
+                if_ijtag_select: 'select',
+                if_ijtag_capture_en: 'capture_en',
+                if_ijtag_shift_en: 'shift_en',
+                if_ijtag_update_en: 'update_en',
+                if_ijtag_scan_in: 'scan_in',
+                if_ijtag_scan_out: 'scan_out',
+            },
+            connections: {
+                c_bus_clock_in: 'bus_clock_in',
+            }
+        },
+        ssn_busfrequencydivider: {
+            idKey: 'bfd_id',
+            topLevel: {
+                ijtag_host_interface: 'ijtag_host_interface',
+                ijtag_connection_order: 'ijtag_connection_order',
+                bus_clock_period: 'bus_clock_period',
+                input_retimed: 'input_retimed',
+                input_retiming_cell_type: 'input_retiming_cell_type',
+                use_clock_shaper_cell: 'use_clock_shaper_cell',
+                frequency_ratio: 'frequency_ratio',
+                output_divided_clock: 'output_divided_clock',
+                parent_instance: 'parent_instance',
+                leaf_instance_name: 'leaf_instance_name',
+            },
+            interface: {
+                if_bus_clock: 'bus_clock',
+                if_bus_clock_out: 'bus_clock_out',
+                if_bus_clock_out_local: 'bus_clock_out_local',
+                if_bus_data_in: 'bus_data_in',
+                if_bus_data_out: 'bus_data_out',
+            },
+            ijtag: {
+                if_ijtag_reset: 'reset',
+                if_ijtag_tck: 'tck',
+                if_ijtag_select: 'select',
+                if_ijtag_capture_en: 'capture_en',
+                if_ijtag_shift_en: 'shift_en',
+                if_ijtag_update_en: 'update_en',
+                if_ijtag_scan_in: 'scan_in',
+                if_ijtag_scan_out: 'scan_out',
+            },
+            connections: {
+                c_bus_clock_in: 'bus_clock_in',
+            }
+        }
+    };
+
     function emitScanHostDetails(node, indentLevel) {
         const indent = ' '.repeat(indentLevel);
         const params = Object.assign({}, (node && node.params) || {});
@@ -141,30 +441,84 @@ function convertEDTYamlToDftspec(spec) {
         const cgId = params.cg_id;
         const connCgId = params.conn_cg_id;
         const csmModuleName = params.csm_module_name;
+        const ifCgEdtUpdate = params.if_cg_edt_update;
+        const ifIjtagShiftEn = params.if_ijtag_shift_en;
+        const connCgFromScanOutBypassOut = params.conn_cg_from_scan_out_bypass_out;
+        const topLevel = takeMapped(params, {
+            ijtag_host_interface: 'ijtag_host_interface',
+            ijtag_connection_order: 'ijtag_connection_order',
+            bus_clock_period: 'bus_clock_period',
+            max_capture_clock_pulses: 'max_capture_clock_pulses',
+            max_capture_to_shift_clock_period_ratio: 'max_capture_to_shift_clock_period_ratio',
+            parent_instance: 'parent_instance',
+            leaf_instance_name: 'leaf_instance_name',
+            max_scan_chain_length: 'max_scan_chain_length',
+            max_scan_en_mcp: 'max_scan_en_mcp',
+            max_edt_update_mcp: 'max_edt_update_mcp',
+            input_chain_count: 'input_chain_count',
+            output_chain_count: 'output_chain_count',
+            output_chain_count_in_occ_mode: 'output_chain_count_in_occ_mode',
+            high_comp_in: 'high_comp_in',
+            high_comp_out: 'high_comp_out',
+            use_high_comp_in_bypass: 'use_high_comp_in_bypass',
+            support_from_scan_out_le_strobing: 'support_from_scan_out_le_strobing',
+            scan_signals_bypass: 'scan_signals_bypass',
+            use_clock_dff_cell: 'use_clock_dff_cell',
+            use_clock_or_cell: 'use_clock_or_cell',
+            use_clock_shaper_cell: 'use_clock_shaper_cell',
+            support_output_clock_activation_when_ssh_is_off: 'support_output_clock_activation_when_ssh_is_off',
+            size_resolution: 'size_resolution',
+            use_ssn_bus_clock_as_test_clock_bypass: 'use_ssn_bus_clock_as_test_clock_bypass',
+            dft_signals_not_mapped: 'dft_signals_not_mapped',
+        });
         delete params.cg_id;
         delete params.conn_cg_id;
         delete params.csm_module_name;
+        delete params.if_cg_edt_update;
+        delete params.if_ijtag_shift_en;
+        delete params.conn_cg_from_scan_out_bypass_out;
+        out += emitSimpleFields(topLevel, indentLevel);
         if (cgId !== undefined && cgId !== '') {
             out += `\n${indent}ChainGroup {`;
             out += `\n${indent}  id : ${formatValue(cgId)};`;
             out += `\n${indent}}`;
         }
-        if (csmModuleName !== undefined && csmModuleName !== '') {
+        if (csmModuleName !== undefined && csmModuleName !== '' || ifCgEdtUpdate !== undefined && ifCgEdtUpdate !== '' || ifIjtagShiftEn !== undefined && ifIjtagShiftEn !== '') {
             out += `\n${indent}Interface {`;
-            out += `\n${indent}  ClockSignalModule {`;
-            out += `\n${indent}    module_name : ${formatValue(csmModuleName)};`;
-            out += `\n${indent}  }`;
+            if (csmModuleName !== undefined && csmModuleName !== '') {
+                out += `\n${indent}  ClockSignalModule {`;
+                out += `\n${indent}    module_name : ${formatValue(csmModuleName)};`;
+                out += `\n${indent}  }`;
+            }
+            if (ifCgEdtUpdate !== undefined && ifCgEdtUpdate !== '') {
+                out += `\n${indent}  ChainGroup {`;
+                out += `\n${indent}    edt_update : ${formatValue(ifCgEdtUpdate)};`;
+                out += `\n${indent}  }`;
+            }
+            if (ifIjtagShiftEn !== undefined && ifIjtagShiftEn !== '') {
+                out += `\n${indent}  IjtagScanInterface {`;
+                out += `\n${indent}    shift_en : ${formatValue(ifIjtagShiftEn)};`;
+                out += `\n${indent}  }`;
+            }
             out += `\n${indent}}`;
         }
-        if (connCgId !== undefined && connCgId !== '') {
+        if (connCgId !== undefined && connCgId !== '' || connCgFromScanOutBypassOut !== undefined && connCgFromScanOutBypassOut !== '') {
             out += `\n${indent}Connections {`;
             out += `\n${indent}  ChainGroup {`;
-            out += `\n${indent}    id : ${formatValue(connCgId)};`;
+            if (connCgId !== undefined && connCgId !== '') out += `\n${indent}    id : ${formatValue(connCgId)};`;
+            if (connCgFromScanOutBypassOut !== undefined && connCgFromScanOutBypassOut !== '') out += `\n${indent}    from_scan_out_bypass_out : ${formatValue(connCgFromScanOutBypassOut)};`;
             out += `\n${indent}  }`;
             out += `\n${indent}}`;
         }
         if (Object.keys(params).length) out += emitParams(params, indentLevel);
         return out;
+    }
+
+    function emitSsnNodeDetails(node, indentLevel) {
+        const t = String((node && node.type) || '').toLowerCase();
+        if (t === 'ssn_scanhost') return emitScanHostDetails(node, indentLevel);
+        if (SSN_GENERIC_SPECS[t]) return emitGenericSsnNodeDetails(node, indentLevel, SSN_GENERIC_SPECS[t]);
+        return emitParams((node && node.params) || {}, indentLevel);
     }
 
     function emitSmuxSecondary(smuxSecondary, indentLevel) {
@@ -179,7 +533,7 @@ function convertEDTYamlToDftspec(spec) {
             if (!isRenderableSsnType(t)) return;
             const blockName = typeToSsnBlockName(t);
             out += `\n${indent}${blockName}(${instName}) {`;
-            out += t === 'ssn_scanhost' ? emitScanHostDetails(node, indentLevel + 2) : emitParams(node.params, indentLevel + 2);
+            out += emitSsnNodeDetails(node, indentLevel + 2);
             out += `\n${indent}}`;
         });
         return out;
@@ -201,7 +555,7 @@ function convertEDTYamlToDftspec(spec) {
                         if (!isRenderableSsnType(t)) return;
                         const blockName = typeToSsnBlockName(t);
                         body += `\n${indent}  ${blockName}(${instName}) {`;
-                        body += t === 'ssn_scanhost' ? emitScanHostDetails(node, indentLevel + 4) : emitParams(node.params, indentLevel + 4);
+                        body += emitSsnNodeDetails(node, indentLevel + 4);
                         body += `\n${indent}  }`;
                     });
                 });
@@ -212,7 +566,7 @@ function convertEDTYamlToDftspec(spec) {
                     if (!isRenderableSsnType(t)) return;
                     const blockName = typeToSsnBlockName(t);
                     body += `\n${indent}  ${blockName}(${instName}) {`;
-                    body += t === 'ssn_scanhost' ? emitScanHostDetails(node, indentLevel + 4) : emitParams(node.params, indentLevel + 4);
+                    body += emitSsnNodeDetails(node, indentLevel + 4);
                     body += `\n${indent}  }`;
                 });
             }
@@ -231,7 +585,7 @@ function convertEDTYamlToDftspec(spec) {
             if (!isRenderableSsnType(t)) return;
             const blockName = typeToSsnBlockName(t);
             out += `\n${indent}${blockName}(${instName}) {`;
-            out += t === 'ssn_scanhost' ? emitScanHostDetails(node, indentLevel + 2) : emitParams(node.params, indentLevel + 2);
+            out += emitSsnNodeDetails(node, indentLevel + 2);
             if (node.smux_secondary) {
                 out += `\n${indent}  smux_secondary {`;
                 out += emitSmuxSecondary(node.smux_secondary, indentLevel + 4);
