@@ -2348,11 +2348,9 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
                     return out;
                 }
                 if (ipt === 'ssn_multiplexer') {
-                    ['master_bus_data_in', 'secondary_bus_data_in'].forEach((n) => {
-                        const a = findByName(inPins, n);
-                        const b = findByName(outPins, 'bus_data_out');
-                        if (a && b) out.push([a, b]);
-                    });
+                    const a = findByName(inPins, 'master_bus_data_in');
+                    const b = findByName(outPins, 'bus_data_out');
+                    if (a && b) out.push([a, b]);
                     return out;
                 }
                 inPins.forEach((i) => outPins.forEach((o) => out.push([i, o])));
