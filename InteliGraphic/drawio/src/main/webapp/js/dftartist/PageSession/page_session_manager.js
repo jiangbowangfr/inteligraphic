@@ -197,7 +197,33 @@
       try { ui.showLayersDialog(); } catch (e) {}
     }, 0);
   }
+    
+    function resetUndoHistoryForCurrentPage(ui, reason) {
+    if (!ui || !ui.editor || !ui.editor.undoManager) return;
+    try {
+        ui.editor.undoManager.clear();
+    } catch (e0) {}
 
+    try {
+        if (ui.currentPage) {
+        ui.currentPage.__dftUndoState = { history: [], indexOfNextAdd: 0 };
+        }
+    } catch (e1) {}
+
+    try {
+        if (typeof console !== "undefined" && console.log) {
+        console.log("[dft-page-session]", {
+            stage: "reset-undo-history",
+            reason: reason || "page-open",
+            page:
+            ui.currentPage && typeof ui.currentPage.getName === "function"
+                ? ui.currentPage.getName()
+                : (ui.currentPage && ui.currentPage.name) || "(unknown)",
+        });
+        }
+    } catch (e2) {}
+    }
+    
   function getProjectStorageRoot(ui) {
     var dbRoot = ui && ui._projectDbDirPath ? String(ui._projectDbDirPath) : '';
     if (dbRoot) return dbRoot.replace(/\\/g, '/').replace(/\/+/g, '/');
@@ -861,7 +887,8 @@
     activateDrawingWorkspace(ui);
     restoreViewState(ui, makeViewStateKey(designRef, pageName, abs || ''));
     syncLayersDialogForPage(ui, designRef);
-
+    resetUndoHistoryForCurrentPage(ui, exists ? 'open-page-loaded' : 'open-page-blank');
+    
     return {
       pageName: pageName,
       absPath: abs,
