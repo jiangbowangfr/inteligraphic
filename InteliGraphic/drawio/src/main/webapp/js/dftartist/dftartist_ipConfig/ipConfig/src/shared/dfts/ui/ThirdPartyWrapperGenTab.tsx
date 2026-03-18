@@ -6,14 +6,10 @@ import {
   Checkbox,
   Empty,
   Input,
-  Radio,
-  Space,
   Tabs,
   Tag,
   Typography,
-  message,
 } from 'antd';
-import type { CheckboxChangeEvent } from 'antd/es/checkbox';
 import type { DftsExtraTabRenderProps } from '../../../shared/dfts/types';
 import { getDftsTypeFromCell } from '../../../shared/dfts/cell';
 import {
@@ -23,8 +19,6 @@ import {
   type WrapperResult,
 } from '../../../shared/third_party/dfxWrapperGenerator';
 import {
-  addGeneratedWrapperToLibrary,
-  insertGeneratedWrapperIntoCanvas,
   readCurrentThirdPartyItem,
   type ThirdPartyItem,
   type ThirdPartyPort,
@@ -276,8 +270,6 @@ export default function ThirdPartyWrapperGenTab(
   const [inputKeyword, setInputKeyword] = useState('');
   const [outputKeyword, setOutputKeyword] = useState('');
   const [previewTab, setPreviewTab] = useState<PreviewTabKey>('v');
-  const [busy, setBusy] = useState(false);
-  const [msgApi, contextHolder] = message.useMessage();
 
   const rawCellType = useMemo(() => getDftsTypeFromCell(graph, cell) || def.type, [graph, cell, def.type]);
   const sourceItem = useMemo(() => readCurrentThirdPartyItem(def, graph, cell), [def, graph, cell]);
@@ -369,37 +361,6 @@ export default function ThirdPartyWrapperGenTab(
     updateDraft({ [kind === 'input' ? 'selectedInputPins' : 'selectedOutputPins']: [] } as Partial<ThirdPartyWrapperDraft>);
   };
 
-  const disabledGenerate =
-    !sourceItem ||
-    !safeDraft.wrapperModuleName?.trim() ||
-    ((safeDraft.selectedInputPins || []).length === 0 && (safeDraft.selectedOutputPins || []).length === 0);
-
-  const handleGenerate = async (insertAfter: boolean) => {
-    if (!sourceItem) return;
-    if (disabledGenerate) {
-      msgApi.warning('请至少选择一个 input 或 output 引脚，并填写 Wrapper 模块名。');
-      return;
-    }
-    setBusy(true);
-    try {
-      const created = await addGeneratedWrapperToLibrary({
-        sourceItem,
-        wrapperModuleName: safeDraft.wrapperModuleName!.trim(),
-        scope: (safeDraft.scope || 'project') as ScopeValue,
-        generated,
-      });
-      msgApi.success(insertAfter ? '已生成并加入 Library，正在插入画布。' : '已生成并加入 Library。');
-      if (insertAfter) {
-        await insertGeneratedWrapperIntoCanvas(graph, created);
-      }
-    } catch (err: any) {
-      console.error('[ThirdPartyWrapperGenTab] generate failed', err);
-      msgApi.error(err?.message || '生成失败');
-    } finally {
-      setBusy(false);
-    }
-  };
-
   if (!sourceItem) {
     return (
       <div style={{ height: '100%', minHeight: 0 }}>
@@ -421,8 +382,6 @@ export default function ThirdPartyWrapperGenTab(
         gap: 16,
       }}
     >
-      {contextHolder}
-
       <Card
         title="Wrapper 生成参数"
         size="small"
@@ -464,21 +423,6 @@ export default function ThirdPartyWrapperGenTab(
           />
         </div>
 
-        <div>
-          <Text>保存范围</Text>
-          <div style={{ marginTop: 8 }}>
-            <Radio.Group
-              value={safeDraft.scope || 'project'}
-              onChange={(e) => updateDraft({ scope: e.target.value as ScopeValue })}
-              optionType="button"
-              buttonStyle="solid"
-            >
-              <Radio.Button value="project">Project IP</Radio.Button>
-              <Radio.Button value="software">Software IP</Radio.Button>
-            </Radio.Group>
-          </div>
-        </div>
-
         <Alert
           type="info"
           showIcon
@@ -498,15 +442,6 @@ export default function ThirdPartyWrapperGenTab(
             description="当前版本不会自动处理 inout，引脚不会进入生成列表。"
           />
         ) : null}
-
-        <Space direction="vertical" size={10} style={{ width: '100%' }}>
-          <Button type="primary" loading={busy} disabled={disabledGenerate} onClick={() => handleGenerate(false)}>
-            生成并加入 Library
-          </Button>
-          <Button loading={busy} disabled={disabledGenerate} onClick={() => handleGenerate(true)}>
-            生成并插入画布
-          </Button>
-        </Space>
       </Card>
 
       <div
