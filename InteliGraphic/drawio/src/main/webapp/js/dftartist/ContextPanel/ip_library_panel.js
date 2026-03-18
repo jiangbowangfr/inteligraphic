@@ -3,7 +3,6 @@
 
     var THIRD_PARTY_CATEGORY = 'third_party_ip';
     var SOFTWARE_STORAGE_KEY = 'dft.third_party_ip_registry.v1';
-    var PREF_STORAGE_KEY = 'dft.third_party_ip_import_prefs.v1';
     var PROJECT_REGISTRY_FILE = 'third_party_ip_registry.json';
 
     function el(tag, cls, text) {
@@ -39,13 +38,6 @@
             return global.electron.requestPromise(msg);
         }
         return Promise.reject(new Error('IPC bridge unavailable'));
-    }
-
-    function parseTextList(text) {
-        return safeText(text)
-            .split(/\r?\n|;/)
-            .map(function (line) { return safeText(line).trim(); })
-            .filter(Boolean);
     }
 
     function basename(filePath) {
@@ -492,15 +484,10 @@
                 overlay: null,
                 dialog: null,
                 listHost: null,
-                scopeSelect: null,
-                slangInput: null,
-                definesBox: null,
-                includeBox: null,
                 detailTitle: null,
                 detailMeta: null,
                 detailPorts: null,
                 detailDiag: null,
-                detailScope: null,
                 footerHint: null,
                 saveBtn: null,
                 shown: false
@@ -512,31 +499,6 @@
         var searchInput = null;
         var statusText = null;
         var previewBox = null;
-
-        function getImportPrefs() {
-            try {
-                var raw = global.localStorage ? global.localStorage.getItem(PREF_STORAGE_KEY) : '';
-                var parsed = raw ? JSON.parse(raw) : {};
-                return {
-                    slangPath: safeText(parsed && parsed.slangPath).trim(),
-                    defines: Array.isArray(parsed && parsed.defines) ? parsed.defines.slice() : [],
-                    includeDirs: Array.isArray(parsed && parsed.includeDirs) ? parsed.includeDirs.slice() : []
-                };
-            } catch (e) {
-                return { slangPath: '', defines: [], includeDirs: [] };
-            }
-        }
-
-        function saveImportPrefs(prefs) {
-            try {
-                if (!global.localStorage) return;
-                global.localStorage.setItem(PREF_STORAGE_KEY, JSON.stringify({
-                    slangPath: safeText(prefs && prefs.slangPath).trim(),
-                    defines: Array.isArray(prefs && prefs.defines) ? prefs.defines.slice() : [],
-                    includeDirs: Array.isArray(prefs && prefs.includeDirs) ? prefs.includeDirs.slice() : []
-                }));
-            } catch (e) { }
-        }
 
         function readSoftwareItems() {
             try {
@@ -1134,7 +1096,7 @@
             var head = el('div');
             head.style.cssText = 'padding:14px 16px;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;gap:12px;';
             var title = el('div');
-            title.innerHTML = '<div style="font-size:16px;font-weight:700;color:#0f172a;">Import HDL</div><div style="font-size:12px;color:#64748b;">Manage 3rd Party IP and parse Verilog modules with slang.</div>';
+            title.innerHTML = '<div style="font-size:16px;font-weight:700;color:#0f172a;">Import HDL</div><div style="font-size:12px;color:#64748b;">Manage 3rd Party IP and parse Verilog modules.</div>';
             head.appendChild(title);
             var closeBtn = el('button', null, 'Close');
             closeBtn.type = 'button';
@@ -1142,51 +1104,6 @@
             closeBtn.onclick = function () { hideManager(); };
             head.appendChild(closeBtn);
             mgr.dialog.appendChild(head);
-
-            var controls = el('div');
-            controls.style.cssText = 'padding:12px 16px;border-bottom:1px solid #e2e8f0;display:grid;grid-template-columns:180px 1fr 1fr;gap:12px;align-items:start;';
-
-            var scopeBox = el('div');
-            scopeBox.innerHTML = '<div style="font-size:12px;color:#475569;margin-bottom:6px;">Scope for new imports</div>';
-            mgr.scopeSelect = document.createElement('select');
-            mgr.scopeSelect.style.cssText = 'width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:8px;';
-            mgr.scopeSelect.innerHTML = '<option value="project">Project IP</option><option value="software">Software IP</option>';
-            scopeBox.appendChild(mgr.scopeSelect);
-            controls.appendChild(scopeBox);
-
-            var slangBox = el('div');
-            slangBox.innerHTML = '<div style="font-size:12px;color:#475569;margin-bottom:6px;">Slang executable</div>';
-            mgr.slangInput = document.createElement('input');
-            mgr.slangInput.type = 'text';
-            mgr.slangInput.placeholder = 'Leave blank to use bundled / PATH slang';
-            mgr.slangInput.style.cssText = 'width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:8px;box-sizing:border-box;';
-            slangBox.appendChild(mgr.slangInput);
-            controls.appendChild(slangBox);
-
-            var tipBox = el('div');
-            tipBox.innerHTML = '<div style="font-size:12px;color:#475569;margin-bottom:6px;">Parser</div><div style="font-size:12px;color:#0f172a;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;">Verilog / SystemVerilog via slang (IPC)</div>';
-            controls.appendChild(tipBox);
-            mgr.dialog.appendChild(controls);
-
-            var options = el('div');
-            options.style.cssText = 'padding:12px 16px;border-bottom:1px solid #e2e8f0;display:grid;grid-template-columns:1fr 1fr;gap:12px;';
-            var definesWrap = el('div');
-            definesWrap.innerHTML = '<div style="font-size:12px;color:#475569;margin-bottom:6px;">Preprocessor Defines (one per line)</div>';
-            mgr.definesBox = document.createElement('textarea');
-            mgr.definesBox.rows = 3;
-            mgr.definesBox.placeholder = 'DFT_SHARED_EFUSE_WITH_FUNC\nREADBUFFER=1';
-            mgr.definesBox.style.cssText = 'width:100%;resize:vertical;padding:8px;border:1px solid #cbd5e1;border-radius:8px;box-sizing:border-box;font-family:monospace;font-size:12px;';
-            definesWrap.appendChild(mgr.definesBox);
-            options.appendChild(definesWrap);
-            var includeWrap = el('div');
-            includeWrap.innerHTML = '<div style="font-size:12px;color:#475569;margin-bottom:6px;">Include Dirs (one per line)</div>';
-            mgr.includeBox = document.createElement('textarea');
-            mgr.includeBox.rows = 3;
-            mgr.includeBox.placeholder = '/path/to/includes';
-            mgr.includeBox.style.cssText = 'width:100%;resize:vertical;padding:8px;border:1px solid #cbd5e1;border-radius:8px;box-sizing:border-box;font-family:monospace;font-size:12px;';
-            includeWrap.appendChild(mgr.includeBox);
-            options.appendChild(includeWrap);
-            mgr.dialog.appendChild(options);
 
             var body = el('div');
             body.style.cssText = 'flex:1;min-height:0;display:grid;grid-template-columns:380px 1fr;';
@@ -1232,13 +1149,8 @@
             mgr.detailTitle.style.cssText = 'font-size:16px;font-weight:700;color:#0f172a;';
             mgr.detailMeta = el('div');
             mgr.detailMeta.style.cssText = 'margin-top:6px;font-size:12px;color:#64748b;white-space:pre-wrap;';
-            mgr.detailScope = document.createElement('select');
-            mgr.detailScope.style.cssText = 'margin-top:10px;padding:8px;border:1px solid #cbd5e1;border-radius:8px;';
-            mgr.detailScope.innerHTML = '<option value="project">Project IP</option><option value="software">Software IP</option>';
-            mgr.detailScope.onchange = function () { applyScopeToSelection(mgr.detailScope.value); };
             detailHead.appendChild(mgr.detailTitle);
             detailHead.appendChild(mgr.detailMeta);
-            detailHead.appendChild(mgr.detailScope);
             right.appendChild(detailHead);
 
             var detailBody = el('div');
@@ -1396,7 +1308,6 @@
             if (!item) {
                 mgr.detailTitle.textContent = 'No module selected';
                 mgr.detailMeta.textContent = 'Click + to import Verilog files.';
-                mgr.detailScope.value = getProjectRoot(ui) ? 'project' : 'software';
                 mgr.detailPorts.innerHTML = '<div style="font-size:12px;color:#64748b;border:1px dashed #cbd5e1;border-radius:8px;padding:10px;background:#f8fafc;">No module details.</div>';
                 mgr.detailDiag.innerHTML = '';
                 return;
@@ -1407,7 +1318,6 @@
                 item.sourceFileName ? ('Source: ' + item.sourceFileName) : '',
                 item.sourcePath ? ('Path: ' + item.sourcePath) : ''
             ].filter(Boolean).join('\n');
-            mgr.detailScope.value = item.scope;
             mgr.detailPorts.innerHTML = renderPortsTable(item);
             mgr.detailDiag.innerHTML = renderDiagnostics(item);
         }
@@ -1419,48 +1329,6 @@
             renderManagerDetail();
             var selectedCount = getSelectedDraftItems().length;
             mgr.footerHint.textContent = mgr.draft.length + ' module(s) in library' + (selectedCount ? ' · ' + selectedCount + ' selected' : '');
-            if (!getProjectRoot(ui)) {
-                mgr.footerHint.textContent += ' · No project path: Project IP will fail to save';
-            }
-        }
-
-        function applyScopeToSelection(scope) {
-            scope = normalize(scope) === 'software' ? 'software' : 'project';
-            var mgr = state.manager;
-            var targets = getSelectedDraftItems();
-            if (!targets.length) {
-                var active = activeDraftItem();
-                if (active) targets = [active];
-            }
-            if (!targets.length) return;
-            if (scope === 'project' && !getProjectRoot(ui)) {
-                dockInfo(ui, 'warning', 'Project IP requires an open/saved project. Scope changed to Software IP instead.', { source: 'ip-library' });
-                scope = 'software';
-            }
-
-            var nextSelected = {};
-            targets.forEach(function (target) {
-                for (var i = 0; i < mgr.draft.length; i++) {
-                    if (mgr.draft[i].id !== target.id) continue;
-                    var rebuilt = buildThirdPartyItem({
-                        moduleName: target.moduleName,
-                        sourceModuleName: target.sourceModuleName || target.moduleName,
-                        sourceFileName: target.sourceFileName,
-                        sourcePath: target.sourcePath,
-                        ports: target.ports || [],
-                        diagnostics: target.diagnostics || [],
-                        scope: scope,
-                        createdAt: target.createdAt
-                    }, mgr.draft.filter(function (it) { return it.id !== target.id; }));
-                    mgr.draft[i] = rebuilt;
-                    if (mgr.activeId === target.id) mgr.activeId = rebuilt.id;
-                    nextSelected[rebuilt.id] = true;
-                    break;
-                }
-            });
-
-            mgr.selectedIds = nextSelected;
-            renderManager();
         }
 
         function removeSelectedDraftItems() {
@@ -1581,29 +1449,12 @@
             });
             if (!paths || !paths.length) return;
 
-            var scope = mgr.scopeSelect ? mgr.scopeSelect.value : (getProjectRoot(ui) ? 'project' : 'software');
-            if (normalize(scope) === 'project' && !getProjectRoot(ui)) {
-                scope = 'software';
-                if (mgr.scopeSelect) mgr.scopeSelect.value = 'software';
-                dockInfo(ui, 'warning', 'No project path. Importing as Software IP instead.', { source: 'ip-library' });
-            }
-
-            var prefs = {
-                slangPath: mgr.slangInput ? mgr.slangInput.value : '',
-                defines: parseTextList(mgr.definesBox ? mgr.definesBox.value : ''),
-                includeDirs: parseTextList(mgr.includeBox ? mgr.includeBox.value : '')
-            };
-            saveImportPrefs(prefs);
-
             mgr.footerHint.textContent = 'Parsing ' + paths.length + ' file(s) with slang…';
 
             var payload = {
                 files: paths.map(function (filePath) {
                     return { path: filePath, name: basename(filePath) };
-                }),
-                slangPath: prefs.slangPath,
-                defines: prefs.defines,
-                includeDirs: prefs.includeDirs
+                })
             };
 
             var result = await parseWithBridge(payload);
@@ -1616,7 +1467,7 @@
                 throw new Error(diags[0] || 'No Verilog module was found.');
             }
 
-            var added = mergeParsedModules(modules, scope);
+            var added = mergeParsedModules(modules, 'software');
             dockInfo(ui, 'success', 'Parsed ' + modules.length + ' module(s) with ' + safeText(result.engine || 'slang') + (result.slangPath ? (' (' + result.slangPath + ')') : ''), { source: 'ip-library' });
             if (!added) {
                 dockInfo(ui, 'warning', 'No module was added to the library.', { source: 'ip-library' });
@@ -1637,12 +1488,7 @@
             ensureBuilt();
             ensureManagerBuilt();
             await ensureThirdPartyLoaded();
-            var prefs = getImportPrefs();
             var mgr = state.manager;
-            mgr.slangInput.value = prefs.slangPath || '';
-            mgr.definesBox.value = (prefs.defines || []).join('\n');
-            mgr.includeBox.value = (prefs.includeDirs || []).join('\n');
-            mgr.scopeSelect.value = getProjectRoot(ui) ? 'project' : 'software';
             setManagerDraft(state.thirdParty.items);
             mgr.overlay.style.display = 'block';
             mgr.shown = true;
