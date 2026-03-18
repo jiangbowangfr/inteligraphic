@@ -587,9 +587,7 @@ function convertEDTYamlToDftspec(spec) {
             out += `\n${indent}${blockName}(${instName}) {`;
             out += emitSsnNodeDetails(node, indentLevel + 2);
             if (node.smux_secondary) {
-                out += `\n${indent}  smux_secondary {`;
-                out += emitSmuxSecondary(node.smux_secondary, indentLevel + 4);
-                out += `\n${indent}  }`;
+                out += emitSmuxSecondary(node.smux_secondary, indentLevel + 2);
             }
             const extraOut = emitExtraOutputPath(node.ExtraOutputPath, indentLevel + 2);
             if (extraOut) {
