@@ -317,9 +317,11 @@
       layerName: String(Shared.getCellStyleValue(graph, cell, 'flowLayer', '') || ''),
       interfaceType: String(Shared.getCellStyleValue(graph, cell, 'flowInterfaceType', '') || ''),
       pairId: String(Shared.getCellStyleValue(graph, cell, 'flowPair', '') || ''),
-      side: '',
-      bundleId: '',
-      chainId: ''
+      side: String(Shared.getCellStyleValue(graph, cell, 'flowSide', '') || ''),
+      bundleId: String(Shared.getCellStyleValue(graph, cell, 'flowBundle', '') || ''),
+      chainId: String(Shared.getCellStyleValue(graph, cell, 'flowChain', '') || ''),
+      sideStackIndex: Number(Shared.getCellStyleValue(graph, cell, 'flowSideStackIndex', '') || 0),
+      id: String(Shared.getCellStyleValue(graph, cell, 'flowMarkerId', '') || '')
     };
     if (!fromStyle.moduleName || !fromStyle.layerName || !fromStyle.interfaceType) return null;
     return fromStyle;
@@ -548,6 +550,11 @@
     style = mxUtils.setStyle(style, 'flowInterfaceType', markerMeta && markerMeta.interfaceType || '');
     style = mxUtils.setStyle(style, 'flowLayer', markerMeta && markerMeta.layerName || '');
     style = mxUtils.setStyle(style, 'flowPair', markerMeta && markerMeta.pairId || '');
+    style = mxUtils.setStyle(style, 'flowBundle', markerMeta && markerMeta.bundleId || '');
+    style = mxUtils.setStyle(style, 'flowChain', markerMeta && markerMeta.chainId || '');
+    style = mxUtils.setStyle(style, 'flowSide', markerMeta && markerMeta.side || '');
+    style = mxUtils.setStyle(style, 'flowSideStackIndex', markerMeta && markerMeta.sideStackIndex == null ? '' : String(markerMeta.sideStackIndex));
+    style = mxUtils.setStyle(style, 'flowMarkerId', markerMeta && markerMeta.id || '');
     return style;
   }
 
