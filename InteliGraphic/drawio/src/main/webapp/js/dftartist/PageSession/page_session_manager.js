@@ -198,7 +198,7 @@
     }, 0);
   }
     
-    function resetUndoHistoryForCurrentPage(ui, reason) {
+  function resetUndoHistoryForCurrentPage(ui, reason) {
     if (!ui || !ui.editor || !ui.editor.undoManager) return;
     try {
         ui.editor.undoManager.clear();
@@ -223,6 +223,33 @@
         }
     } catch (e2) {}
     }
+
+  function getPageAbsPath(page) {
+    if (!page) return '';
+    try {
+      return text(page.__dftPageAbs || '').trim();
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function markPageSession(page, absPath, loaded) {
+    if (!page) return;
+    try {
+      if (absPath) page.__dftPageAbs = absPath;
+      if (loaded != null) page.__dftLoadedOnce = !!loaded;
+    } catch (e) {}
+  }
+
+  function findPageByAbs(ui, absPath) {
+    if (!ui || !Array.isArray(ui.pages) || !absPath) return null;
+    for (var i = 0; i < ui.pages.length; i++) {
+      if (getPageAbsPath(ui.pages[i]) === absPath) {
+        return ui.pages[i];
+      }
+    }
+    return null;
+  }
     
   function getProjectStorageRoot(ui) {
     var dbRoot = ui && ui._projectDbDirPath ? String(ui._projectDbDirPath) : '';
@@ -831,9 +858,19 @@
       });
     }
 
-    ensurePageTab(ui, pageName);
-
     var abs = await resolvePageFileAbs(ui, designRef, pageName);
+    var page = findPageByAbs(ui, abs);
+
+    if (!page) {
+      page = ensurePageTab(ui, pageName);
+    } else if (page !== ui.currentPage && typeof ui.selectPage === 'function') {
+      try { ui.selectPage(page); } catch (reuseSelectErr) {}
+    }
+
+    if (page) {
+      markPageSession(page, abs, page.__dftLoadedOnce === true);
+    }
+
     emitLog('info', 'Opening page.', {
       pageName: pageName,
       absPath: abs,
@@ -842,6 +879,34 @@
     });
     try { ui._activeEnvCtx = null; } catch (envErr) {}
     setActiveContext(ui, designRef, pageName, abs || null);
+
+    if (page && page.__dftLoadedOnce) {
+      emitLog('info', 'Reusing in-memory page session.', {
+        pageName: pageName,
+        absPath: abs
+      });
+
+      try {
+        if (typeof ui.updatePageTabs === 'function') ui.updatePageTabs();
+      } catch (reuseTabsErr) {}
+
+      setStatus(ui, 'Opened page: ' + pageName);
+
+      try {
+        if (typeof ui.refreshProjectExplorer === 'function') ui.refreshProjectExplorer();
+      } catch (reuseExplorerErr) {}
+
+      activateDrawingWorkspace(ui);
+      restoreViewState(ui, makeViewStateKey(designRef, pageName, abs || ''));
+      syncLayersDialogForPage(ui, designRef);
+
+      return {
+        pageName: pageName,
+        absPath: abs,
+        exists: true,
+        context: getActiveContext(ui)
+      };
+    }
 
     var exists = await pageExists(abs);
     if (exists) {
@@ -868,9 +933,15 @@
         xmlLength: String(xml || '').length
       }, summarizeXmlIds(xml)));
       await loadPageXmlToCurrent(ui, xml);
+      if (ui && ui.currentPage) {
+        markPageSession(ui.currentPage, abs, true);
+      }
       emitLog('info', 'Loaded page "' + pageName + '" from disk.');
     } else {
       clearGraphPage(ui);
+      if (ui && ui.currentPage) {
+        markPageSession(ui.currentPage, abs, true);
+      }
       emitLog('warn', 'Page file does not exist yet; opened blank page shell for "' + pageName + '".');
     }
 
