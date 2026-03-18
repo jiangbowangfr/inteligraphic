@@ -395,7 +395,9 @@
             if (typeof NS.installConfigAction === 'function') NS.installConfigAction(ui);
         }
 
-        var cell = NS.createByKey(graph, def.key, {});
+        var createOpt = {};
+        if (def.__thirdPartyManaged) createOpt.defaultHidePins = false;
+        var cell = NS.createByKey(graph, def.key, createOpt);
         var parent = graph.getDefaultParent ? graph.getDefaultParent() : null;
         var geo = cell && cell.geometry ? cell.geometry.clone() : null;
         var w = geo ? (geo.width || 220) : 220;
@@ -444,7 +446,9 @@
             if (typeof NS.installConfigAction === 'function') NS.installConfigAction(ui);
         }
 
-        var cell = NS.createByKey(graph, def.key, {});
+        var createOpt = {};
+        if (def.__thirdPartyManaged) createOpt.defaultHidePins = false;
+        var cell = NS.createByKey(graph, def.key, createOpt);
         var parent = graph.getDefaultParent ? graph.getDefaultParent() : null;
         var geo = cell && cell.geometry ? cell.geometry.clone() : null;
         var w = geo ? (geo.width || 220) : 220;

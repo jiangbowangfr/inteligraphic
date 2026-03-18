@@ -234,7 +234,7 @@ function decoratePorts(ports) {
       isBus: !!range,
       side: inferPinSide(port.direction),
       pinType: inferPinType(port.direction, port.name),
-      displayName: port.name + (range ? range.replace(/\s+/g, '') : ''),
+      displayName: port.name,
       pinKey: safeText(port.name).replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '').toLowerCase() || 'pin'
     };
   });
