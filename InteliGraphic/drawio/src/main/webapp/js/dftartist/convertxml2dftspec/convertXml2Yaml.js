@@ -2249,13 +2249,37 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
                 return (byIp[ipId] || []).filter((pid) => predicate(pins[pid]));
             }
 
+            function normalizeMuxPinAlias(pinKey) {
+                const wanted = String(pinKey || '').trim().toLowerCase();
+                if (!wanted) return '';
+                if (wanted === 'master' || wanted === 'i0') return 'master_bus_data_in';
+                if (wanted === 'secondary' || wanted === 'i1') return 'secondary_bus_data_in';
+                return wanted;
+            }
+
             function findPinByKey(ipId, pinKey) {
+                const wanted = normalizeMuxPinAlias(pinKey);
+                if (!wanted) return null;
                 const plist = byIp[ipId] || [];
                 for (let i = 0; i < plist.length; i++) {
                     const p = pins[plist[i]];
-                    if (String(p.pinKey) === String(pinKey)) return p;
+                    if (String(p.pinKey || '').toLowerCase() === wanted) return p;
                 }
                 return null;
+            }
+
+            function pickMuxDstPin(ipId, explicitKey) {
+                const wanted = normalizeMuxPinAlias(explicitKey);
+                const masterPin = findPinByKey(ipId, 'master_bus_data_in');
+                const secondaryPin = findPinByKey(ipId, 'secondary_bus_data_in');
+                if (wanted === 'master_bus_data_in') return masterPin || secondaryPin;
+                if (wanted === 'secondary_bus_data_in') return secondaryPin || masterPin;
+                const masterBusy = !!(masterPin && (radj[masterPin.id] || []).length);
+                const secondaryBusy = !!(secondaryPin && (radj[secondaryPin.id] || []).length);
+                if (masterPin && !masterBusy && secondaryPin && !secondaryBusy) return masterPin;
+                if (secondaryPin && !secondaryBusy) return secondaryPin;
+                if (masterPin && !masterBusy) return masterPin;
+                return secondaryPin || masterPin;
             }
 
             function getLinkRecord(edge) {
@@ -2278,11 +2302,17 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
                 const link = getLinkRecord(e);
                 const srcPins = findPinsByIp(s, () => true).map((pid) => pins[pid]);
                 const dstPins = findPinsByIp(t, () => true).map((pid) => pins[pid]);
-                const hintedKey = String(link.edgeLabel || '').trim();
+                const hintedKey = normalizeMuxPinAlias(link.edgeLabel);
                 const srcPin = findPinByKey(link.srcBodyId || s, link.srcPinKey) || pickBestPin(srcPins, 'output', null, link.srcPinKey);
-                const dstPin = findPinByKey(link.dstBodyId || t, link.dstPinKey) ||
-                    findPinByKey(link.dstBodyId || t, hintedKey) ||
-                    pickBestPin(dstPins, 'input', srcPin, link.dstPinKey || hintedKey);
+                let dstPin = null;
+                if (String(ips[t].ip_type || '').toLowerCase() === 'ssn_multiplexer') {
+                    dstPin = pickMuxDstPin(t, link.dstPinKey || hintedKey);
+                }
+                if (!dstPin) {
+                    dstPin = findPinByKey(link.dstBodyId || t, link.dstPinKey) ||
+                        findPinByKey(link.dstBodyId || t, hintedKey) ||
+                        pickBestPin(dstPins, 'input', srcPin, link.dstPinKey || hintedKey);
+                }
                 dpLog('edge_resolve', {
                     edge: e.id,
                     source: ips[s] ? ips[s].label : s,
