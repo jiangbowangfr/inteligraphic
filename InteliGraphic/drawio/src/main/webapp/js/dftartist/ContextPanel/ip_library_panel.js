@@ -562,11 +562,13 @@
                 var moduleName = safeText(item.moduleName || item.displayLabel || item.name).trim();
                 if (!moduleName) return;
                 var ports = Array.isArray(item.ports) ? item.ports : [];
+                var parameters = Array.isArray(item.parameters) ? item.parameters : [];
                 var diagnostics = Array.isArray(item.diagnostics) ? item.diagnostics : [];
                 var norm = buildThirdPartyItem({
                     moduleName: moduleName,
                     sourceFileName: safeText(item.sourceFileName || basename(item.sourcePath)),
                     sourcePath: safeText(item.sourcePath),
+                    parameters: cloneJson(parameters) || [],
                     ports: cloneJson(ports) || [],
                     diagnostics: cloneJson(diagnostics) || [],
                     scope: scope,
@@ -619,6 +621,7 @@
                 sourceModuleName: safeText(src.sourceModuleName || moduleName) || moduleName,
                 sourceFileName: safeText(src.sourceFileName || basename(src.sourcePath)),
                 sourcePath: safeText(src.sourcePath),
+                parameters: Array.isArray(src.parameters) ? cloneJson(src.parameters) || [] : [],
                 ports: Array.isArray(src.ports) ? cloneJson(src.ports) || [] : [],
                 diagnostics: Array.isArray(src.diagnostics) ? cloneJson(src.diagnostics) || [] : [],
                 createdAt: safeText(src.createdAt || new Date().toISOString()),
@@ -773,6 +776,7 @@
                 sourceModuleName: safeText(sourceItem && (sourceItem.sourceModuleName || sourceItem.moduleName)) || moduleName,
                 sourceFileName: basename(paths.vPath),
                 sourcePath: paths.vPath,
+                parameters: cloneJson(payload.wrapperParameters) || [],
                 ports: cloneJson(payload.wrapperPorts) || [],
                 diagnostics: [],
                 scope: scope,
@@ -1289,6 +1293,26 @@
             return html;
         }
 
+        function renderParametersTable(item) {
+            var params = Array.isArray(item && item.parameters) ? item.parameters : [];
+            if (!params.length) return '';
+            var html = '<div style="font-size:13px;font-weight:600;color:#0f172a;margin-bottom:8px;">Parameters (' + params.length + ')</div>' +
+                '<div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:14px;">' +
+                '<table style="width:100%;border-collapse:collapse;font-size:12px;">' +
+                '<thead><tr style="background:#f8fafc;">' +
+                '<th style="text-align:left;padding:8px;border-bottom:1px solid #e2e8f0;">Name</th>' +
+                '<th style="text-align:left;padding:8px;border-bottom:1px solid #e2e8f0;">Default</th>' +
+                '</tr></thead><tbody>';
+            params.forEach(function (param) {
+                html += '<tr>' +
+                    '<td style="padding:8px;border-bottom:1px solid #f1f5f9;font-family:monospace;">' + safeText(param.name) + '</td>' +
+                    '<td style="padding:8px;border-bottom:1px solid #f1f5f9;font-family:monospace;white-space:pre-wrap;word-break:break-word;">' + safeText(param.value || '') + '</td>' +
+                    '</tr>';
+            });
+            html += '</tbody></table></div>';
+            return html;
+        }
+
         function renderDiagnostics(item) {
             var diags = Array.isArray(item && item.diagnostics) ? item.diagnostics : [];
             if (!diags.length) return '';
@@ -1316,9 +1340,10 @@
             mgr.detailMeta.textContent = [
                 (item.scope === 'software' ? 'Software IP' : 'Project IP'),
                 item.sourceFileName ? ('Source: ' + item.sourceFileName) : '',
-                item.sourcePath ? ('Path: ' + item.sourcePath) : ''
+                item.sourcePath ? ('Path: ' + item.sourcePath) : '',
+                Array.isArray(item.parameters) && item.parameters.length ? ('Parameters: ' + item.parameters.length) : ''
             ].filter(Boolean).join('\n');
-            mgr.detailPorts.innerHTML = renderPortsTable(item);
+            mgr.detailPorts.innerHTML = renderParametersTable(item) + renderPortsTable(item);
             mgr.detailDiag.innerHTML = renderDiagnostics(item);
         }
 
@@ -1390,6 +1415,7 @@
                             sourceModuleName: modName,
                             sourceFileName: mod.sourceFileName || basename(mod.sourcePath),
                             sourcePath: mod.sourcePath,
+                            parameters: mod.parameters || [],
                             ports: mod.ports || [],
                             diagnostics: mod.diagnostics || [],
                             scope: scope,
@@ -1416,6 +1442,7 @@
                     sourceModuleName: modName,
                     sourceFileName: mod.sourceFileName || basename(mod.sourcePath),
                     sourcePath: mod.sourcePath,
+                    parameters: mod.parameters || [],
                     ports: mod.ports || [],
                     diagnostics: mod.diagnostics || [],
                     scope: scope
