@@ -367,9 +367,18 @@
     return 'south';
   }
 
-  function intersectSegmentWithRectSides(a, b, rect) {
+  function sideForPolygonEdge(rect, edgeA, edgeB) {
+    var dx = Number(edgeB.x || 0) - Number(edgeA.x || 0);
+    var dy = Number(edgeB.y || 0) - Number(edgeA.y || 0);
+    var mid = midpoint(edgeA, edgeB);
+    var cx = rect ? rect.x + rect.width / 2 : 0;
+    var cy = rect ? rect.y + rect.height / 2 : 0;
+    if (Math.abs(dx) >= Math.abs(dy)) return mid.y <= cy ? 'top' : 'bottom';
+    return mid.x <= cx ? 'left' : 'right';
+  }
+
+  function intersectSegmentWithOutline(a, b, outline, rect) {
     var out = [];
-    var dx = b.x - a.x, dy = b.y - a.y;
     function add(side, t, x, y) {
       if (!isFinite(t) || t < 0 || t > 1) return;
       for (var i = 0; i < out.length; i++) {
@@ -380,21 +389,22 @@
       }
       out.push({ side: side, t: t, point: { x: x, y: y } });
     }
-    if (Math.abs(dx) > 1e-9) {
-      var tLeft = (rect.left - a.x) / dx;
-      var yLeft = a.y + dy * tLeft;
-      if (yLeft >= rect.top - 1e-6 && yLeft <= rect.bottom + 1e-6) add('left', tLeft, rect.left, yLeft);
-      var tRight = (rect.right - a.x) / dx;
-      var yRight = a.y + dy * tRight;
-      if (yRight >= rect.top - 1e-6 && yRight <= rect.bottom + 1e-6) add('right', tRight, rect.right, yRight);
-    }
-    if (Math.abs(dy) > 1e-9) {
-      var tTop = (rect.top - a.y) / dy;
-      var xTop = a.x + dx * tTop;
-      if (xTop >= rect.left - 1e-6 && xTop <= rect.right + 1e-6) add('top', tTop, xTop, rect.top);
-      var tBottom = (rect.bottom - a.y) / dy;
-      var xBottom = a.x + dx * tBottom;
-      if (xBottom >= rect.left - 1e-6 && xBottom <= rect.right + 1e-6) add('bottom', tBottom, xBottom, rect.bottom);
+    if (!outline || outline.length < 2) return out;
+    var rdx = Number(b.x || 0) - Number(a.x || 0);
+    var rdy = Number(b.y || 0) - Number(a.y || 0);
+    for (var i = 0; i < outline.length; i++) {
+      var p = outline[i];
+      var q = outline[(i + 1) % outline.length];
+      var sdx = Number(q.x || 0) - Number(p.x || 0);
+      var sdy = Number(q.y || 0) - Number(p.y || 0);
+      var denom = rdx * sdy - rdy * sdx;
+      if (Math.abs(denom) <= 1e-9) continue;
+      var apx = Number(p.x || 0) - Number(a.x || 0);
+      var apy = Number(p.y || 0) - Number(a.y || 0);
+      var t = (apx * sdy - apy * sdx) / denom;
+      var u = (apx * rdy - apy * rdx) / denom;
+      if (t < -1e-6 || t > 1 + 1e-6 || u < -1e-6 || u > 1 + 1e-6) continue;
+      add(sideForPolygonEdge(rect, p, q), t, Number(a.x || 0) + rdx * t, Number(a.y || 0) + rdy * t);
     }
     out.sort(function (x, y) { return x.t - y.t; });
     return out;
@@ -409,17 +419,17 @@
         inner.top >= outer.top - tol &&
         inner.bottom <= outer.bottom + tol;
     }
-    function pointInOrOnRect(pt, rect, tol) {
+    function pointInOrOnModule(pt, info, tol) {
       tol = Number(tol || 0);
-      if (!pt || !rect) return false;
-      return pt.x >= rect.left - tol && pt.x <= rect.right + tol &&
-        pt.y >= rect.top - tol && pt.y <= rect.bottom + tol;
+      if (!pt || !info) return false;
+      if (!Shared.pointInRect(pt, info.rect, tol)) return false;
+      return Shared.pointInCellOutline(pt, info.cell, Math.max(1e-6, tol));
     }
     var moduleInfo = [];
     for (var mi = 0; mi < modules.length; mi++) {
       var mRect = Shared.rectOfCell(modules[mi]);
       if (!mRect) continue;
-      moduleInfo.push({ cell: modules[mi], rect: mRect, children: [] });
+      moduleInfo.push({ cell: modules[mi], rect: mRect, outline: Shared.outlineOfCell(modules[mi]), children: [] });
     }
     for (mi = 0; mi < moduleInfo.length; mi++) {
       for (var mj = 0; mj < moduleInfo.length; mj++) {
@@ -442,20 +452,20 @@
         var info = moduleInfo[m];
         var moduleCell = info.cell;
         var rect = info.rect;
-        var hits = intersectSegmentWithRectSides(a, b, rect);
+        var hits = intersectSegmentWithOutline(a, b, info.outline, rect);
         for (var h = 0; h < hits.length; h++) {
           var hit = hits[h];
           var coveredByChild = false;
           for (var c = 0; c < info.children.length; c++) {
             var childInfo = info.children[c];
-            if (pointInOrOnRect(hit.point, childInfo.rect, 1.2)) { coveredByChild = true; break; }
+            if (pointInOrOnModule(hit.point, childInfo, 1.2)) { coveredByChild = true; break; }
           }
           if (coveredByChild) continue;
           var stepT = Math.max(0.002, Math.min(0.05, (Math.max(1, Number(config.interiorEpsilon || 0)) + 1) / segLen));
           var before = pointAtT(a, b, Math.max(0, hit.t - stepT));
           var after = pointAtT(a, b, Math.min(1, hit.t + stepT));
-          var insideBefore = Shared.pointInRectInterior(before, rect, config.interiorEpsilon);
-          var insideAfter = Shared.pointInRectInterior(after, rect, config.interiorEpsilon);
+          var insideBefore = Shared.pointInCellOutlineInterior(before, moduleCell, config.interiorEpsilon);
+          var insideAfter = Shared.pointInCellOutlineInterior(after, moduleCell, config.interiorEpsilon);
           if (insideBefore === insideAfter) continue;
           events.push({
             moduleCell: moduleCell,
@@ -522,7 +532,7 @@
     var bestArea = Infinity;
     for (var i = 0; i < modules.length; i++) {
       var rect = Shared.rectOfCell(modules[i]);
-      if (!rect || !Shared.pointInRectInterior(center, rect, 0.01)) continue;
+      if (!rect || !Shared.pointInCellOutlineInterior(center, modules[i], 0.01)) continue;
       var area = Math.max(0, Number(rect.width || 0)) * Math.max(0, Number(rect.height || 0));
       if (!best || area < bestArea) {
         best = modules[i];
@@ -1025,11 +1035,12 @@
         if (!ctx.lineAnalyses[l].validLoop) continue;
         var pts = orderedPointsForLine(ctx.lineAnalyses[l]);
         for (var k = 0; k < pts.length; k++) {
-          if (Shared.pointInRect(pts[k], Shared.expandRect(rect, ctx.config.moduleHitPadding), 0)) { visited = true; break; }
+          if (Shared.pointInRect(pts[k], Shared.expandRect(rect, ctx.config.moduleHitPadding), 0) &&
+              Shared.pointInCellOutline(pts[k], moduleCell, Math.max(0.01, ctx.config.interiorEpsilon))) { visited = true; break; }
         }
         if (!visited) {
           for (k = 0; k < pts.length - 1; k++) {
-            var events = intersectSegmentWithRectSides(pts[k], pts[k + 1], rect);
+            var events = intersectSegmentWithOutline(pts[k], pts[k + 1], Shared.outlineOfCell(moduleCell), rect);
             if (events.length) { visited = true; break; }
           }
         }
