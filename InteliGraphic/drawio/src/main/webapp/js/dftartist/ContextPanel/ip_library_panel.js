@@ -381,6 +381,112 @@
             '</svg>';
     }
 
+    function normalizeLayerName(name) {
+        return String(name || '').replace(/^\s+|\s+$/g, '').toLowerCase();
+    }
+
+    function getLayerRootCell(graph) {
+        if (!graph || !graph.getModel || !graph.getDefaultParent) return null;
+        try {
+            var model = graph.getModel();
+            var parent = graph.getDefaultParent();
+            return model && parent ? model.getParent(parent) : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function getOwningTopLayerName(graph, cell) {
+        if (!graph || !cell || !graph.getModel) return '';
+        var model = graph.getModel();
+        var layerRoot = getLayerRootCell(graph);
+        if (!layerRoot) return '';
+        var cur = cell;
+        while (cur) {
+            var parent = null;
+            try { parent = model.getParent(cur); } catch (e) { parent = null; }
+            if (!parent) return '';
+            if (parent === layerRoot) return String(cur.value || '');
+            cur = parent;
+        }
+        return '';
+    }
+
+    function isDataSourceCategory(category, dftsType) {
+        category = String(category || '').toLowerCase();
+        dftsType = String(dftsType || '').toLowerCase();
+        return category === 'data_source' || category === 'datasource' || /data_source/.test(dftsType);
+    }
+
+    function describeDataSourceType(dftsType) {
+        dftsType = String(dftsType || '').toLowerCase();
+        if (dftsType === 'ssn_data_source') return 'PadSource';
+        if (dftsType === 'bscan_data_source') return 'TapSource';
+        if (dftsType === 'bisrc_data_source') return 'BISRCSource';
+        if (dftsType === 'mux_data_source') return 'MuxDataSource';
+        return dftsType || 'DataSource';
+    }
+
+    function getDataSourcePlacementError(graph, cell) {
+        var NS = global.DftsIP;
+        if (!graph || !cell || !NS) return '';
+        var body = (typeof NS.resolveChipBodyFromContext === 'function') ? NS.resolveChipBodyFromContext(graph, cell) : cell;
+        if (!body) body = cell;
+        var style = graph.getCellStyle ? graph.getCellStyle(body) : {};
+        var category = mxUtils.getValue(style, 'dftsIP_category', '');
+        var dftsType = String(mxUtils.getValue(style, 'dftsIP_type', ''));
+        if (!isDataSourceCategory(category, dftsType)) return '';
+
+        var layerName = normalizeLayerName(getOwningTopLayerName(graph, body));
+        var label = body.value != null ? String(body.value) : '';
+        if (!label && typeof graph.convertValueToString === 'function') label = String(graph.convertValueToString(body) || '');
+        if (!label) label = describeDataSourceType(dftsType);
+
+        if (layerName === 'base') {
+            return 'Error: base layer cannot contain data source IP "' + label + '".';
+        }
+
+        var allowedLayers = null;
+        var dataSourceType = String(dftsType || '').toLowerCase();
+        if (dataSourceType === 'ssn_data_source') {
+            allowedLayers = ['ssn'];
+        } else if (dataSourceType === 'bscan_data_source') {
+            allowedLayers = ['bscan', 'ijtag', 'iftag', 'jtag'];
+        } else if (dataSourceType === 'bisrc_data_source') {
+            allowedLayers = ['bisr'];
+        } else if (dataSourceType === 'mux_data_source') {
+            allowedLayers = ['ssn', 'bscan', 'ijtag', 'iftag', 'jtag', 'bisr'];
+        } else {
+            return 'Error: unsupported data source type "' + describeDataSourceType(dftsType) + '" on layer "' + (layerName || '?') + '".';
+        }
+
+        if (allowedLayers.indexOf(layerName) >= 0) return '';
+        return 'Error: ' + describeDataSourceType(dftsType) + ' can only be placed on layer(s): ' +
+            allowedLayers.join(', ') + '; current layer is "' + (layerName || '?') + '".';
+    }
+
+    function removeCell(graph, cell) {
+        if (!graph || !cell || !graph.getModel) return;
+        var model = graph.getModel();
+        model.beginUpdate();
+        try {
+            model.remove(cell);
+        } finally {
+            model.endUpdate();
+        }
+    }
+
+    function validateInsertedCell(ui, graph, cell) {
+        var errorText = getDataSourcePlacementError(graph, cell);
+        if (!errorText) return cell;
+        removeCell(graph, cell);
+        dockInfo(ui, 'error', errorText, { source: 'ip-library' });
+        if (typeof console !== 'undefined' && console.error) {
+            console.error('[Context.IP] ' + errorText);
+        }
+        return null;
+    }
+
     function insertDefinition(ui, def) {
         var graph = getGraph(ui);
         var isFloorplan = !!(def && def.__panelSource === 'floorplan');
@@ -430,6 +536,8 @@
             }
         }
 
+        inserted = validateInsertedCell(ui, graph, inserted);
+        if (!inserted) return null;
         if (inserted && typeof graph.setSelectionCell === 'function') graph.setSelectionCell(inserted);
         dockInfo(ui, 'success', 'Added IP to current page: ' + safeText(def.defaultLabel || def.key), { source: 'ip-library' });
         return inserted;
@@ -465,6 +573,8 @@
 
         var arr = graph.importCells([cell], x, y, parent) || [];
         var inserted = arr[0] || null;
+        inserted = validateInsertedCell(ui, graph, inserted);
+        if (!inserted) return null;
         if (inserted && typeof graph.setSelectionCell === 'function') graph.setSelectionCell(inserted);
         return inserted;
     }
