@@ -495,6 +495,11 @@
                 footerHint: null,
                 saveBtn: null,
                 shown: false
+            },
+            contextMenu: {
+                overlay: null,
+                deleteBtn: null,
+                targetKey: ''
             }
         };
 
@@ -503,6 +508,85 @@
         var searchInput = null;
         var statusText = null;
         var previewBox = null;
+
+        function hideContextMenu() {
+            var menu = state.contextMenu;
+            menu.targetKey = '';
+            if (menu.overlay) menu.overlay.style.display = 'none';
+        }
+
+        async function deleteThirdPartyItemByKey(key) {
+            key = safeText(key).trim();
+            if (!key) return;
+            var items = (state.thirdParty.items || []).slice();
+            var hit = null;
+            for (var i = 0; i < items.length; i++) {
+                if (safeText(items[i] && items[i].key) === key) {
+                    hit = items[i];
+                    break;
+                }
+            }
+            if (!hit) return;
+
+            var msg = 'Delete 3rd Party IP "' + safeText(hit.moduleName || hit.sourceModuleName || hit.key) + '"?';
+            var confirmed = false;
+            if (global.mxUtils && typeof global.mxUtils.confirm === 'function') {
+                confirmed = !!global.mxUtils.confirm(msg);
+            } else if (typeof global.confirm === 'function') {
+                confirmed = !!global.confirm(msg);
+            }
+            if (!confirmed) return;
+
+            hideContextMenu();
+            await saveThirdPartyItems(items.filter(function (item) { return safeText(item && item.key) !== key; }));
+            renderList();
+            dockInfo(ui, 'success', 'Deleted 3rd Party IP: ' + safeText(hit.moduleName || hit.key), { source: 'ip-library' });
+        }
+
+        function ensureContextMenuBuilt() {
+            var menu = state.contextMenu;
+            if (menu.overlay) return;
+
+            menu.overlay = el('div');
+            menu.overlay.style.cssText = 'position:fixed;display:none;z-index:1400;min-width:150px;background:#fff;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 14px 30px rgba(15,23,42,0.18);padding:6px;';
+
+            menu.deleteBtn = el('button', null, 'Delete IP');
+            menu.deleteBtn.type = 'button';
+            menu.deleteBtn.style.cssText = 'display:block;width:100%;text-align:left;border:none;background:transparent;border-radius:8px;padding:8px 10px;font-size:12px;color:#b91c1c;cursor:pointer;';
+            menu.deleteBtn.onmouseenter = function () { menu.deleteBtn.style.background = '#fef2f2'; };
+            menu.deleteBtn.onmouseleave = function () { menu.deleteBtn.style.background = 'transparent'; };
+            menu.deleteBtn.onmousedown = function (evt) { stop(evt); };
+            menu.deleteBtn.onclick = function (evt) {
+                stop(evt);
+                deleteThirdPartyItemByKey(menu.targetKey).catch(function (e) {
+                    dockInfo(ui, 'error', 'Delete 3rd Party IP failed: ' + e.message, { source: 'ip-library' });
+                });
+            };
+            menu.overlay.appendChild(menu.deleteBtn);
+            document.body.appendChild(menu.overlay);
+
+            document.addEventListener('mousedown', function (evt) {
+                if (menu.overlay && evt && evt.target && menu.overlay.contains && menu.overlay.contains(evt.target)) return;
+                hideContextMenu();
+            }, true);
+            document.addEventListener('scroll', function () { hideContextMenu(); }, true);
+            document.addEventListener('keydown', function (evt) {
+                if (evt && (evt.key === 'Escape' || evt.keyCode === 27)) hideContextMenu();
+            }, true);
+        }
+
+        function showContextMenuForDef(def, clientX, clientY) {
+            ensureContextMenuBuilt();
+            var menu = state.contextMenu;
+            if (!def || !def.__thirdPartyManaged) {
+                hideContextMenu();
+                return;
+            }
+            menu.targetKey = safeText(def.key);
+            menu.overlay.style.left = Math.max(8, clientX) + 'px';
+            menu.overlay.style.top = Math.max(8, clientY) + 'px';
+            menu.overlay.style.display = 'block';
+        }
 
         function readSoftwareItems() {
             try {
@@ -886,6 +970,11 @@
         function ensureBuilt() {
             if (root) return;
             root = el('div', 'dftctx-panel dftctx-ip');
+            root.oncontextmenu = function (evt) {
+                stop(evt);
+                hideContextMenu();
+                return false;
+            };
 
             var toolbar = el('div', 'dftctx-panel-toolbar compact');
             var searchWrap = el('div', 'dftctx-search-wrap');
@@ -1040,6 +1129,17 @@
                 if (state.hoverKey === def.key) state.hoverKey = '';
                 row.style.background = 'transparent';
             };
+            row.oncontextmenu = function (evt) {
+                stop(evt);
+                state.hoverKey = '';
+                row.style.background = 'transparent';
+                if (def.__thirdPartyManaged) {
+                    showContextMenuForDef(def, evt.clientX || 0, evt.clientY || 0);
+                } else {
+                    hideContextMenu();
+                }
+                return false;
+            };
             row.ondragstart = function (evt) {
                 if (!pageReady || !evt.dataTransfer) return;
                 evt.dataTransfer.effectAllowed = 'copy';
@@ -1049,6 +1149,7 @@
                 row.style.background = 'transparent';
             };
             row.onmousedown = function (evt) {
+                if (evt && evt.button !== 0) return;
                 stop(evt);
                 state.hoverKey = '';
                 row.style.background = 'transparent';
@@ -1572,6 +1673,10 @@
         }
 
         function destroy() {
+            hideContextMenu();
+            if (state.contextMenu.overlay && state.contextMenu.overlay.parentNode) state.contextMenu.overlay.parentNode.removeChild(state.contextMenu.overlay);
+            state.contextMenu.overlay = null;
+            state.contextMenu.deleteBtn = null;
             hideManager();
             if (state.manager.overlay && state.manager.overlay.parentNode) state.manager.overlay.parentNode.removeChild(state.manager.overlay);
             state.manager.overlay = null;
