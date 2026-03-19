@@ -234,7 +234,12 @@
   }
 
   function runPreviewDftspec(ui) {
-    return runGenerateDftspecViaConverters(ui, false);
+    if (!Shared.isProjectReady(ui)) throw new Error('Create or open a project first.');
+    if (!Shared.getActivePageReady(ui)) throw new Error('Open a page before generating dftspec.');
+    Shared.showDftspecPreview(ui, Shared.ensureState(ui).lastDftspec || '');
+    Shared.logDock(ui, 'Opened DFTSPEC preview. Validation results update live in the preview.', 'info');
+    Shared.setJobs(ui, [{ name: 'generate_dftspec', status: 'success', detail: 'Preview opened', progress: 100 }]);
+    return true;
   }
 
   function getDiagramXmlForDftspec(ui) {

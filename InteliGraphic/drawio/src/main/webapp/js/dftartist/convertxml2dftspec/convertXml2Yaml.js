@@ -8,11 +8,44 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
     try {
         const doc = mxUtils.parseXml(xmlString);
         const root = doc.documentElement;
+        const runtimeGlobal = typeof globalThis !== "undefined" ? globalThis : (typeof window !== "undefined" ? window : this);
 
         // -----------------------------
         // Utils
         // -----------------------------
         const htmlEntities = new DOMParser();
+
+        function reportDftspecValidation(level, message) {
+            try {
+                const ui = runtimeGlobal && runtimeGlobal.DFT_CTX;
+                if (!ui) return;
+                const text = String(message || "").trim();
+                const key = String(level || "info") + "|" + text;
+                if (runtimeGlobal.__dftspecDockLastKey === key) return;
+                runtimeGlobal.__dftspecDockLastKey = key;
+                const lines = text ? text.split(/\n+/).filter(Boolean) : [];
+                if (typeof ui.setDockReports === "function") {
+                    ui.setDockReports([{
+                        title: "DFTSPEC Validation",
+                        items: {
+                            status: String(level || "info"),
+                            summary: lines[0] || (level === "success" ? "DFTSPEC validation passed." : ""),
+                            issues: level === "error" ? lines.length : 0
+                        }
+                    }]);
+                }
+                if (typeof ui.logDockOutput === "function") {
+                    if (!lines.length && level === "success") ui.logDockOutput("DFTSPEC validation passed.", "success", { source: "dftspec-preview" });
+                    lines.forEach((line) => ui.logDockOutput(line, level || "info", { source: "dftspec-preview" }));
+                }
+                if (typeof ui.pushDockMessage === "function" && (level === "error" || level === "warning")) {
+                    lines.forEach((line) => ui.pushDockMessage({ level: level, text: line, source: "dftspec-preview" }));
+                }
+                if (typeof ui.focusDockTab === "function") {
+                    ui.focusDockTab(level === "error" ? "messages" : "reports");
+                }
+            } catch (dockErr) {}
+        }
 
         function stripHtml(s) {
             if (!s) return "";
@@ -2652,6 +2685,7 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
                 if (!p) return false;
                 const pt = String(p.pin_type || '').toLowerCase();
                 if (!isDataPinType(pt)) return false;
+                if (String(p.role || '') !== 'host_input') return false;
                 return outDegree(p.id) > 0;
             }
 
@@ -2659,7 +2693,63 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
                 if (!p) return false;
                 const pt = String(p.pin_type || '').toLowerCase();
                 if (!isDataPinType(pt)) return false;
+                if (String(p.role || '') !== 'host_output') return false;
                 return inDegree(p.id) > 0;
+            }
+
+            function isRenderableMiddleSsnType(typeName) {
+                const t = String(typeName || '').toLowerCase();
+                return t === 'ssn_scanhost' ||
+                    t === 'ssn_outputpipeline' ||
+                    t === 'ssn_pipeline' ||
+                    t === 'ssn_receiver1xpipeline' ||
+                    t === 'ssn_fifo' ||
+                    t === 'ssn_busfrequencymultiplier' ||
+                    t === 'ssn_busfrequencydivider';
+            }
+
+            function formatPinList(pinIds) {
+                return (pinIds || []).map((pid) => {
+                    const p = pins[pid];
+                    if (!p) return String(pid);
+                    return String(p.pinKey || p.name || pid) + ' [' + String(p.direction || '?') + ']';
+                });
+            }
+
+            function validateRenderableSsnIps() {
+                const errors = [];
+                Object.keys(byIp).forEach((ipId) => {
+                    const ip = ips[ipId];
+                    if (!ip || !isRenderableMiddleSsnType(ip.ip_type)) return;
+                    const plist = byIp[ipId] || [];
+                    const dataInputs = plist.filter((pid) => pins[pid].direction === 'input' && isDataPinType(pins[pid].pin_type));
+                    const dataOutputs = plist.filter((pid) => pins[pid].direction === 'output' && isDataPinType(pins[pid].pin_type));
+                    const instName = String(ip.inst || ip.label || ipId);
+                    if (!dataInputs.length || !dataOutputs.length) {
+                        const missing = [];
+                        if (!dataInputs.length) missing.push('data input');
+                        if (!dataOutputs.length) missing.push('data output');
+                        errors.push(
+                            'SSN IP "' + instName + '" (' + String(ip.ip_type || '') + ') is invalid: missing ' + missing.join(' and ') + '.'
+                        );
+                        return;
+                    }
+                    const hasIncomingEdge = dataInputs.some((pid) => inDegree(pid) > 0);
+                    const hasOutgoingEdge = dataOutputs.some((pid) => outDegree(pid) > 0);
+                    if (!hasIncomingEdge) {
+                        errors.push(
+                            'SSN IP "' + instName + '" (' + String(ip.ip_type || '') + ') is disconnected on input side: no incoming edge reaches any input pin. Inputs: ' +
+                            formatPinList(dataInputs).join(', ')
+                        );
+                    }
+                    if (!hasOutgoingEdge) {
+                        errors.push(
+                            'SSN IP "' + instName + '" (' + String(ip.ip_type || '') + ') is disconnected on output side: no outgoing edge leaves any output pin. Outputs: ' +
+                            formatPinList(dataOutputs).join(', ')
+                        );
+                    }
+                });
+                return errors;
             }
 
             const entryPins = [];
@@ -2686,7 +2776,20 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
                 outdeg: outDegree(pid),
                 role: pins[pid].role
             })));
-            if (!entryPins.length || !exitPins.length) return {};
+            const validationErrors = validateRenderableSsnIps();
+            const hostInputs = Object.keys(pins).filter((pid) => String(pins[pid].role || '') === 'host_input' && isDataPinType(pins[pid].pin_type));
+            const hostOutputs = Object.keys(pins).filter((pid) => String(pins[pid].role || '') === 'host_output' && isDataPinType(pins[pid].pin_type));
+            if (!entryPins.length || !exitPins.length) {
+                validationErrors.push(
+                    'SSN host datapath must be HI -> ... -> HO. Missing a connected HI entry or HO exit pin.'
+                );
+                validationErrors.push(
+                    'HI data candidates: ' + (hostInputs.length ? formatPinList(hostInputs).join(', ') : 'none')
+                );
+                validationErrors.push(
+                    'HO data candidates: ' + (hostOutputs.length ? formatPinList(hostOutputs).join(', ') : 'none')
+                );
+            }
 
             let ep = entryPins[0];
             let xp = exitPins[0];
@@ -2710,7 +2813,26 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
                 exit: xp,
                 path: (mainPinPath || []).map((pid) => pins[pid] ? (pins[pid].ip_inst + '.' + pins[pid].pinKey) : pid)
             });
-            if (!mainPinPath || !mainPinPath.length) return {};
+            if (entryPins.length && exitPins.length) {
+                if (!mainPinPath || !mainPinPath.length) {
+                    validationErrors.push(
+                        'SSN host datapath direction is invalid. Expected HI -> ... -> HO, but no valid path was found.'
+                    );
+                    validationErrors.push(
+                        'Tried HI pin "' + String(pins[ep] ? (pins[ep].ip_inst + '.' + pins[ep].pinKey) : ep) + '" to HO pin "' +
+                        String(pins[xp] ? (pins[xp].ip_inst + '.' + pins[xp].pinKey) : xp) + '".'
+                    );
+                } else if (pins[ep].role !== 'host_input' || pins[xp].role !== 'host_output') {
+                    validationErrors.push(
+                        'SSN host datapath must start from HI and end at HO. Current path resolves to "' +
+                        String(pins[ep] ? (pins[ep].ip_inst + '.' + pins[ep].pinKey) : ep) + '" -> "' +
+                        String(pins[xp] ? (pins[xp].ip_inst + '.' + pins[xp].pinKey) : xp) + '".'
+                    );
+                }
+            }
+            if (validationErrors.length) {
+                throw new Error(validationErrors.join('\n'));
+            }
 
             const out = {};
             out.DATAPATH0 = makeDatapathObject(mainPinPath, true);
@@ -2923,9 +3045,11 @@ function convertXmlToyaml(xmlString, /*unused*/pretty) {
         }
 
         const data = parseDrawio(root);
+        reportDftspecValidation("success", "DFTSPEC validation passed.");
         return toYAML(data);
     } catch (e) {
         console.error("convertXmlToyaml error:", e);
+        reportDftspecValidation("error", e && e.message ? e.message : String(e));
         return "";
     }
 }
