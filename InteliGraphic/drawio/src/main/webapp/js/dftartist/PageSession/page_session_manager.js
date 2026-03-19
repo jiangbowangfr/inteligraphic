@@ -456,12 +456,24 @@
     return '';
   }
 
+  function notifyContextPanel(ui, key) {
+    if (!ui) return;
+    try {
+      if (typeof ui.refreshContextPanel === 'function') {
+        ui.refreshContextPanel(key);
+      } else if (ui._dftContextPanel && typeof ui._dftContextPanel.refresh === 'function') {
+        ui._dftContextPanel.refresh(key);
+      }
+    } catch (e) {}
+  }
+
   function setActiveContext(ui, designRef, pageName, absPath) {
     if (!ui || !designRef || !pageName) return null;
 
     if (typeof global._setActivePageCtx === 'function') {
       try {
         global._setActivePageCtx(ui, designRef, pageName, absPath);
+        notifyContextPanel(ui, 'ip');
         return ui._activeProjectPageCtx || null;
       } catch (e) {
         emitLog('warn', '_setActivePageCtx failed; using fallback context.', e);
@@ -481,6 +493,7 @@
 
     if (absPath) ui._activeProjectPageCtx.abs = absPath;
     if (designRef) ui._activeProjectPageCtx.designKey = (Array.isArray(segs) ? segs.join('/') : '');
+    notifyContextPanel(ui, 'ip');
     return ui._activeProjectPageCtx;
   }
 
@@ -610,6 +623,7 @@
 
     try { ui._activeProjectPageCtx = null; } catch (e0) {}
     try { ui._activeEnvCtx = null; } catch (e1) {}
+    notifyContextPanel(ui, 'ip');
 
     var targetName = text(pageName).trim() || 'Page-1';
     var blankPage = createBlankPageTab(ui, targetName);
