@@ -1124,7 +1124,8 @@
                 var pg = new mxGeometry(); pg.relative = false;
                 var lg = new mxGeometry(); lg.relative = false;
                 var portHitSize = Math.max(12, Math.round(layout.pinStub * 0.7));
-                var portHalf = Math.round(portHitSize / 2);
+                var portHalf = portHitSize / 2;
+                var lineCenterOffset = (thickness / 2) - Math.floor(thickness / 2);
 
                 var attach = getPinAttachPoint(model, layout, side, pos);
 
@@ -1136,7 +1137,7 @@
                     sg.height = thickness;
 
                     pg.x = attach.x - layout.pinStub - portHalf;
-                    pg.y = attach.y - portHalf;
+                    pg.y = attach.y + lineCenterOffset - portHalf;
                     pg.width = portHitSize;
                     pg.height = portHitSize;
 
@@ -1152,7 +1153,7 @@
                     sg.height = thickness;
 
                     pg.x = attach.x + layout.pinStub - portHalf;
-                    pg.y = attach.y - portHalf;
+                    pg.y = attach.y + lineCenterOffset - portHalf;
                     pg.width = portHitSize;
                     pg.height = portHitSize;
 
@@ -1166,7 +1167,7 @@
                     sg.width = thickness;
                     sg.height = layout.pinStub;
 
-                    pg.x = attach.x - portHalf;
+                    pg.x = attach.x + lineCenterOffset - portHalf;
                     pg.y = attach.y - layout.pinStub - portHalf;
                     pg.width = portHitSize;
                     pg.height = portHitSize;
@@ -1181,7 +1182,7 @@
                     sg.width = thickness;
                     sg.height = layout.pinStub;
 
-                    pg.x = attach.x - portHalf;
+                    pg.x = attach.x + lineCenterOffset - portHalf;
                     pg.y = attach.y + layout.pinStub - portHalf;
                     pg.width = portHitSize;
                     pg.height = portHitSize;
