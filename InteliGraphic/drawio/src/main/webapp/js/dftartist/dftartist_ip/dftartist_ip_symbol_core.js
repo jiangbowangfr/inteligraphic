@@ -628,10 +628,29 @@
         return mxUtils.getValue(s, 'dftsIP_symbolStub', '0') === '1';
     }
 
+    function rotateSide(side, rotation) {
+        side = normalizeSide(side);
+        var steps = Math.round(normalizeRotation(rotation) / 90) % 4;
+        for (var i = 0; i < steps; i++) {
+            if (side === 'west') side = 'north';
+            else if (side === 'north') side = 'east';
+            else if (side === 'east') side = 'south';
+            else if (side === 'south') side = 'west';
+        }
+        return side;
+    }
+
     function getSymbolEndpointSide(graph, cell) {
         if (!graph || !cell) return '';
         var s = graph.getCellStyle(cell);
-        return normalizeSide(mxUtils.getValue(s, 'dftsIP_symbolSide', ''));
+        var side = normalizeSide(mxUtils.getValue(s, 'dftsIP_symbolSide', ''));
+        var model = graph.getModel();
+        var parent = model ? model.getParent(cell) : null;
+        var bodyModel = getModel(parent);
+        if (bodyModel && bodyModel.transform) {
+            return rotateSide(side, bodyModel.transform.rotation || 0);
+        }
+        return rotateSide(side, mxUtils.getValue(s, 'rotation', '0'));
     }
 
     function applyTerminalConstraint(style, prefix, side) {
@@ -729,6 +748,26 @@
         for (var j = 0; j < drop.length; j++) m.remove(drop[j]);
     }
 
+    function normalizeConnectedSymbolEdges(graph, body) {
+        if (!graph || !body) return;
+        var m = graph.getModel();
+        var seen = {};
+        for (var i = 0; i < m.getChildCount(body); i++) {
+            var child = m.getChildAt(body, i);
+            if (!child || (!isSymbolPortCell(graph, child) && !isSymbolStubCell(graph, child))) continue;
+            for (var j = 0; j < m.getEdgeCount(child); j++) {
+                var edge = m.getEdgeAt(child, j);
+                if (!edge || !edge.edge) continue;
+                var edgeId = edge.getId ? edge.getId() : edge.id;
+                if (seen[edgeId]) continue;
+                seen[edgeId] = true;
+                var source = m.getTerminal(edge, true);
+                var target = m.getTerminal(edge, false);
+                m.setStyle(edge, normalizeSymbolPortEdgeStyle(graph, edge.style || '', source, target));
+            }
+        }
+    }
+
     function getAllSymbolBodies(graph) {
         var out = [];
         if (!graph || !graph.getModel) return out;
@@ -750,6 +789,16 @@
 
         walk(model.getRoot());
         return out;
+    }
+
+    function scheduleRelayoutAllSymbolBodies(graph) {
+        if (!graph || graph.__dftsSymbolRelayoutAllScheduled) return;
+        graph.__dftsSymbolRelayoutAllScheduled = true;
+        setTimeout(function () {
+            graph.__dftsSymbolRelayoutAllScheduled = false;
+            var bodies = getAllSymbolBodies(graph);
+            for (var i = 0; i < bodies.length; i++) relayout(graph, bodies[i]);
+        }, 0);
     }
 
     function allocateInstanceName(graph, base) {
@@ -1203,6 +1252,7 @@
             });
 
             removeStaleChildren(graph, body, valid);
+            normalizeConnectedSymbolEdges(graph, body);
         } finally {
             m.endUpdate();
         }
@@ -1568,6 +1618,8 @@
                 return edge;
             };
         }
+
+        scheduleRelayoutAllSymbolBodies(graph);
     }
 
     function openPinLayoutEditor(ui, body, forcedGraph) {
