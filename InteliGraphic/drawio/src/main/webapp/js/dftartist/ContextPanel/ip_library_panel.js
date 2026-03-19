@@ -442,6 +442,7 @@
         if (!label && typeof graph.convertValueToString === 'function') label = String(graph.convertValueToString(body) || '');
         if (!label) label = describeDataSourceType(dftsType);
 
+        if (!layerName || layerName === 'other') return '';
         if (layerName === 'base') {
             return 'Error: base layer cannot contain data source IP "' + label + '".';
         }
@@ -460,6 +461,16 @@
             return 'Error: unsupported data source type "' + describeDataSourceType(dftsType) + '" on layer "' + (layerName || '?') + '".';
         }
 
+        var restrictedLayers = {
+            base: true,
+            ssn: true,
+            bscan: true,
+            ijtag: true,
+            iftag: true,
+            jtag: true,
+            bisr: true
+        };
+        if (!restrictedLayers[layerName]) return '';
         if (allowedLayers.indexOf(layerName) >= 0) return '';
         return 'Error: ' + describeDataSourceType(dftsType) + ' can only be placed on layer(s): ' +
             allowedLayers.join(', ') + '; current layer is "' + (layerName || '?') + '".';
