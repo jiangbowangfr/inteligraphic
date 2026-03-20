@@ -422,6 +422,7 @@
     }
     inner.appendChild(scroll);
     wrap.appendChild(inner);
+    scrollToBottom(scroll);
   }
 
   function normalizeReportItems(items) {

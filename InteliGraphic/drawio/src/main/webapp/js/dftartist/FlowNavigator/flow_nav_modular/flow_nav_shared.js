@@ -337,6 +337,97 @@
     return { x: x, y: y, width: w, height: h, left: x, top: y, right: x + w, bottom: y + h };
   };
 
+  function parsePolyPoints(styleText, rect) {
+    var raw = trim(Shared.styleValue(styleText, 'polyPoints', ''));
+    if (!raw || !rect) return [];
+    var tokens = raw.split(/\s+/);
+    var out = [];
+    for (var i = 0; i < tokens.length; i++) {
+      var xy = tokens[i].split(',');
+      if (xy.length < 2) continue;
+      var x = Number(xy[0]);
+      var y = Number(xy[1]);
+      if (!isFinite(x) || !isFinite(y)) continue;
+      out.push({
+        x: rect.x + x * rect.width,
+        y: rect.y + y * rect.height
+      });
+    }
+    return out;
+  }
+
+  function fallbackRectOutline(rect) {
+    if (!rect) return [];
+    return [
+      { x: rect.left, y: rect.top },
+      { x: rect.right, y: rect.top },
+      { x: rect.right, y: rect.bottom },
+      { x: rect.left, y: rect.bottom }
+    ];
+  }
+
+  function pointOnSegment(point, a, b, eps) {
+    eps = Number(eps == null ? 1e-6 : eps);
+    if (!point || !a || !b) return false;
+    var abx = Number(b.x) - Number(a.x);
+    var aby = Number(b.y) - Number(a.y);
+    var apx = Number(point.x) - Number(a.x);
+    var apy = Number(point.y) - Number(a.y);
+    var cross = abx * apy - aby * apx;
+    if (Math.abs(cross) > eps) return false;
+    var dot = apx * abx + apy * aby;
+    if (dot < -eps) return false;
+    var lenSq = abx * abx + aby * aby;
+    if (dot - lenSq > eps) return false;
+    return true;
+  }
+
+  Shared.outlineOfCell = function outlineOfCell(cell) {
+    var rect = Shared.rectOfCell(cell);
+    if (!rect) return [];
+    var styleText = cell && cell.style ? String(cell.style) : '';
+    var poly = parsePolyPoints(styleText, rect);
+    return poly.length >= 3 ? poly : fallbackRectOutline(rect);
+  };
+
+  Shared.pointOnPolygonBoundary = function pointOnPolygonBoundary(point, polygon, eps) {
+    if (!point || !polygon || polygon.length < 2) return false;
+    eps = Number(eps == null ? 1e-6 : eps);
+    for (var i = 0; i < polygon.length; i++) {
+      var a = polygon[i];
+      var b = polygon[(i + 1) % polygon.length];
+      if (pointOnSegment(point, a, b, eps)) return true;
+    }
+    return false;
+  };
+
+  Shared.pointInPolygon = function pointInPolygon(point, polygon, eps, includeBoundary) {
+    if (!point || !polygon || polygon.length < 3) return false;
+    eps = Number(eps == null ? 1e-6 : eps);
+    if (Shared.pointOnPolygonBoundary(point, polygon, eps)) return includeBoundary !== false;
+    var inside = false;
+    for (var i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      var xi = Number(polygon[i].x), yi = Number(polygon[i].y);
+      var xj = Number(polygon[j].x), yj = Number(polygon[j].y);
+      var intersects = ((yi > point.y) !== (yj > point.y)) &&
+        (point.x < (xj - xi) * (point.y - yi) / ((yj - yi) || 1e-12) + xi);
+      if (intersects) inside = !inside;
+    }
+    return inside;
+  };
+
+  Shared.pointInCellOutline = function pointInCellOutline(point, cell, eps) {
+    var outline = Shared.outlineOfCell(cell);
+    if (!outline.length) return false;
+    return Shared.pointInPolygon(point, outline, eps, true);
+  };
+
+  Shared.pointInCellOutlineInterior = function pointInCellOutlineInterior(point, cell, eps) {
+    var outline = Shared.outlineOfCell(cell);
+    if (!outline.length) return false;
+    return Shared.pointInPolygon(point, outline, eps, false);
+  };
+
   Shared.centerOfCell = function centerOfCell(cell) {
     var rect = Shared.rectOfCell(cell);
     return rect ? { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 } : null;

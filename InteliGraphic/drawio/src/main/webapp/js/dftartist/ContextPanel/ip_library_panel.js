@@ -3,7 +3,6 @@
 
     var THIRD_PARTY_CATEGORY = 'third_party_ip';
     var SOFTWARE_STORAGE_KEY = 'dft.third_party_ip_registry.v1';
-    var PREF_STORAGE_KEY = 'dft.third_party_ip_import_prefs.v1';
     var PROJECT_REGISTRY_FILE = 'third_party_ip_registry.json';
 
     function el(tag, cls, text) {
@@ -39,13 +38,6 @@
             return global.electron.requestPromise(msg);
         }
         return Promise.reject(new Error('IPC bridge unavailable'));
-    }
-
-    function parseTextList(text) {
-        return safeText(text)
-            .split(/\r?\n|;/)
-            .map(function (line) { return safeText(line).trim(); })
-            .filter(Boolean);
     }
 
     function basename(filePath) {
@@ -389,6 +381,123 @@
             '</svg>';
     }
 
+    function normalizeLayerName(name) {
+        return String(name || '').replace(/^\s+|\s+$/g, '').toLowerCase();
+    }
+
+    function getLayerRootCell(graph) {
+        if (!graph || !graph.getModel || !graph.getDefaultParent) return null;
+        try {
+            var model = graph.getModel();
+            var parent = graph.getDefaultParent();
+            return model && parent ? model.getParent(parent) : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function getOwningTopLayerName(graph, cell) {
+        if (!graph || !cell || !graph.getModel) return '';
+        var model = graph.getModel();
+        var layerRoot = getLayerRootCell(graph);
+        if (!layerRoot) return '';
+        var cur = cell;
+        while (cur) {
+            var parent = null;
+            try { parent = model.getParent(cur); } catch (e) { parent = null; }
+            if (!parent) return '';
+            if (parent === layerRoot) return String(cur.value || '');
+            cur = parent;
+        }
+        return '';
+    }
+
+    function isDataSourceCategory(category, dftsType) {
+        category = String(category || '').toLowerCase();
+        dftsType = String(dftsType || '').toLowerCase();
+        return category === 'data_source' || category === 'datasource' || /data_source/.test(dftsType);
+    }
+
+    function describeDataSourceType(dftsType) {
+        dftsType = String(dftsType || '').toLowerCase();
+        if (dftsType === 'ssn_data_source') return 'PadSource';
+        if (dftsType === 'bscan_data_source') return 'TapSource';
+        if (dftsType === 'bisrc_data_source') return 'BISRCSource';
+        if (dftsType === 'mux_data_source') return 'MuxDataSource';
+        return dftsType || 'DataSource';
+    }
+
+    function getDataSourcePlacementError(graph, cell) {
+        var NS = global.DftsIP;
+        if (!graph || !cell || !NS) return '';
+        var body = (typeof NS.resolveChipBodyFromContext === 'function') ? NS.resolveChipBodyFromContext(graph, cell) : cell;
+        if (!body) body = cell;
+        var style = graph.getCellStyle ? graph.getCellStyle(body) : {};
+        var category = mxUtils.getValue(style, 'dftsIP_category', '');
+        var dftsType = String(mxUtils.getValue(style, 'dftsIP_type', ''));
+        if (!isDataSourceCategory(category, dftsType)) return '';
+
+        var layerName = normalizeLayerName(getOwningTopLayerName(graph, body));
+        var label = body.value != null ? String(body.value) : '';
+        if (!label && typeof graph.convertValueToString === 'function') label = String(graph.convertValueToString(body) || '');
+        if (!label) label = describeDataSourceType(dftsType);
+
+        if (!layerName || layerName === 'other') return '';
+        if (layerName === 'base') {
+            return 'Error: base layer cannot contain data source IP "' + label + '".';
+        }
+
+        var allowedLayers = null;
+        var dataSourceType = String(dftsType || '').toLowerCase();
+        if (dataSourceType === 'ssn_data_source') {
+            allowedLayers = ['ssn'];
+        } else if (dataSourceType === 'bscan_data_source') {
+            allowedLayers = ['bscan', 'ijtag', 'iftag', 'jtag'];
+        } else if (dataSourceType === 'bisrc_data_source') {
+            allowedLayers = ['bisr'];
+        } else if (dataSourceType === 'mux_data_source') {
+            allowedLayers = ['ssn', 'bscan', 'ijtag', 'iftag', 'jtag', 'bisr'];
+        } else {
+            return 'Error: unsupported data source type "' + describeDataSourceType(dftsType) + '" on layer "' + (layerName || '?') + '".';
+        }
+
+        var restrictedLayers = {
+            base: true,
+            ssn: true,
+            bscan: true,
+            ijtag: true,
+            iftag: true,
+            jtag: true,
+            bisr: true
+        };
+        if (!restrictedLayers[layerName]) return '';
+        if (allowedLayers.indexOf(layerName) >= 0) return '';
+        return 'Error: ' + describeDataSourceType(dftsType) + ' can only be placed on layer(s): ' +
+            allowedLayers.join(', ') + '; current layer is "' + (layerName || '?') + '".';
+    }
+
+    function removeCell(graph, cell) {
+        if (!graph || !cell || !graph.getModel) return;
+        var model = graph.getModel();
+        model.beginUpdate();
+        try {
+            model.remove(cell);
+        } finally {
+            model.endUpdate();
+        }
+    }
+
+    function validateInsertedCell(ui, graph, cell) {
+        var errorText = getDataSourcePlacementError(graph, cell);
+        if (!errorText) return cell;
+        removeCell(graph, cell);
+        dockInfo(ui, 'error', errorText, { source: 'ip-library' });
+        if (typeof console !== 'undefined' && console.error) {
+            console.error('[Context.IP] ' + errorText);
+        }
+        return null;
+    }
+
     function insertDefinition(ui, def) {
         var graph = getGraph(ui);
         var isFloorplan = !!(def && def.__panelSource === 'floorplan');
@@ -403,7 +512,9 @@
             if (typeof NS.installConfigAction === 'function') NS.installConfigAction(ui);
         }
 
-        var cell = NS.createByKey(graph, def.key, {});
+        var createOpt = {};
+        if (def.__thirdPartyManaged) createOpt.defaultHidePins = false;
+        var cell = NS.createByKey(graph, def.key, createOpt);
         var parent = graph.getDefaultParent ? graph.getDefaultParent() : null;
         var geo = cell && cell.geometry ? cell.geometry.clone() : null;
         var w = geo ? (geo.width || 220) : 220;
@@ -436,6 +547,8 @@
             }
         }
 
+        inserted = validateInsertedCell(ui, graph, inserted);
+        if (!inserted) return null;
         if (inserted && typeof graph.setSelectionCell === 'function') graph.setSelectionCell(inserted);
         dockInfo(ui, 'success', 'Added IP to current page: ' + safeText(def.defaultLabel || def.key), { source: 'ip-library' });
         return inserted;
@@ -452,7 +565,9 @@
             if (typeof NS.installConfigAction === 'function') NS.installConfigAction(ui);
         }
 
-        var cell = NS.createByKey(graph, def.key, {});
+        var createOpt = {};
+        if (def.__thirdPartyManaged) createOpt.defaultHidePins = false;
+        var cell = NS.createByKey(graph, def.key, createOpt);
         var parent = graph.getDefaultParent ? graph.getDefaultParent() : null;
         var geo = cell && cell.geometry ? cell.geometry.clone() : null;
         var w = geo ? (geo.width || 220) : 220;
@@ -469,6 +584,8 @@
 
         var arr = graph.importCells([cell], x, y, parent) || [];
         var inserted = arr[0] || null;
+        inserted = validateInsertedCell(ui, graph, inserted);
+        if (!inserted) return null;
         if (inserted && typeof graph.setSelectionCell === 'function') graph.setSelectionCell(inserted);
         return inserted;
     }
@@ -492,18 +609,18 @@
                 overlay: null,
                 dialog: null,
                 listHost: null,
-                scopeSelect: null,
-                slangInput: null,
-                definesBox: null,
-                includeBox: null,
                 detailTitle: null,
                 detailMeta: null,
                 detailPorts: null,
                 detailDiag: null,
-                detailScope: null,
                 footerHint: null,
                 saveBtn: null,
                 shown: false
+            },
+            contextMenu: {
+                overlay: null,
+                deleteBtn: null,
+                targetKey: ''
             }
         };
 
@@ -513,29 +630,83 @@
         var statusText = null;
         var previewBox = null;
 
-        function getImportPrefs() {
-            try {
-                var raw = global.localStorage ? global.localStorage.getItem(PREF_STORAGE_KEY) : '';
-                var parsed = raw ? JSON.parse(raw) : {};
-                return {
-                    slangPath: safeText(parsed && parsed.slangPath).trim(),
-                    defines: Array.isArray(parsed && parsed.defines) ? parsed.defines.slice() : [],
-                    includeDirs: Array.isArray(parsed && parsed.includeDirs) ? parsed.includeDirs.slice() : []
-                };
-            } catch (e) {
-                return { slangPath: '', defines: [], includeDirs: [] };
-            }
+        function hideContextMenu() {
+            var menu = state.contextMenu;
+            menu.targetKey = '';
+            if (menu.overlay) menu.overlay.style.display = 'none';
         }
 
-        function saveImportPrefs(prefs) {
-            try {
-                if (!global.localStorage) return;
-                global.localStorage.setItem(PREF_STORAGE_KEY, JSON.stringify({
-                    slangPath: safeText(prefs && prefs.slangPath).trim(),
-                    defines: Array.isArray(prefs && prefs.defines) ? prefs.defines.slice() : [],
-                    includeDirs: Array.isArray(prefs && prefs.includeDirs) ? prefs.includeDirs.slice() : []
-                }));
-            } catch (e) { }
+        async function deleteThirdPartyItemByKey(key) {
+            key = safeText(key).trim();
+            if (!key) return;
+            var items = (state.thirdParty.items || []).slice();
+            var hit = null;
+            for (var i = 0; i < items.length; i++) {
+                if (safeText(items[i] && items[i].key) === key) {
+                    hit = items[i];
+                    break;
+                }
+            }
+            if (!hit) return;
+
+            var msg = 'Delete 3rd Party IP "' + safeText(hit.moduleName || hit.sourceModuleName || hit.key) + '"?';
+            var confirmed = false;
+            if (global.mxUtils && typeof global.mxUtils.confirm === 'function') {
+                confirmed = !!global.mxUtils.confirm(msg);
+            } else if (typeof global.confirm === 'function') {
+                confirmed = !!global.confirm(msg);
+            }
+            if (!confirmed) return;
+
+            hideContextMenu();
+            await saveThirdPartyItems(items.filter(function (item) { return safeText(item && item.key) !== key; }));
+            renderList();
+            dockInfo(ui, 'success', 'Deleted 3rd Party IP: ' + safeText(hit.moduleName || hit.key), { source: 'ip-library' });
+        }
+
+        function ensureContextMenuBuilt() {
+            var menu = state.contextMenu;
+            if (menu.overlay) return;
+
+            menu.overlay = el('div');
+            menu.overlay.style.cssText = 'position:fixed;display:none;z-index:1400;min-width:150px;background:#fff;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 14px 30px rgba(15,23,42,0.18);padding:6px;';
+
+            menu.deleteBtn = el('button', null, 'Delete IP');
+            menu.deleteBtn.type = 'button';
+            menu.deleteBtn.style.cssText = 'display:block;width:100%;text-align:left;border:none;background:transparent;border-radius:8px;padding:8px 10px;font-size:12px;color:#b91c1c;cursor:pointer;';
+            menu.deleteBtn.onmouseenter = function () { menu.deleteBtn.style.background = '#fef2f2'; };
+            menu.deleteBtn.onmouseleave = function () { menu.deleteBtn.style.background = 'transparent'; };
+            menu.deleteBtn.onmousedown = function (evt) { stop(evt); };
+            menu.deleteBtn.onclick = function (evt) {
+                stop(evt);
+                deleteThirdPartyItemByKey(menu.targetKey).catch(function (e) {
+                    dockInfo(ui, 'error', 'Delete 3rd Party IP failed: ' + e.message, { source: 'ip-library' });
+                });
+            };
+            menu.overlay.appendChild(menu.deleteBtn);
+            document.body.appendChild(menu.overlay);
+
+            document.addEventListener('mousedown', function (evt) {
+                if (menu.overlay && evt && evt.target && menu.overlay.contains && menu.overlay.contains(evt.target)) return;
+                hideContextMenu();
+            }, true);
+            document.addEventListener('scroll', function () { hideContextMenu(); }, true);
+            document.addEventListener('keydown', function (evt) {
+                if (evt && (evt.key === 'Escape' || evt.keyCode === 27)) hideContextMenu();
+            }, true);
+        }
+
+        function showContextMenuForDef(def, clientX, clientY) {
+            ensureContextMenuBuilt();
+            var menu = state.contextMenu;
+            if (!def || !def.__thirdPartyManaged) {
+                hideContextMenu();
+                return;
+            }
+            menu.targetKey = safeText(def.key);
+            menu.overlay.style.left = Math.max(8, clientX) + 'px';
+            menu.overlay.style.top = Math.max(8, clientY) + 'px';
+            menu.overlay.style.display = 'block';
         }
 
         function readSoftwareItems() {
@@ -600,11 +771,13 @@
                 var moduleName = safeText(item.moduleName || item.displayLabel || item.name).trim();
                 if (!moduleName) return;
                 var ports = Array.isArray(item.ports) ? item.ports : [];
+                var parameters = Array.isArray(item.parameters) ? item.parameters : [];
                 var diagnostics = Array.isArray(item.diagnostics) ? item.diagnostics : [];
                 var norm = buildThirdPartyItem({
                     moduleName: moduleName,
                     sourceFileName: safeText(item.sourceFileName || basename(item.sourcePath)),
                     sourcePath: safeText(item.sourcePath),
+                    parameters: cloneJson(parameters) || [],
                     ports: cloneJson(ports) || [],
                     diagnostics: cloneJson(diagnostics) || [],
                     scope: scope,
@@ -657,6 +830,7 @@
                 sourceModuleName: safeText(src.sourceModuleName || moduleName) || moduleName,
                 sourceFileName: safeText(src.sourceFileName || basename(src.sourcePath)),
                 sourcePath: safeText(src.sourcePath),
+                parameters: Array.isArray(src.parameters) ? cloneJson(src.parameters) || [] : [],
                 ports: Array.isArray(src.ports) ? cloneJson(src.ports) || [] : [],
                 diagnostics: Array.isArray(src.diagnostics) ? cloneJson(src.diagnostics) || [] : [],
                 createdAt: safeText(src.createdAt || new Date().toISOString()),
@@ -811,6 +985,7 @@
                 sourceModuleName: safeText(sourceItem && (sourceItem.sourceModuleName || sourceItem.moduleName)) || moduleName,
                 sourceFileName: basename(paths.vPath),
                 sourcePath: paths.vPath,
+                parameters: cloneJson(payload.wrapperParameters) || [],
                 ports: cloneJson(payload.wrapperPorts) || [],
                 diagnostics: [],
                 scope: scope,
@@ -916,6 +1091,11 @@
         function ensureBuilt() {
             if (root) return;
             root = el('div', 'dftctx-panel dftctx-ip');
+            root.oncontextmenu = function (evt) {
+                stop(evt);
+                hideContextMenu();
+                return false;
+            };
 
             var toolbar = el('div', 'dftctx-panel-toolbar compact');
             var searchWrap = el('div', 'dftctx-search-wrap');
@@ -1070,6 +1250,17 @@
                 if (state.hoverKey === def.key) state.hoverKey = '';
                 row.style.background = 'transparent';
             };
+            row.oncontextmenu = function (evt) {
+                stop(evt);
+                state.hoverKey = '';
+                row.style.background = 'transparent';
+                if (def.__thirdPartyManaged) {
+                    showContextMenuForDef(def, evt.clientX || 0, evt.clientY || 0);
+                } else {
+                    hideContextMenu();
+                }
+                return false;
+            };
             row.ondragstart = function (evt) {
                 if (!pageReady || !evt.dataTransfer) return;
                 evt.dataTransfer.effectAllowed = 'copy';
@@ -1079,6 +1270,7 @@
                 row.style.background = 'transparent';
             };
             row.onmousedown = function (evt) {
+                if (evt && evt.button !== 0) return;
                 stop(evt);
                 state.hoverKey = '';
                 row.style.background = 'transparent';
@@ -1134,7 +1326,7 @@
             var head = el('div');
             head.style.cssText = 'padding:14px 16px;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;gap:12px;';
             var title = el('div');
-            title.innerHTML = '<div style="font-size:16px;font-weight:700;color:#0f172a;">Import HDL</div><div style="font-size:12px;color:#64748b;">Manage 3rd Party IP and parse Verilog modules with slang.</div>';
+            title.innerHTML = '<div style="font-size:16px;font-weight:700;color:#0f172a;">Import HDL</div><div style="font-size:12px;color:#64748b;">Manage 3rd Party IP and parse Verilog modules.</div>';
             head.appendChild(title);
             var closeBtn = el('button', null, 'Close');
             closeBtn.type = 'button';
@@ -1142,51 +1334,6 @@
             closeBtn.onclick = function () { hideManager(); };
             head.appendChild(closeBtn);
             mgr.dialog.appendChild(head);
-
-            var controls = el('div');
-            controls.style.cssText = 'padding:12px 16px;border-bottom:1px solid #e2e8f0;display:grid;grid-template-columns:180px 1fr 1fr;gap:12px;align-items:start;';
-
-            var scopeBox = el('div');
-            scopeBox.innerHTML = '<div style="font-size:12px;color:#475569;margin-bottom:6px;">Scope for new imports</div>';
-            mgr.scopeSelect = document.createElement('select');
-            mgr.scopeSelect.style.cssText = 'width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:8px;';
-            mgr.scopeSelect.innerHTML = '<option value="project">Project IP</option><option value="software">Software IP</option>';
-            scopeBox.appendChild(mgr.scopeSelect);
-            controls.appendChild(scopeBox);
-
-            var slangBox = el('div');
-            slangBox.innerHTML = '<div style="font-size:12px;color:#475569;margin-bottom:6px;">Slang executable</div>';
-            mgr.slangInput = document.createElement('input');
-            mgr.slangInput.type = 'text';
-            mgr.slangInput.placeholder = 'Leave blank to use bundled / PATH slang';
-            mgr.slangInput.style.cssText = 'width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:8px;box-sizing:border-box;';
-            slangBox.appendChild(mgr.slangInput);
-            controls.appendChild(slangBox);
-
-            var tipBox = el('div');
-            tipBox.innerHTML = '<div style="font-size:12px;color:#475569;margin-bottom:6px;">Parser</div><div style="font-size:12px;color:#0f172a;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;">Verilog / SystemVerilog via slang (IPC)</div>';
-            controls.appendChild(tipBox);
-            mgr.dialog.appendChild(controls);
-
-            var options = el('div');
-            options.style.cssText = 'padding:12px 16px;border-bottom:1px solid #e2e8f0;display:grid;grid-template-columns:1fr 1fr;gap:12px;';
-            var definesWrap = el('div');
-            definesWrap.innerHTML = '<div style="font-size:12px;color:#475569;margin-bottom:6px;">Preprocessor Defines (one per line)</div>';
-            mgr.definesBox = document.createElement('textarea');
-            mgr.definesBox.rows = 3;
-            mgr.definesBox.placeholder = 'DFT_SHARED_EFUSE_WITH_FUNC\nREADBUFFER=1';
-            mgr.definesBox.style.cssText = 'width:100%;resize:vertical;padding:8px;border:1px solid #cbd5e1;border-radius:8px;box-sizing:border-box;font-family:monospace;font-size:12px;';
-            definesWrap.appendChild(mgr.definesBox);
-            options.appendChild(definesWrap);
-            var includeWrap = el('div');
-            includeWrap.innerHTML = '<div style="font-size:12px;color:#475569;margin-bottom:6px;">Include Dirs (one per line)</div>';
-            mgr.includeBox = document.createElement('textarea');
-            mgr.includeBox.rows = 3;
-            mgr.includeBox.placeholder = '/path/to/includes';
-            mgr.includeBox.style.cssText = 'width:100%;resize:vertical;padding:8px;border:1px solid #cbd5e1;border-radius:8px;box-sizing:border-box;font-family:monospace;font-size:12px;';
-            includeWrap.appendChild(mgr.includeBox);
-            options.appendChild(includeWrap);
-            mgr.dialog.appendChild(options);
 
             var body = el('div');
             body.style.cssText = 'flex:1;min-height:0;display:grid;grid-template-columns:380px 1fr;';
@@ -1232,13 +1379,8 @@
             mgr.detailTitle.style.cssText = 'font-size:16px;font-weight:700;color:#0f172a;';
             mgr.detailMeta = el('div');
             mgr.detailMeta.style.cssText = 'margin-top:6px;font-size:12px;color:#64748b;white-space:pre-wrap;';
-            mgr.detailScope = document.createElement('select');
-            mgr.detailScope.style.cssText = 'margin-top:10px;padding:8px;border:1px solid #cbd5e1;border-radius:8px;';
-            mgr.detailScope.innerHTML = '<option value="project">Project IP</option><option value="software">Software IP</option>';
-            mgr.detailScope.onchange = function () { applyScopeToSelection(mgr.detailScope.value); };
             detailHead.appendChild(mgr.detailTitle);
             detailHead.appendChild(mgr.detailMeta);
-            detailHead.appendChild(mgr.detailScope);
             right.appendChild(detailHead);
 
             var detailBody = el('div');
@@ -1377,6 +1519,26 @@
             return html;
         }
 
+        function renderParametersTable(item) {
+            var params = Array.isArray(item && item.parameters) ? item.parameters : [];
+            if (!params.length) return '';
+            var html = '<div style="font-size:13px;font-weight:600;color:#0f172a;margin-bottom:8px;">Parameters (' + params.length + ')</div>' +
+                '<div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:14px;">' +
+                '<table style="width:100%;border-collapse:collapse;font-size:12px;">' +
+                '<thead><tr style="background:#f8fafc;">' +
+                '<th style="text-align:left;padding:8px;border-bottom:1px solid #e2e8f0;">Name</th>' +
+                '<th style="text-align:left;padding:8px;border-bottom:1px solid #e2e8f0;">Default</th>' +
+                '</tr></thead><tbody>';
+            params.forEach(function (param) {
+                html += '<tr>' +
+                    '<td style="padding:8px;border-bottom:1px solid #f1f5f9;font-family:monospace;">' + safeText(param.name) + '</td>' +
+                    '<td style="padding:8px;border-bottom:1px solid #f1f5f9;font-family:monospace;white-space:pre-wrap;word-break:break-word;">' + safeText(param.value || '') + '</td>' +
+                    '</tr>';
+            });
+            html += '</tbody></table></div>';
+            return html;
+        }
+
         function renderDiagnostics(item) {
             var diags = Array.isArray(item && item.diagnostics) ? item.diagnostics : [];
             if (!diags.length) return '';
@@ -1396,7 +1558,6 @@
             if (!item) {
                 mgr.detailTitle.textContent = 'No module selected';
                 mgr.detailMeta.textContent = 'Click + to import Verilog files.';
-                mgr.detailScope.value = getProjectRoot(ui) ? 'project' : 'software';
                 mgr.detailPorts.innerHTML = '<div style="font-size:12px;color:#64748b;border:1px dashed #cbd5e1;border-radius:8px;padding:10px;background:#f8fafc;">No module details.</div>';
                 mgr.detailDiag.innerHTML = '';
                 return;
@@ -1405,10 +1566,10 @@
             mgr.detailMeta.textContent = [
                 (item.scope === 'software' ? 'Software IP' : 'Project IP'),
                 item.sourceFileName ? ('Source: ' + item.sourceFileName) : '',
-                item.sourcePath ? ('Path: ' + item.sourcePath) : ''
+                item.sourcePath ? ('Path: ' + item.sourcePath) : '',
+                Array.isArray(item.parameters) && item.parameters.length ? ('Parameters: ' + item.parameters.length) : ''
             ].filter(Boolean).join('\n');
-            mgr.detailScope.value = item.scope;
-            mgr.detailPorts.innerHTML = renderPortsTable(item);
+            mgr.detailPorts.innerHTML = renderParametersTable(item) + renderPortsTable(item);
             mgr.detailDiag.innerHTML = renderDiagnostics(item);
         }
 
@@ -1419,48 +1580,6 @@
             renderManagerDetail();
             var selectedCount = getSelectedDraftItems().length;
             mgr.footerHint.textContent = mgr.draft.length + ' module(s) in library' + (selectedCount ? ' · ' + selectedCount + ' selected' : '');
-            if (!getProjectRoot(ui)) {
-                mgr.footerHint.textContent += ' · No project path: Project IP will fail to save';
-            }
-        }
-
-        function applyScopeToSelection(scope) {
-            scope = normalize(scope) === 'software' ? 'software' : 'project';
-            var mgr = state.manager;
-            var targets = getSelectedDraftItems();
-            if (!targets.length) {
-                var active = activeDraftItem();
-                if (active) targets = [active];
-            }
-            if (!targets.length) return;
-            if (scope === 'project' && !getProjectRoot(ui)) {
-                dockInfo(ui, 'warning', 'Project IP requires an open/saved project. Scope changed to Software IP instead.', { source: 'ip-library' });
-                scope = 'software';
-            }
-
-            var nextSelected = {};
-            targets.forEach(function (target) {
-                for (var i = 0; i < mgr.draft.length; i++) {
-                    if (mgr.draft[i].id !== target.id) continue;
-                    var rebuilt = buildThirdPartyItem({
-                        moduleName: target.moduleName,
-                        sourceModuleName: target.sourceModuleName || target.moduleName,
-                        sourceFileName: target.sourceFileName,
-                        sourcePath: target.sourcePath,
-                        ports: target.ports || [],
-                        diagnostics: target.diagnostics || [],
-                        scope: scope,
-                        createdAt: target.createdAt
-                    }, mgr.draft.filter(function (it) { return it.id !== target.id; }));
-                    mgr.draft[i] = rebuilt;
-                    if (mgr.activeId === target.id) mgr.activeId = rebuilt.id;
-                    nextSelected[rebuilt.id] = true;
-                    break;
-                }
-            });
-
-            mgr.selectedIds = nextSelected;
-            renderManager();
         }
 
         function removeSelectedDraftItems() {
@@ -1522,6 +1641,7 @@
                             sourceModuleName: modName,
                             sourceFileName: mod.sourceFileName || basename(mod.sourcePath),
                             sourcePath: mod.sourcePath,
+                            parameters: mod.parameters || [],
                             ports: mod.ports || [],
                             diagnostics: mod.diagnostics || [],
                             scope: scope,
@@ -1548,6 +1668,7 @@
                     sourceModuleName: modName,
                     sourceFileName: mod.sourceFileName || basename(mod.sourcePath),
                     sourcePath: mod.sourcePath,
+                    parameters: mod.parameters || [],
                     ports: mod.ports || [],
                     diagnostics: mod.diagnostics || [],
                     scope: scope
@@ -1581,29 +1702,12 @@
             });
             if (!paths || !paths.length) return;
 
-            var scope = mgr.scopeSelect ? mgr.scopeSelect.value : (getProjectRoot(ui) ? 'project' : 'software');
-            if (normalize(scope) === 'project' && !getProjectRoot(ui)) {
-                scope = 'software';
-                if (mgr.scopeSelect) mgr.scopeSelect.value = 'software';
-                dockInfo(ui, 'warning', 'No project path. Importing as Software IP instead.', { source: 'ip-library' });
-            }
-
-            var prefs = {
-                slangPath: mgr.slangInput ? mgr.slangInput.value : '',
-                defines: parseTextList(mgr.definesBox ? mgr.definesBox.value : ''),
-                includeDirs: parseTextList(mgr.includeBox ? mgr.includeBox.value : '')
-            };
-            saveImportPrefs(prefs);
-
             mgr.footerHint.textContent = 'Parsing ' + paths.length + ' file(s) with slang…';
 
             var payload = {
                 files: paths.map(function (filePath) {
                     return { path: filePath, name: basename(filePath) };
-                }),
-                slangPath: prefs.slangPath,
-                defines: prefs.defines,
-                includeDirs: prefs.includeDirs
+                })
             };
 
             var result = await parseWithBridge(payload);
@@ -1616,7 +1720,7 @@
                 throw new Error(diags[0] || 'No Verilog module was found.');
             }
 
-            var added = mergeParsedModules(modules, scope);
+            var added = mergeParsedModules(modules, 'software');
             dockInfo(ui, 'success', 'Parsed ' + modules.length + ' module(s) with ' + safeText(result.engine || 'slang') + (result.slangPath ? (' (' + result.slangPath + ')') : ''), { source: 'ip-library' });
             if (!added) {
                 dockInfo(ui, 'warning', 'No module was added to the library.', { source: 'ip-library' });
@@ -1637,12 +1741,7 @@
             ensureBuilt();
             ensureManagerBuilt();
             await ensureThirdPartyLoaded();
-            var prefs = getImportPrefs();
             var mgr = state.manager;
-            mgr.slangInput.value = prefs.slangPath || '';
-            mgr.definesBox.value = (prefs.defines || []).join('\n');
-            mgr.includeBox.value = (prefs.includeDirs || []).join('\n');
-            mgr.scopeSelect.value = getProjectRoot(ui) ? 'project' : 'software';
             setManagerDraft(state.thirdParty.items);
             mgr.overlay.style.display = 'block';
             mgr.shown = true;
@@ -1695,6 +1794,10 @@
         }
 
         function destroy() {
+            hideContextMenu();
+            if (state.contextMenu.overlay && state.contextMenu.overlay.parentNode) state.contextMenu.overlay.parentNode.removeChild(state.contextMenu.overlay);
+            state.contextMenu.overlay = null;
+            state.contextMenu.deleteBtn = null;
             hideManager();
             if (state.manager.overlay && state.manager.overlay.parentNode) state.manager.overlay.parentNode.removeChild(state.manager.overlay);
             state.manager.overlay = null;

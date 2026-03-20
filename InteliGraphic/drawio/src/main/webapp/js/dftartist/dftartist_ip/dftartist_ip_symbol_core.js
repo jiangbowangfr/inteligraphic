@@ -14,7 +14,7 @@
         bodyPaddingY: 12,
         titlePadding: 12,
         pinRowPitch: 32,
-        pinStub: 26,
+        pinStub: 18,
         labelGap: 8,
         instanceGap: 10,
         minBodyWidth: 40,
@@ -366,7 +366,7 @@
         var bodyPaddingX = Math.max(4, Math.round(l.bodyPaddingX * scale));
         var bodyPaddingY = Math.max(3, Math.round(l.bodyPaddingY * scale));
         var titlePadding = Math.max(4, Math.round(l.titlePadding * scale));
-        var pinStub = Math.max(8, Math.round(l.pinStub * scale));
+        var pinStub = Math.max(6, Math.round(l.pinStub * scale));
         var labelGap = Math.max(3, Math.round(l.labelGap * scale));
         var instanceGap = Math.max(3, Math.round(l.instanceGap * scale));
         var fontSize = Math.max(3, Math.round(l.fontSize * scale));
@@ -570,12 +570,12 @@
 
         return [
             'shape=rectangle',
-            'fillOpacity=0',
-            'fillColor=none',
-            'strokeColor=#111111',
-            'strokeWidth=' + (isBus(pin) ? 3 : 1),
-            'connectable=1',
-            'pointerEvents=1',
+            'fillOpacity=100',
+            'fillColor=#111111',
+            'strokeColor=none',
+            'strokeWidth=1',
+            'connectable=0',
+            'pointerEvents=0',
             'resizable=0',
             'movable=0',
             'rotatable=0',
@@ -600,6 +600,7 @@
             'strokeColor=none',
             'fillColor=none',
             'pointerEvents=1',
+            'connectable=1',
             'resizable=0',
             'movable=0',
             'rotatable=0',
@@ -627,10 +628,29 @@
         return mxUtils.getValue(s, 'dftsIP_symbolStub', '0') === '1';
     }
 
+    function rotateSide(side, rotation) {
+        side = normalizeSide(side);
+        var steps = Math.round(normalizeRotation(rotation) / 90) % 4;
+        for (var i = 0; i < steps; i++) {
+            if (side === 'west') side = 'north';
+            else if (side === 'north') side = 'east';
+            else if (side === 'east') side = 'south';
+            else if (side === 'south') side = 'west';
+        }
+        return side;
+    }
+
     function getSymbolEndpointSide(graph, cell) {
         if (!graph || !cell) return '';
         var s = graph.getCellStyle(cell);
-        return normalizeSide(mxUtils.getValue(s, 'dftsIP_symbolSide', ''));
+        var side = normalizeSide(mxUtils.getValue(s, 'dftsIP_symbolSide', ''));
+        var model = graph.getModel();
+        var parent = model ? model.getParent(cell) : null;
+        var bodyModel = getModel(parent);
+        if (bodyModel && bodyModel.transform) {
+            return rotateSide(side, bodyModel.transform.rotation || 0);
+        }
+        return rotateSide(side, mxUtils.getValue(s, 'rotation', '0'));
     }
 
     function applyTerminalConstraint(style, prefix, side) {
@@ -728,6 +748,26 @@
         for (var j = 0; j < drop.length; j++) m.remove(drop[j]);
     }
 
+    function normalizeConnectedSymbolEdges(graph, body) {
+        if (!graph || !body) return;
+        var m = graph.getModel();
+        var seen = {};
+        for (var i = 0; i < m.getChildCount(body); i++) {
+            var child = m.getChildAt(body, i);
+            if (!child || (!isSymbolPortCell(graph, child) && !isSymbolStubCell(graph, child))) continue;
+            for (var j = 0; j < m.getEdgeCount(child); j++) {
+                var edge = m.getEdgeAt(child, j);
+                if (!edge || !edge.edge) continue;
+                var edgeId = edge.getId ? edge.getId() : edge.id;
+                if (seen[edgeId]) continue;
+                seen[edgeId] = true;
+                var source = m.getTerminal(edge, true);
+                var target = m.getTerminal(edge, false);
+                m.setStyle(edge, normalizeSymbolPortEdgeStyle(graph, edge.style || '', source, target));
+            }
+        }
+    }
+
     function getAllSymbolBodies(graph) {
         var out = [];
         if (!graph || !graph.getModel) return out;
@@ -749,6 +789,16 @@
 
         walk(model.getRoot());
         return out;
+    }
+
+    function scheduleRelayoutAllSymbolBodies(graph) {
+        if (!graph || graph.__dftsSymbolRelayoutAllScheduled) return;
+        graph.__dftsSymbolRelayoutAllScheduled = true;
+        setTimeout(function () {
+            graph.__dftsSymbolRelayoutAllScheduled = false;
+            var bodies = getAllSymbolBodies(graph);
+            for (var i = 0; i < bodies.length; i++) relayout(graph, bodies[i]);
+        }, 0);
     }
 
     function allocateInstanceName(graph, base) {
@@ -1102,16 +1152,17 @@
                 var text = pinText(pin);
                 var labelW = Math.max(8, side === 'west' ? layout.leftTextW : (side === 'east' ? layout.rightTextW : estimateTextWidth(text, layout.fontSize)));
                 var labelH = Math.max(8, Math.ceil(layout.fontSize * 1.08));
-                var thickness = isBus(pin) ? 3 : 1;
+                // Keep a tiny rectangular terminal for stable routing, but render it as a thin line.
+                var thickness = isBus(pin) ? 4 : 1;
 
                 var stub = ensureChild(graph, body, 'stub', pin.key, stubStyle(side, pin), '');
                 var port = ensureChild(graph, body, 'port', pin.key, portStyle(side), '');
                 var label = ensureChild(graph, body, 'label', pin.key, textStyle(layout.fontSize, (side === 'west' ? 'left' : (side === 'east' ? 'right' : 'center')), false, 0, 'visible'), text);
-                stub.connectable = true;
-                port.connectable = false;
+                stub.connectable = false;
+                port.connectable = true;
                 label.connectable = false;
                 stub.visible = shown;
-                port.visible = false;
+                port.visible = shown;
                 label.visible = shown && !model.hidePinLabels;
                 valid['stub:' + pin.key] = true;
                 valid['port:' + pin.key] = true;
@@ -1122,7 +1173,8 @@
                 var pg = new mxGeometry(); pg.relative = false;
                 var lg = new mxGeometry(); lg.relative = false;
                 var portHitSize = Math.max(12, Math.round(layout.pinStub * 0.7));
-                var portHalf = Math.round(portHitSize / 2);
+                var portHalf = portHitSize / 2;
+                var lineCenterOffset = (thickness / 2) - Math.floor(thickness / 2);
 
                 var attach = getPinAttachPoint(model, layout, side, pos);
 
@@ -1134,7 +1186,7 @@
                     sg.height = thickness;
 
                     pg.x = attach.x - layout.pinStub - portHalf;
-                    pg.y = attach.y - portHalf;
+                    pg.y = attach.y + lineCenterOffset - portHalf;
                     pg.width = portHitSize;
                     pg.height = portHitSize;
 
@@ -1150,7 +1202,7 @@
                     sg.height = thickness;
 
                     pg.x = attach.x + layout.pinStub - portHalf;
-                    pg.y = attach.y - portHalf;
+                    pg.y = attach.y + lineCenterOffset - portHalf;
                     pg.width = portHitSize;
                     pg.height = portHitSize;
 
@@ -1164,7 +1216,7 @@
                     sg.width = thickness;
                     sg.height = layout.pinStub;
 
-                    pg.x = attach.x - portHalf;
+                    pg.x = attach.x + lineCenterOffset - portHalf;
                     pg.y = attach.y - layout.pinStub - portHalf;
                     pg.width = portHitSize;
                     pg.height = portHitSize;
@@ -1179,7 +1231,7 @@
                     sg.width = thickness;
                     sg.height = layout.pinStub;
 
-                    pg.x = attach.x - portHalf;
+                    pg.x = attach.x + lineCenterOffset - portHalf;
                     pg.y = attach.y + layout.pinStub - portHalf;
                     pg.width = portHitSize;
                     pg.height = portHitSize;
@@ -1200,6 +1252,7 @@
             });
 
             removeStaleChildren(graph, body, valid);
+            normalizeConnectedSymbolEdges(graph, body);
         } finally {
             m.endUpdate();
         }
@@ -1565,6 +1618,8 @@
                 return edge;
             };
         }
+
+        scheduleRelayoutAllSymbolBodies(graph);
     }
 
     function openPinLayoutEditor(ui, body, forcedGraph) {

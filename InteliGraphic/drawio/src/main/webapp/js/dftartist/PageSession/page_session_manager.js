@@ -197,7 +197,60 @@
       try { ui.showLayersDialog(); } catch (e) {}
     }, 0);
   }
+    
+  function resetUndoHistoryForCurrentPage(ui, reason) {
+    if (!ui || !ui.editor || !ui.editor.undoManager) return;
+    try {
+        ui.editor.undoManager.clear();
+    } catch (e0) {}
 
+    try {
+        if (ui.currentPage) {
+        ui.currentPage.__dftUndoState = { history: [], indexOfNextAdd: 0 };
+        }
+    } catch (e1) {}
+
+    try {
+        if (typeof console !== "undefined" && console.log) {
+        console.log("[dft-page-session]", {
+            stage: "reset-undo-history",
+            reason: reason || "page-open",
+            page:
+            ui.currentPage && typeof ui.currentPage.getName === "function"
+                ? ui.currentPage.getName()
+                : (ui.currentPage && ui.currentPage.name) || "(unknown)",
+        });
+        }
+    } catch (e2) {}
+    }
+
+  function getPageAbsPath(page) {
+    if (!page) return '';
+    try {
+      return text(page.__dftPageAbs || '').trim();
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function markPageSession(page, absPath, loaded) {
+    if (!page) return;
+    try {
+      if (absPath) page.__dftPageAbs = absPath;
+      if (loaded != null) page.__dftLoadedOnce = !!loaded;
+    } catch (e) {}
+  }
+
+  function findPageByAbs(ui, absPath) {
+    if (!ui || !Array.isArray(ui.pages) || !absPath) return null;
+    for (var i = 0; i < ui.pages.length; i++) {
+      if (getPageAbsPath(ui.pages[i]) === absPath) {
+        return ui.pages[i];
+      }
+    }
+    return null;
+  }
+    
   function getProjectStorageRoot(ui) {
     var dbRoot = ui && ui._projectDbDirPath ? String(ui._projectDbDirPath) : '';
     if (dbRoot) return dbRoot.replace(/\\/g, '/').replace(/\/+/g, '/');
@@ -403,12 +456,24 @@
     return '';
   }
 
+  function notifyContextPanel(ui, key) {
+    if (!ui) return;
+    try {
+      if (typeof ui.refreshContextPanel === 'function') {
+        ui.refreshContextPanel(key);
+      } else if (ui._dftContextPanel && typeof ui._dftContextPanel.refresh === 'function') {
+        ui._dftContextPanel.refresh(key);
+      }
+    } catch (e) {}
+  }
+
   function setActiveContext(ui, designRef, pageName, absPath) {
     if (!ui || !designRef || !pageName) return null;
 
     if (typeof global._setActivePageCtx === 'function') {
       try {
         global._setActivePageCtx(ui, designRef, pageName, absPath);
+        notifyContextPanel(ui, 'ip');
         return ui._activeProjectPageCtx || null;
       } catch (e) {
         emitLog('warn', '_setActivePageCtx failed; using fallback context.', e);
@@ -428,6 +493,7 @@
 
     if (absPath) ui._activeProjectPageCtx.abs = absPath;
     if (designRef) ui._activeProjectPageCtx.designKey = (Array.isArray(segs) ? segs.join('/') : '');
+    notifyContextPanel(ui, 'ip');
     return ui._activeProjectPageCtx;
   }
 
@@ -557,6 +623,7 @@
 
     try { ui._activeProjectPageCtx = null; } catch (e0) {}
     try { ui._activeEnvCtx = null; } catch (e1) {}
+    notifyContextPanel(ui, 'ip');
 
     var targetName = text(pageName).trim() || 'Page-1';
     var blankPage = createBlankPageTab(ui, targetName);
@@ -805,9 +872,19 @@
       });
     }
 
-    ensurePageTab(ui, pageName);
-
     var abs = await resolvePageFileAbs(ui, designRef, pageName);
+    var page = findPageByAbs(ui, abs);
+
+    if (!page) {
+      page = ensurePageTab(ui, pageName);
+    } else if (page !== ui.currentPage && typeof ui.selectPage === 'function') {
+      try { ui.selectPage(page); } catch (reuseSelectErr) {}
+    }
+
+    if (page) {
+      markPageSession(page, abs, page.__dftLoadedOnce === true);
+    }
+
     emitLog('info', 'Opening page.', {
       pageName: pageName,
       absPath: abs,
@@ -816,6 +893,34 @@
     });
     try { ui._activeEnvCtx = null; } catch (envErr) {}
     setActiveContext(ui, designRef, pageName, abs || null);
+
+    if (page && page.__dftLoadedOnce) {
+      emitLog('info', 'Reusing in-memory page session.', {
+        pageName: pageName,
+        absPath: abs
+      });
+
+      try {
+        if (typeof ui.updatePageTabs === 'function') ui.updatePageTabs();
+      } catch (reuseTabsErr) {}
+
+      setStatus(ui, 'Opened page: ' + pageName);
+
+      try {
+        if (typeof ui.refreshProjectExplorer === 'function') ui.refreshProjectExplorer();
+      } catch (reuseExplorerErr) {}
+
+      activateDrawingWorkspace(ui);
+      restoreViewState(ui, makeViewStateKey(designRef, pageName, abs || ''));
+      syncLayersDialogForPage(ui, designRef);
+
+      return {
+        pageName: pageName,
+        absPath: abs,
+        exists: true,
+        context: getActiveContext(ui)
+      };
+    }
 
     var exists = await pageExists(abs);
     if (exists) {
@@ -842,9 +947,15 @@
         xmlLength: String(xml || '').length
       }, summarizeXmlIds(xml)));
       await loadPageXmlToCurrent(ui, xml);
+      if (ui && ui.currentPage) {
+        markPageSession(ui.currentPage, abs, true);
+      }
       emitLog('info', 'Loaded page "' + pageName + '" from disk.');
     } else {
       clearGraphPage(ui);
+      if (ui && ui.currentPage) {
+        markPageSession(ui.currentPage, abs, true);
+      }
       emitLog('warn', 'Page file does not exist yet; opened blank page shell for "' + pageName + '".');
     }
 
@@ -861,7 +972,8 @@
     activateDrawingWorkspace(ui);
     restoreViewState(ui, makeViewStateKey(designRef, pageName, abs || ''));
     syncLayersDialogForPage(ui, designRef);
-
+    resetUndoHistoryForCurrentPage(ui, exists ? 'open-page-loaded' : 'open-page-blank');
+    
     return {
       pageName: pageName,
       absPath: abs,

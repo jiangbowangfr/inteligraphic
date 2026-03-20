@@ -115,6 +115,28 @@ function parseBodyPorts(body) {
   return out;
 }
 
+function parseModuleParameters(paramText) {
+  return splitTopLevelComma(paramText).map((chunk) => {
+    let s = safeText(chunk).replace(/\s+/g, ' ').trim();
+    if (!s) return null;
+    s = s.replace(/^(parameter|localparam)\b/i, '').trim();
+    s = s.replace(/^(?:signed|unsigned|integer|int|longint|shortint|byte|logic|reg|wire|bit|time|realtime|real|string)\b\s*/i, '');
+    const m = /^([A-Za-z_][A-Za-z0-9_$]*)\s*=\s*([\s\S]+)$/.exec(s);
+    if (!m) {
+      return {
+        name: s,
+        value: '',
+        raw: s
+      };
+    }
+    return {
+      name: safeText(m[1]).trim(),
+      value: safeText(m[2]).trim(),
+      raw: safeText(chunk).trim()
+    };
+  }).filter((item) => item && item.name);
+}
+
 function readBalanced(src, startIndex) {
   const open = src.charAt(startIndex);
   const close = open === '(' ? ')' : (open === '[' ? ']' : (open === '{' ? '}' : ''));
@@ -148,12 +170,14 @@ function extractModuleBlocks(content) {
     const moduleName = nameMatch[0];
     p += moduleName.length;
     while (p < src.length && /\s/.test(src.charAt(p))) p++;
+    let paramText = '';
     if (src.charAt(p) === '#') {
       p++;
       while (p < src.length && /\s/.test(src.charAt(p))) p++;
       if (src.charAt(p) === '(') {
         const params = readBalanced(src, p);
         if (!params) { idx = p + 1; continue; }
+        paramText = params.text;
         p = params.end + 1;
       }
     }
@@ -168,7 +192,7 @@ function extractModuleBlocks(content) {
     if (!endMatch) break;
     const bodyStart = afterPorts + 1;
     const bodyEnd = bodyStart + endMatch.index;
-    out.push({ moduleName, portText: ports.text, bodyText: src.slice(bodyStart, bodyEnd) });
+    out.push({ moduleName, paramText, portText: ports.text, bodyText: src.slice(bodyStart, bodyEnd) });
     idx = bodyEnd + endMatch[0].length;
   }
   return out;
@@ -210,7 +234,7 @@ function decoratePorts(ports) {
       isBus: !!range,
       side: inferPinSide(port.direction),
       pinType: inferPinType(port.direction, port.name),
-      displayName: port.name + (range ? range.replace(/\s+/g, '') : ''),
+      displayName: port.name,
       pinKey: safeText(port.name).replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '').toLowerCase() || 'pin'
     };
   });
@@ -231,6 +255,7 @@ function parseVerilogModules(text, meta, sharedDiagnostics) {
       moduleName: block.moduleName,
       sourceFileName: safeText(meta.name),
       sourcePath: safeText(meta.path),
+      parameters: parseModuleParameters(block.paramText || ''),
       ports: decoratePorts(ports),
       diagnostics: [].concat(sharedDiagnostics || []),
       __id: `${safeText(meta.path || meta.name || 'file')}::${block.moduleName}::${idx}`
