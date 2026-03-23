@@ -143,6 +143,13 @@
     return segs === 'floorplan' || /(^|\/)floorplan$/.test(segs);
   }
 
+  function shouldShowLayersForPage(ui, designRef) {
+    if (isFloorplanRef(designRef)) return true;
+    var ctx = getActiveContext(ui);
+    var pageName = text(ctx && ctx.name || '').trim().toLowerCase();
+    return pageName === 'arch';
+  }
+
   function activateDrawingWorkspace(ui) {
     try { if (ui) ui._activeWorkspaceKey = null; } catch (_) { }
     var shell = ui && ui._phase1 && ui._phase1.workspaceShell ? ui._phase1.workspaceShell : document;
@@ -184,7 +191,7 @@
 
   function syncLayersDialogForPage(ui, designRef) {
     if (!ui) return;
-    if (!isFloorplanRef(designRef)) {
+    if (!shouldShowLayersForPage(ui, designRef)) {
       try {
         if (ui.actions && ui.actions.layersWindow && ui.actions.layersWindow.window && ui.actions.layersWindow.window.isVisible()) {
           ui.actions.layersWindow.window.setVisible(false);
