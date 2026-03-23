@@ -725,10 +725,10 @@
   }
 
   function floorplanBlankPageXml(pageName) {
-    var layerNames = ['base', 'ssn', 'bscan', 'iftag', 'jtag', 'bisr', 'other'];
-    var root = ['<mxCell id="0"/>', '<mxCell id="1" value="base" parent="0"/>'];
+    var layerNames = ['base', 'ssn', 'bscan', 'ijtag', 'bisr', 'other'];
+    var root = ['<mxCell id="0"/>'];
     for (var i = 0; i < layerNames.length; i++) {
-      root.push('<mxCell id="' + String(i + 2) + '" value="' + escapeHtml(layerNames[i]) + '" parent="0"/>');
+      root.push('<mxCell id="' + String(i + 1) + '" value="' + escapeHtml(layerNames[i]) + '" parent="0"/>');
     }
     return '<mxfile host="app.diagrams.net"><diagram id="' + sanitizeName(pageName) + '" name="' + escapeHtml(pageName) + '"><mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0"><root>' + root.join('') + '</root></mxGraphModel></diagram></mxfile>';
   }

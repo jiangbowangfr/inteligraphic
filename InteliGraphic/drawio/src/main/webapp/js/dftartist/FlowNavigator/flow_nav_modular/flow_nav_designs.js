@@ -6,6 +6,8 @@
   var Analysis = Mod.Analysis;
   var Markers = Mod.Markers;
   var Designs = Mod.Designs = Mod.Designs || {};
+  var MODULE_LAYER_ORDER = ['base', 'ssn', 'bscan', 'ijtag', 'bisr', 'other'];
+  var MODULE_INTERFACE_LAYER_ORDER = ['ssn', 'bscan', 'ijtag', 'bisr', 'other'];
   if (!Shared || !Analysis) throw new Error('flow_nav_shared.js and flow_nav_analysis.js must be loaded before flow_nav_designs.js');
 
   function findTopLevelDesign(ui, name) {
@@ -476,7 +478,9 @@
   }
 
   function normalizeLayerName(name) {
-    return String(name || '').trim().toLowerCase();
+    var normalized = String(name || '').trim().toLowerCase();
+    if (normalized === 'iftag' || normalized === 'jtag') return 'ijtag';
+    return normalized;
   }
 
   function groupMarkersByLayer(markerEntries) {
@@ -1255,8 +1259,8 @@
     var designInputs = Designs.collectDesignInputs(ui);
     var moduleNames = Object.keys(designInputs).sort();
     if (!moduleNames.length) throw new Error('No generated floorplan interfaces found. Generate interfaces first.');
-    var pageOrder = ['ssn', 'ijtag', 'bscan', 'bisr'];
-    var archLayerOrder = ['base'].concat(pageOrder);
+    var pageOrder = MODULE_INTERFACE_LAYER_ORDER.slice();
+    var archLayerOrder = MODULE_LAYER_ORDER.slice();
     var archPageName = 'arch';
     var previousCtx = captureCurrentPageCtx(ui);
     var results = [];
@@ -1325,8 +1329,9 @@
           markerCount: markerEntries.length
         });
         if (design.page_meta && design.page_meta[archPageName]) delete design.page_meta[archPageName];
-        for (var k = 0; k < pageOrder.length; k++) {
-          var legacyPageName = pageOrder[k];
+        var legacyPageOrder = ['ssn', 'ijtag', 'bscan', 'bisr'];
+        for (var k = 0; k < legacyPageOrder.length; k++) {
+          var legacyPageName = legacyPageOrder[k];
           var idx = Array.isArray(design.pages) ? design.pages.indexOf(legacyPageName) : -1;
           if (idx >= 0) design.pages.splice(idx, 1);
           if (design.page_meta && design.page_meta[legacyPageName]) delete design.page_meta[legacyPageName];
