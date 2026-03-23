@@ -139,6 +139,63 @@
     graph.removeCells(doomed, false);
   }
 
+  function clearParentContents(graph, parent) {
+    if (!graph || !parent || !graph.getModel) return;
+    var model = graph.getModel();
+    var doomed = [];
+    var childCount = model.getChildCount(parent);
+    for (var i = 0; i < childCount; i++) doomed.push(model.getChildAt(parent, i));
+    if (!doomed.length) return;
+    graph.removeCells(doomed, false);
+  }
+
+  function ensureNamedLayers(ui, layerNames) {
+    var graph = Shared.graphOf(ui);
+    var model = graph && graph.getModel ? graph.getModel() : null;
+    var defaultParent = Shared.getDefaultParent(ui);
+    var layerRoot = Shared.getLayerRoot ? Shared.getLayerRoot(ui) : null;
+    var out = Object.create(null);
+    if (!graph || !model || !defaultParent) return out;
+    if (!layerRoot) {
+      out[String(layerNames && layerNames[0] || 'default').toLowerCase()] = defaultParent;
+      return out;
+    }
+
+    var existing = Shared.getTopLevelLayers ? Shared.getTopLevelLayers(ui) : [];
+    var unnamedDefault = existing.length === 1 && !String(Shared.getLayerName(existing[0]) || '').trim() ? existing[0] : null;
+    model.beginUpdate();
+    try {
+      for (var i = 0; i < layerNames.length; i++) {
+        var layerName = String(layerNames[i] || '').trim();
+        if (!layerName) continue;
+        var normalized = layerName.toLowerCase();
+        var layerCell = null;
+        for (var j = 0; j < existing.length; j++) {
+          if (String(Shared.getLayerName(existing[j]) || '').trim().toLowerCase() === normalized) {
+            layerCell = existing[j];
+            break;
+          }
+        }
+        if (!layerCell && unnamedDefault) {
+          layerCell = unnamedDefault;
+          model.setValue(layerCell, layerName);
+          unnamedDefault = null;
+        }
+        if (!layerCell) {
+          layerCell = new mxCell(layerName);
+          layerCell.setVisible(true);
+          layerCell.setConnectable(false);
+          model.add(layerRoot, layerCell);
+          existing.push(layerCell);
+        }
+        out[normalized] = layerCell;
+      }
+    } finally {
+      model.endUpdate();
+    }
+    return out;
+  }
+
   function isFlowModuleShell(cell) {
     return !!cell && String(Shared.styleValue(cell.style || '', 'flowModuleShell', '0')) === '1';
   }
@@ -1032,8 +1089,10 @@
 
   async function materializeModulePage(ui, moduleName, markerEntries, opts) {
     opts = opts || {};
+    var includeBody = opts.includeBody !== false;
     emitDesignLog('materialize-start', {
       moduleName: moduleName,
+      includeBody: includeBody,
       includeInterfaces: opts.includeInterfaces !== false,
       markerCount: Array.isArray(markerEntries) ? markerEntries.length : 0,
       activeCtx: ui && ui._activeProjectPageCtx ? {
@@ -1042,10 +1101,11 @@
       } : null,
       before: currentGraphSummary(ui)
     });
-    clearCurrentGraph(ui);
-    emitDesignLog('after-clear', currentGraphSummary(ui));
     var graph = Shared.graphOf(ui);
-    var parent = Shared.getDefaultParent(ui);
+    var parent = opts.targetParent || Shared.getDefaultParent(ui);
+    if (opts.clearMode === 'layer') clearParentContents(graph, parent);
+    else clearCurrentGraph(ui);
+    emitDesignLog('after-clear', currentGraphSummary(ui));
     if (!graph || !parent) throw new Error('Graph is not ready for materialization.');
     installShellResizeBehavior(graph);
 
@@ -1073,6 +1133,7 @@
     }
 
     var sourceModuleCell = opts.sourceModuleCell || null;
+    var referenceBodyCell = opts.referenceBodyCell || null;
     var sideBand = 64;
     var topBand = 64;
     var bodyRect = {
@@ -1084,39 +1145,43 @@
 
     graph.getModel().beginUpdate();
     try {
-      var body = addCellAt(graph, parent, createFloorplanModuleCell(graph, moduleName, bodyRect.width, bodyRect.height, sourceModuleCell, {
-        interactive: !includeInterfaces
-      }), bodyRect.x, bodyRect.y);
-      try {
-        if (global.console && typeof global.console.debug === 'function') {
-          global.console.debug('[FlowNavDesigns] materialize body', {
-            moduleName: moduleName,
-            pageName: ui && ui._activeProjectPageCtx ? ui._activeProjectPageCtx.name || '' : '',
-            includeInterfaces: includeInterfaces,
-            bodyStyle: body && body.style ? String(body.style) : '',
-            bodyGeo: body && body.geometry ? {
-              x: Number(body.geometry.x || 0),
-              y: Number(body.geometry.y || 0),
-              width: Number(body.geometry.width || 0),
-              height: Number(body.geometry.height || 0)
-            } : null
-          });
-        }
-      } catch (bodyLogErr) {}
-      emitDesignLog('body-added', {
-        moduleName: moduleName,
-        pageName: ui && ui._activeProjectPageCtx ? ui._activeProjectPageCtx.name || '' : '',
-        bodyGeo: body && body.geometry ? {
-          x: Number(body.geometry.x || 0),
-          y: Number(body.geometry.y || 0),
-          width: Number(body.geometry.width || 0),
-          height: Number(body.geometry.height || 0)
-        } : null,
-        graph: currentGraphSummary(ui)
-      });
+      var body = null;
+      if (includeBody) {
+        body = addCellAt(graph, parent, createFloorplanModuleCell(graph, moduleName, bodyRect.width, bodyRect.height, sourceModuleCell, {
+          interactive: !includeInterfaces
+        }), bodyRect.x, bodyRect.y);
+        try {
+          if (global.console && typeof global.console.debug === 'function') {
+            global.console.debug('[FlowNavDesigns] materialize body', {
+              moduleName: moduleName,
+              pageName: ui && ui._activeProjectPageCtx ? ui._activeProjectPageCtx.name || '' : '',
+              includeInterfaces: includeInterfaces,
+              bodyStyle: body && body.style ? String(body.style) : '',
+              bodyGeo: body && body.geometry ? {
+                x: Number(body.geometry.x || 0),
+                y: Number(body.geometry.y || 0),
+                width: Number(body.geometry.width || 0),
+                height: Number(body.geometry.height || 0)
+              } : null
+            });
+          }
+        } catch (bodyLogErr) {}
+        emitDesignLog('body-added', {
+          moduleName: moduleName,
+          pageName: ui && ui._activeProjectPageCtx ? ui._activeProjectPageCtx.name || '' : '',
+          bodyGeo: body && body.geometry ? {
+            x: Number(body.geometry.x || 0),
+            y: Number(body.geometry.y || 0),
+            width: Number(body.geometry.width || 0),
+            height: Number(body.geometry.height || 0)
+          } : null,
+          graph: currentGraphSummary(ui)
+        });
+      }
       var addedInterfaces = [];
       if (includeInterfaces) {
-        var placements = positionInterfacesAroundBody(bodyRect, bySide, interfacePrototypes, body, sourceModuleCell);
+        var placementBody = body || referenceBodyCell || null;
+        var placements = positionInterfacesAroundBody(bodyRect, bySide, interfacePrototypes, placementBody, sourceModuleCell);
         emitDesignLog('interface-placements', {
           moduleName: moduleName,
           pageName: ui && ui._activeProjectPageCtx ? ui._activeProjectPageCtx.name || '' : '',
@@ -1144,9 +1209,11 @@
         interfaceCount: addedInterfaces.length,
         graph: currentGraphSummary(ui)
       });
-      var shellChildren = [body].concat(addedInterfaces);
-      if (includeInterfaces && shellChildren.length > 1) lockChildrenStyles(graph, shellChildren);
-      var shell = buildShellGroup(graph, moduleName, shellChildren);
+      var shellChildren = [];
+      if (body) shellChildren.push(body);
+      Array.prototype.push.apply(shellChildren, addedInterfaces);
+      if (includeInterfaces && body && shellChildren.length > 1) lockChildrenStyles(graph, shellChildren);
+      var shell = body ? buildShellGroup(graph, moduleName, shellChildren) : null;
       if (shell) fitShellToPage(graph, shell, metrics);
       emitDesignLog('shell-built', {
         moduleName: moduleName,
@@ -1189,6 +1256,8 @@
     var moduleNames = Object.keys(designInputs).sort();
     if (!moduleNames.length) throw new Error('No generated floorplan interfaces found. Generate interfaces first.');
     var pageOrder = ['ssn', 'ijtag', 'bscan', 'bisr'];
+    var archLayerOrder = ['base'].concat(pageOrder);
+    var archPageName = 'arch';
     var previousCtx = captureCurrentPageCtx(ui);
     var results = [];
     var modulePlans = analysis && analysis.interfacePlan && analysis.interfacePlan.modulePlans ? analysis.interfacePlan.modulePlans : {};
@@ -1221,26 +1290,46 @@
             markerCount: 0
           });
         }
-        for (var j = 0; j < pageOrder.length; j++) {
-          var pageName = pageOrder[j];
-          var pageMarkers = layerInputs[pageName] || [];
-          if (!pageMarkers.length) continue;
-          await ensurePage(ui, design, pageName);
-          await withOpenedPage(ui, design, pageName, (function (currentPageName, currentPageMarkers, currentSourceModuleCell) {
-            return async function () {
-              await materializeModulePage(ui, moduleName, currentPageMarkers, {
+        await ensurePage(ui, design, archPageName);
+        await withOpenedPage(ui, design, archPageName, (function (currentSourceModuleCell, currentLayerInputs) {
+          return async function () {
+            var layerParents = ensureNamedLayers(ui, archLayerOrder);
+            var baseLayerParent = layerParents.base || Shared.getDefaultParent(ui);
+            var baseResult = await materializeModulePage(ui, moduleName, [], {
+              includeBody: true,
+              includeInterfaces: false,
+              sourceModuleCell: currentSourceModuleCell,
+              targetParent: baseLayerParent,
+              clearMode: 'layer'
+            });
+            for (var j = 0; j < pageOrder.length; j++) {
+              var pageName = pageOrder[j];
+              var pageMarkers = currentLayerInputs[pageName] || [];
+              var layerParent = layerParents[String(pageName || '').toLowerCase()] || Shared.getDefaultParent(ui);
+              await materializeModulePage(ui, moduleName, pageMarkers, {
+                includeBody: false,
                 includeInterfaces: true,
-                sourceModuleCell: currentSourceModuleCell
+                sourceModuleCell: currentSourceModuleCell,
+                referenceBodyCell: baseResult && baseResult.body ? baseResult.body : null,
+                targetParent: layerParent,
+                clearMode: 'layer'
               });
-            };
-          })(pageName, pageMarkers, sourceModuleCell));
-          results.push({
-            module: moduleName,
-            design: design,
-            createdDesign: ensured.created,
-            page: pageName,
-            markerCount: pageMarkers.length
-          });
+            }
+          };
+        })(sourceModuleCell, layerInputs));
+        results.push({
+          module: moduleName,
+          design: design,
+          createdDesign: ensured.created,
+          page: archPageName,
+          markerCount: markerEntries.length
+        });
+        if (design.page_meta && design.page_meta[archPageName]) delete design.page_meta[archPageName];
+        for (var k = 0; k < pageOrder.length; k++) {
+          var legacyPageName = pageOrder[k];
+          var idx = Array.isArray(design.pages) ? design.pages.indexOf(legacyPageName) : -1;
+          if (idx >= 0) design.pages.splice(idx, 1);
+          if (design.page_meta && design.page_meta[legacyPageName]) delete design.page_meta[legacyPageName];
         }
       }
     } finally {

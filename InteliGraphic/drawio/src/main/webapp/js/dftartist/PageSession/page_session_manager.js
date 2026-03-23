@@ -874,6 +874,7 @@
 
     var abs = await resolvePageFileAbs(ui, designRef, pageName);
     var page = findPageByAbs(ui, abs);
+    var matchedByAbs = !!page;
 
     if (!page) {
       page = ensurePageTab(ui, pageName);
@@ -882,7 +883,8 @@
     }
 
     if (page) {
-      markPageSession(page, abs, page.__dftLoadedOnce === true);
+      var canReuseLoadedSession = matchedByAbs && page.__dftLoadedOnce === true;
+      markPageSession(page, abs, canReuseLoadedSession);
     }
 
     emitLog('info', 'Opening page.', {
@@ -894,7 +896,7 @@
     try { ui._activeEnvCtx = null; } catch (envErr) {}
     setActiveContext(ui, designRef, pageName, abs || null);
 
-    if (page && page.__dftLoadedOnce) {
+    if (page && matchedByAbs && page.__dftLoadedOnce) {
       emitLog('info', 'Reusing in-memory page session.', {
         pageName: pageName,
         absPath: abs
