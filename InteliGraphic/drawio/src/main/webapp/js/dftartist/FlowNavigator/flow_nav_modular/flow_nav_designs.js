@@ -17,6 +17,20 @@
     return null;
   }
 
+  function normalizeModuleDesignShape(design) {
+    if (!design) return design;
+    design.__kind = 'module-design';
+    design.env_file = '';
+    var kids = Array.isArray(design.sub_designs) ? design.sub_designs : [];
+    design.sub_designs = kids.filter(function (child) {
+      if (!child) return false;
+      var kind = String(child.__kind || '').toLowerCase();
+      var name = String(child.name || '').trim().toLowerCase();
+      return kind !== 'ipconfig-container' && name !== 'ipconfig';
+    });
+    return design;
+  }
+
   function getProjectRoot(ui) {
     var pm = Shared.getProject(ui);
     return (pm && pm.path) || ui._projectRootPath || ui._projectYamlDir || '';
@@ -24,14 +38,16 @@
 
   async function ensureTopLevelDesign(ui, name) {
     var existing = findTopLevelDesign(ui, name);
-    if (existing) return { design: existing, created: false };
+    if (existing) return { design: normalizeModuleDesignShape(existing), created: false };
     var root = getProjectRoot(ui);
     if (!root) throw new Error('Project root path is unavailable.');
     if (!global.DFTProjectExplorerPhase2 || typeof global.DFTProjectExplorerPhase2.createTopLevelDesign !== 'function') {
       throw new Error('Project Explorer createTopLevelDesign helper is not available.');
     }
-    var design = await global.DFTProjectExplorerPhase2.createTopLevelDesign(ui, name, root);
-    return { design: design, created: true };
+    var design = await global.DFTProjectExplorerPhase2.createTopLevelDesign(ui, name, root, {
+      kind: 'module-design'
+    });
+    return { design: normalizeModuleDesignShape(design), created: true };
   }
 
   async function ensurePage(ui, design, pageName) {
