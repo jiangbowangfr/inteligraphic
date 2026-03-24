@@ -20,21 +20,49 @@ function _hydrateDesignDirsFromYaml(ui) {
     const model = ui.projectModel || {};
     const designs = model.designs || [];
 
+    function normalizeKind(d, segs, parentSegs) {
+        const kind = String((d && (d.__kind || d.kind)) || '').toLowerCase();
+        const dirRel = Array.isArray(segs) ? segs.join('/').toLowerCase() : '';
+        const parentRel = Array.isArray(parentSegs) ? parentSegs.join('/').toLowerCase() : '';
+        if (kind) {
+            d.__kind = kind;
+            return;
+        }
+        if (String(d && d.name || '').trim().toLowerCase() === 'ipconfig' || dirRel === 'ipconfig' || /(^|\/)ipconfig$/.test(dirRel)) {
+            d.__kind = 'ipconfig-container';
+            return;
+        }
+        if (String(d && d.name || '').trim().toLowerCase() === 'floorplan' || dirRel === 'floorplan' || /(^|\/)floorplan$/.test(dirRel)) {
+            d.__kind = 'floorplan-container';
+            return;
+        }
+        const pageNames = Array.isArray(d && d.pages) ? d.pages.map(p => String(p || '').toLowerCase()) : [];
+        const hasModuleArch = pageNames.some(p => /_arch$/.test(p));
+        const hasModuleDataflow = pageNames.some(p => /_dataflow$/.test(p));
+        const hasFloorplanChild = Array.isArray(d && d.sub_designs) && d.sub_designs.some(child => String(child && child.name || '').trim().toLowerCase() === 'floorplan');
+        if (!parentRel && (hasModuleArch || hasModuleDataflow || hasFloorplanChild)) {
+            d.__kind = 'module-design';
+        }
+    }
+
     function walk(d, parentSegs) {
         let segs;
+        const explicitKind = String((d && (d.__kind || d.kind)) || '').toLowerCase();
         if (d && typeof d.env_file === 'string' && d.env_file.trim()) {
             // env_file 形如 "design/env.json" 或 "core/sub_core/env.json"
             const p = d.env_file.replace(/\\/g, '/');
             segs = p.split('/'); segs.pop(); // 去掉文件名
         } else {
             segs = (parentSegs || []).concat([_sanitizeFileName(d.name || 'design')]);
-            // 顺便把 env_file 填好，保持模型一致性
-            d.env_file = _joinPath(...segs, 'env.json');
+            if (explicitKind === 'module-design') d.env_file = '';
+            else d.env_file = _joinPath(...segs, 'env.json');
         }
         d._dirRel = segs;
 
         d.pages = Array.isArray(d.pages) ? d.pages : [];
         d.sub_designs = Array.isArray(d.sub_designs) ? d.sub_designs : [];
+        normalizeKind(d, segs, parentSegs || []);
+        if (String(d.__kind || '').toLowerCase() === 'module-design') d.env_file = '';
 
         d.sub_designs.forEach(child => walk(child, segs));
     }
@@ -135,6 +163,11 @@ function _parseProjectYaml(text) {
                 if (indent2 <= indent) break;
                 if (indent2 !== indent + 2) break;
 
+                if (s2.startsWith('kind:')) {
+                    design.__kind = _unq(s2.slice(5).trim());
+                    i++;
+                    continue;
+                }
                 if (s2.startsWith('env_file:')) {
                     design.env_file = _unq(s2.slice(9).trim());
                     i++;

@@ -30,8 +30,10 @@ function _projectToYamlByName(model) {
         let out = ind(lvl) + '- name: ' + esc(design.name || '') + '\n';
         const pages = design.pages || [];
         const subs = design.sub_designs || design.sub_cores || [];
+        const kind = design.__kind || design.kind || '';
         const envFile = design.env_file || '';
         const pageMeta = design.page_meta || {};
+        if (kind) out += ind(lvl) + '  kind: ' + esc(kind) + '\n';
         out += ind(lvl) + '  env_file: ' + esc(envFile) + '\n';
         out += pages.length ? ind(lvl) + '  pages:\n' : ind(lvl) + '  pages: []\n';
         pages.forEach(p => out += ind(lvl) + '    - ' + esc(p) + '\n');
