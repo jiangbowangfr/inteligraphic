@@ -20,10 +20,9 @@ function _hydrateDesignDirsFromYaml(ui) {
     const model = ui.projectModel || {};
     const designs = model.designs || [];
 
-    function normalizeKind(d, segs, parentSegs) {
+    function normalizeKind(d, segs) {
         const kind = String((d && (d.__kind || d.kind)) || '').toLowerCase();
         const dirRel = Array.isArray(segs) ? segs.join('/').toLowerCase() : '';
-        const parentRel = Array.isArray(parentSegs) ? parentSegs.join('/').toLowerCase() : '';
         if (kind) {
             d.__kind = kind;
             return;
@@ -34,14 +33,6 @@ function _hydrateDesignDirsFromYaml(ui) {
         }
         if (String(d && d.name || '').trim().toLowerCase() === 'floorplan' || dirRel === 'floorplan' || /(^|\/)floorplan$/.test(dirRel)) {
             d.__kind = 'floorplan-container';
-            return;
-        }
-        const pageNames = Array.isArray(d && d.pages) ? d.pages.map(p => String(p || '').toLowerCase()) : [];
-        const hasModuleArch = pageNames.some(p => /_arch$/.test(p));
-        const hasModuleDataflow = pageNames.some(p => /_dataflow$/.test(p));
-        const hasFloorplanChild = Array.isArray(d && d.sub_designs) && d.sub_designs.some(child => String(child && child.name || '').trim().toLowerCase() === 'floorplan');
-        if (!parentRel && (hasModuleArch || hasModuleDataflow || hasFloorplanChild)) {
-            d.__kind = 'module-design';
         }
     }
 
@@ -61,7 +52,7 @@ function _hydrateDesignDirsFromYaml(ui) {
 
         d.pages = Array.isArray(d.pages) ? d.pages : [];
         d.sub_designs = Array.isArray(d.sub_designs) ? d.sub_designs : [];
-        normalizeKind(d, segs, parentSegs || []);
+        normalizeKind(d, segs);
         if (String(d.__kind || '').toLowerCase() === 'module-design') d.env_file = '';
 
         d.sub_designs.forEach(child => walk(child, segs));
