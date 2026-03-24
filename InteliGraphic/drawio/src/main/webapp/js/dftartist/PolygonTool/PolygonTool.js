@@ -171,6 +171,36 @@ PolygonTool.prototype.getPreviewDashPattern = function () {
     return dash + ' ' + gap;
 };
 
+PolygonTool.prototype.consumeKeyEvent = function (evt) {
+    if (!evt) return;
+
+    if (typeof evt.preventDefault === 'function') evt.preventDefault();
+    if (typeof evt.stopImmediatePropagation === 'function') evt.stopImmediatePropagation();
+    else if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
+};
+
+PolygonTool.prototype.runWithoutUndo = function (fn) {
+    if (typeof fn !== 'function') return;
+
+    var undoManager = this.ui && this.ui.editor ? this.ui.editor.undoManager : null;
+    if (!undoManager || typeof undoManager.undoableEditHappened !== 'function') {
+        return fn();
+    }
+
+    var oldUndoableEditHappened = undoManager.undoableEditHappened;
+    undoManager.undoableEditHappened = function () {
+        // Preview cells should not pollute the global undo stack.
+        return;
+    };
+
+    try {
+        return fn();
+    }
+    finally {
+        undoManager.undoableEditHappened = oldUndoableEditHappened;
+    }
+};
+
 PolygonTool.prototype.createPreview = function () {
     if (this.previewCell != null) return;
 
@@ -180,61 +210,63 @@ PolygonTool.prototype.createPreview = function () {
     var model = graph.getModel();
     var parent = graph.getDefaultParent();
 
-    model.beginUpdate();
-    try {
-        // Halo + 主线双层预览，避免与底图线条混在一起看不清
-        var haloStyle = 'strokeColor=#ffffff;strokeWidth=5;opacity=80;endArrow=none;rounded=0;lineJoin=miter;';
-        var style = 'strokeColor=#00cc00;strokeWidth=2;dashed=1;dashPattern=' + this.getPreviewDashPattern() + ';endArrow=none;rounded=0;lineJoin=miter;';
+    this.runWithoutUndo(function () {
+        model.beginUpdate();
+        try {
+            // Halo + 主线双层预览，避免与底图线条混在一起看不清
+            var haloStyle = 'strokeColor=#ffffff;strokeWidth=5;opacity=80;endArrow=none;rounded=0;lineJoin=miter;';
+            var style = 'strokeColor=#00cc00;strokeWidth=2;dashed=1;dashPattern=' + this.getPreviewDashPattern() + ';endArrow=none;rounded=0;lineJoin=miter;';
 
-        this.previewHaloCell = graph.insertEdge(
-            parent,
-            null,
-            '',
-            null,
-            null,
-            haloStyle
-        );
+            this.previewHaloCell = graph.insertEdge(
+                parent,
+                null,
+                '',
+                null,
+                null,
+                haloStyle
+            );
 
-        // 创建一条不连任何 cell 的 edge
-        this.previewCell = graph.insertEdge(
-            parent,
-            null,
-            '',
-            null,
-            null,
-            style
-        );
+            // 创建一条不连任何 cell 的 edge
+            this.previewCell = graph.insertEdge(
+                parent,
+                null,
+                '',
+                null,
+                null,
+                style
+            );
 
-        var guideStyle = 'strokeColor=#4aa3ff;strokeWidth=1;dashed=1;dashPattern=4 4;endArrow=none;rounded=0;lineJoin=miter;';
-        this.guideVCell = graph.insertEdge(parent, null, '', null, null, guideStyle);
-        this.guideHCell = graph.insertEdge(parent, null, '', null, null, guideStyle);
+            var guideStyle = 'strokeColor=#4aa3ff;strokeWidth=1;dashed=1;dashPattern=4 4;endArrow=none;rounded=0;lineJoin=miter;';
+            this.guideVCell = graph.insertEdge(parent, null, '', null, null, guideStyle);
+            this.guideHCell = graph.insertEdge(parent, null, '', null, null, guideStyle);
 
-        var geo = this.previewCell.getGeometry();
+            var geo = this.previewCell.getGeometry();
 
-        // 有可能为 null，稳妥起见先判断一下
-        if (geo != null) {
-            geo = geo.clone();
-            geo.relative = false;
-            geo.points = [];
+            // 有可能为 null，稳妥起见先判断一下
+            if (geo != null) {
+                geo = geo.clone();
+                geo.relative = false;
+                geo.points = [];
 
-            if (this.points.length > 0) {
-                var p = this.points[0];
-                geo.setTerminalPoint(new mxPoint(p.x, p.y), true);  // source
-                geo.setTerminalPoint(new mxPoint(p.x, p.y), false); // target
+                if (this.points.length > 0) {
+                    var p = this.points[0];
+                    geo.setTerminalPoint(new mxPoint(p.x, p.y), true);  // source
+                    geo.setTerminalPoint(new mxPoint(p.x, p.y), false); // target
+                }
+
+                // 关键：通过 model 来设置几何，这样视图才会刷新
+                model.setGeometry(this.previewCell, geo);
+                if (this.previewHaloCell != null) {
+                    model.setGeometry(this.previewHaloCell, geo.clone());
+                }
+                this.updateGuideGeometry(this.guideVCell, null);
+                this.updateGuideGeometry(this.guideHCell, null);
             }
-
-            // 关键：通过 model 来设置几何，这样视图才会刷新
-            model.setGeometry(this.previewCell, geo);
-            if (this.previewHaloCell != null) {
-                model.setGeometry(this.previewHaloCell, geo.clone());
-            }
-            this.updateGuideGeometry(this.guideVCell, null);
-            this.updateGuideGeometry(this.guideHCell, null);
         }
-    }
-    finally {
-        model.endUpdate();
-    }
+        finally {
+            model.endUpdate();
+        }
+    }.bind(this));
 };
 
 PolygonTool.prototype.updatePreview = function (mousePt) {
@@ -268,17 +300,19 @@ PolygonTool.prototype.updatePreview = function (mousePt) {
         }
     }
 
-    model.beginUpdate();
-    try {
-        // 用 model.setGeometry
-        model.setGeometry(this.previewCell, geo);
-        if (this.previewHaloCell != null) {
-            model.setGeometry(this.previewHaloCell, geo.clone());
+    this.runWithoutUndo(function () {
+        model.beginUpdate();
+        try {
+            // 用 model.setGeometry
+            model.setGeometry(this.previewCell, geo);
+            if (this.previewHaloCell != null) {
+                model.setGeometry(this.previewHaloCell, geo.clone());
+            }
         }
-    }
-    finally {
-        model.endUpdate();
-    }
+        finally {
+            model.endUpdate();
+        }
+    }.bind(this));
 
     this.updateGuides(mousePt);
 };
@@ -347,14 +381,16 @@ PolygonTool.prototype.updateGuides = function (mousePt) {
     var hLine = aligned.horizontal == null ? null : { x1: minX - pad, y1: aligned.horizontal, x2: maxX + pad, y2: aligned.horizontal };
 
     var model = this.graph.getModel();
-    model.beginUpdate();
-    try {
-        this.updateGuideGeometry(this.guideVCell, vLine);
-        this.updateGuideGeometry(this.guideHCell, hLine);
-    }
-    finally {
-        model.endUpdate();
-    }
+    this.runWithoutUndo(function () {
+        model.beginUpdate();
+        try {
+            this.updateGuideGeometry(this.guideVCell, vLine);
+            this.updateGuideGeometry(this.guideHCell, hLine);
+        }
+        finally {
+            model.endUpdate();
+        }
+    }.bind(this));
 };
 
 
@@ -364,22 +400,24 @@ PolygonTool.prototype.destroyPreview = function () {
     var graph = this.graph;
     var model = graph.getModel();
 
-    model.beginUpdate();
-    try {
-        var toRemove = [];
-        if (this.previewHaloCell) toRemove.push(this.previewHaloCell);
-        if (this.previewCell) toRemove.push(this.previewCell);
-        if (this.guideVCell) toRemove.push(this.guideVCell);
-        if (this.guideHCell) toRemove.push(this.guideHCell);
-        if (toRemove.length > 0) graph.removeCells(toRemove, false);
-        this.previewHaloCell = null;
-        this.previewCell = null;
-        this.guideVCell = null;
-        this.guideHCell = null;
-    }
-    finally {
-        model.endUpdate();
-    }
+    this.runWithoutUndo(function () {
+        model.beginUpdate();
+        try {
+            var toRemove = [];
+            if (this.previewHaloCell) toRemove.push(this.previewHaloCell);
+            if (this.previewCell) toRemove.push(this.previewCell);
+            if (this.guideVCell) toRemove.push(this.guideVCell);
+            if (this.guideHCell) toRemove.push(this.guideHCell);
+            if (toRemove.length > 0) graph.removeCells(toRemove, false);
+            this.previewHaloCell = null;
+            this.previewCell = null;
+            this.guideVCell = null;
+            this.guideHCell = null;
+        }
+        finally {
+            model.endUpdate();
+        }
+    }.bind(this));
 };
 
 PolygonTool.prototype.computeBounds = function () {
@@ -570,22 +608,19 @@ PolygonTool.prototype.onKeyDown = function (evt) {
         ((evt.ctrlKey || evt.metaKey) && (key === 'z' || key === 'Z'));
 
     if (key === 'Escape') {
-        evt.preventDefault();
-        evt.stopPropagation();
+        this.consumeKeyEvent(evt);
         this.cancel();
         return;
     }
 
     if (key === 'Enter' || key === ' ') {
-        evt.preventDefault();
-        evt.stopPropagation();
+        this.consumeKeyEvent(evt);
         if (this.points.length >= 3) this.finish();
         return;
     }
 
     if (isUndo) {
-        evt.preventDefault();
-        evt.stopPropagation();
+        this.consumeKeyEvent(evt);
         this.undoLastPoint();
     }
 };
