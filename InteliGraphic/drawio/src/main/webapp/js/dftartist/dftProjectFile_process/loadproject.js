@@ -298,7 +298,25 @@ function handleDftartProject(path, data) {
                 ui._projectRootPath = model.path;
                 ui._projectYamlFilePath = path;
                 ui._projectYamlDir = await requestSync({ action: 'dirname', path: path });
+                ui._projectDbDirPath = _joinPath(model.path, 'db');
                 _hydrateDesignDirsFromYaml(ui);  // ← 初始化每个 design 的目录段
+
+                if (window.DFTProjectExplorerPhase2 && typeof window.DFTProjectExplorerPhase2.loadExternalDesignTree === 'function') {
+                    const dbRoot = ui._projectDbDirPath;
+                    const topLevel = Array.isArray(model.designs) ? model.designs.slice() : [];
+                    const rebuilt = [];
+                    for (const item of topLevel) {
+                        const lower = String(item && item.name || '').trim().toLowerCase();
+                        if (lower === 'floorplan' || lower === 'ipconfig') {
+                            rebuilt.push(item);
+                            continue;
+                        }
+                        const absDir = _joinPath(dbRoot, _sanitizeFileName(item && item.name || 'design'));
+                        const loaded = await window.DFTProjectExplorerPhase2.loadExternalDesignTree(ui, absDir, { rootDir: dbRoot });
+                        rebuilt.push(loaded);
+                    }
+                    model.designs = rebuilt;
+                }
 
                 // 刷新 Project Explorer（Phase 2）/ 兼容旧面板
                 _refreshProjectExplorerUi(ui, 'loadProject');

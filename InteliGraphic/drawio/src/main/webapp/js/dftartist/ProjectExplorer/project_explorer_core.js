@@ -378,6 +378,7 @@
       if (!design) return;
       if (!Array.isArray(design.pages)) design.pages = [];
       if (!Array.isArray(design.sub_designs)) design.sub_designs = [];
+      if (!design._containers || typeof design._containers !== 'object') design._containers = {};
       if (!design.page_meta || typeof design.page_meta !== 'object') design.page_meta = {};
 
       if (design.abs_dir && !design._absDir) design._absDir = normalizePath(design.abs_dir);
@@ -414,6 +415,11 @@
           : joinPath.apply(null, (design._dirRel || [sanitizeName(design.name || 'design')]).concat(['env.json']));
       }
 
+      if (!isFloorplanDesign(design) && !isIpconfigDesign(design)) {
+        if (design._containers.floorplan) walk(design._containers.floorplan, design._dirRel || []);
+        if (design._containers.ipconfig) walk(design._containers.ipconfig, design._dirRel || []);
+      }
+
       for (var i = 0; i < design.sub_designs.length; i++) walk(design.sub_designs[i], design._dirRel || []);
     }
 
@@ -422,17 +428,13 @@
 
   function getFloorplanContainer(ui, createIfMissing, parentDesign) {
     if (parentDesign && !isFloorplanDesign(parentDesign) && !isIpconfigDesign(parentDesign)) {
-      if (!usesProjectFlow(parentDesign)) {
-        ensureDefaultContainerChildren(parentDesign, ui);
-        hydrateDesignDirs(ui);
-      }
+      ensureDesignContainers(parentDesign, ui);
+      hydrateDesignDirs(ui);
       var direct = findDirectContainer(parentDesign, 'floorplan');
       if (direct || !createIfMissing) return direct || null;
-      var floorplanOnly = makeContainerDesignRecord('floorplan', parentDesign, ui);
-      parentDesign.sub_designs = Array.isArray(parentDesign.sub_designs) ? parentDesign.sub_designs : [];
-      parentDesign.sub_designs.push(floorplanOnly);
+      parentDesign._containers.floorplan = makeContainerDesignRecord('floorplan', parentDesign, ui);
       hydrateDesignDirs(ui);
-      return floorplanOnly;
+      return parentDesign._containers.floorplan;
     }
     var model = ensureModel(ui);
     for (var i = 0; i < model.designs.length; i++) {
@@ -873,6 +875,28 @@
       }
     }
 
+    var sourceFloorplan = findDirectContainer(sourceDesign, 'floorplan');
+    var targetFloorplan = findDirectContainer(targetDesign, 'floorplan');
+    if (sourceFloorplan && targetFloorplan) {
+      var fpPages = Array.isArray(sourceFloorplan.pages) ? sourceFloorplan.pages.slice() : [];
+      for (var fp = 0; fp < fpPages.length; fp++) {
+        await copyIfExists(resolveLocalPageFileAbs(ui, sourceFloorplan, fpPages[fp]), resolveLocalPageFileAbs(ui, targetFloorplan, fpPages[fp]));
+      }
+    }
+
+    var sourceIpconfig = findDirectContainer(sourceDesign, 'ipconfig');
+    var targetIpconfig = findDirectContainer(targetDesign, 'ipconfig');
+    if (sourceIpconfig && targetIpconfig) {
+      var ipcPages = Array.isArray(sourceIpconfig.pages) ? sourceIpconfig.pages.slice() : [];
+      for (var ip = 0; ip < ipcPages.length; ip++) {
+        await copyIfExists(resolveLocalPageFileAbs(ui, sourceIpconfig, ipcPages[ip]), resolveLocalPageFileAbs(ui, targetIpconfig, ipcPages[ip]));
+        await copyIfExists(
+          joinPath(getDesignAbsDir(ui, sourceIpconfig), 'yaml', sanitizeName(ipcPages[ip]) + '.yaml'),
+          joinPath(getDesignAbsDir(ui, targetIpconfig), 'yaml', sanitizeName(ipcPages[ip]) + '.yaml')
+        );
+      }
+    }
+
     var srcKids = Array.isArray(sourceDesign.sub_designs) ? sourceDesign.sub_designs : [];
     for (var j = 0; j < srcKids.length; j++) {
       var srcChild = srcKids[j];
@@ -933,6 +957,9 @@
     if (source.__kind) clone.__kind = source.__kind;
     if (absDirOverride) clone._absDir = normalizePath(absDirOverride);
     if (dirRelOverride) clone._dirRel = dirRelOverride.slice();
+    clone._containers = {};
+    if (source._containers && source._containers.floorplan) clone._containers.floorplan = cloneDesignRecord(source._containers.floorplan, 'floorplan');
+    if (source._containers && source._containers.ipconfig) clone._containers.ipconfig = cloneDesignRecord(source._containers.ipconfig, 'ipconfig');
     return clone;
   }
 
@@ -941,11 +968,9 @@
   }
 
   function findDirectContainer(designRef, kind) {
-    var kids = Array.isArray(designRef && designRef.sub_designs) ? designRef.sub_designs : [];
-    for (var i = 0; i < kids.length; i++) {
-      if (kind === 'floorplan' && isFloorplanDesign(kids[i])) return kids[i];
-      if (kind === 'ipconfig' && isIpconfigDesign(kids[i])) return kids[i];
-    }
+    if (!designRef) return null;
+    if (designRef._containers && kind === 'floorplan' && designRef._containers.floorplan) return designRef._containers.floorplan;
+    if (designRef._containers && kind === 'ipconfig' && designRef._containers.ipconfig) return designRef._containers.ipconfig;
     return null;
   }
 
@@ -969,6 +994,11 @@
           page_meta: ipconfig && ipconfig.page_meta ? JSON.parse(JSON.stringify(ipconfig.page_meta)) : {}
         }
       },
+      children: Array.isArray(designRef && designRef.sub_designs)
+        ? designRef.sub_designs.filter(function (child) { return child && !isFloorplanDesign(child) && !isIpconfigDesign(child); }).map(function (child) {
+            return { name: text(child.name || ''), ref: sanitizeName(child.name || '') };
+          })
+        : [],
       updatedAt: new Date().toISOString()
     };
     if (designRef && designRef.__kind) out.kind = designRef.__kind;
@@ -1362,29 +1392,27 @@
     });
   }
 
+  function ensureDesignContainers(designRef, ui) {
+    if (!designRef || isFloorplanDesign(designRef) || isIpconfigDesign(designRef)) return designRef;
+    if (!designRef._containers || typeof designRef._containers !== 'object') designRef._containers = {};
+    if (!designRef._containers.floorplan) designRef._containers.floorplan = makeContainerDesignRecord('floorplan', designRef, ui);
+    if (!designRef._containers.ipconfig && !usesProjectFlow(designRef)) designRef._containers.ipconfig = makeContainerDesignRecord('ipconfig', designRef, ui);
+    return designRef;
+  }
+
   function ensureDefaultContainerChildren(designRef, ui) {
     if (!designRef || isFloorplanDesign(designRef) || isIpconfigDesign(designRef)) return designRef;
-    designRef.sub_designs = Array.isArray(designRef.sub_designs) ? designRef.sub_designs : [];
-
-    var hasFloorplan = false;
-    var hasIpconfig = false;
-    for (var i = 0; i < designRef.sub_designs.length; i++) {
-      var child = designRef.sub_designs[i];
-      if (isFloorplanDesign(child)) hasFloorplan = true;
-      else if (isIpconfigDesign(child)) hasIpconfig = true;
-    }
-
-    if (!hasIpconfig) designRef.sub_designs.push(makeContainerDesignRecord('ipconfig', designRef, ui));
-    if (!hasFloorplan) designRef.sub_designs.push(makeContainerDesignRecord('floorplan', designRef, ui));
-    return designRef;
+    return ensureDesignContainers(designRef, ui);
   }
 
   async function ensureNestedContainerStorage(ui, designRef) {
     if (!designRef || isFloorplanDesign(designRef) || isIpconfigDesign(designRef)) return;
-    if (!usesProjectFlow(designRef)) ensureDefaultContainerChildren(designRef, ui);
+    ensureDesignContainers(designRef, ui);
     hydrateDesignDirs(ui);
 
-    var children = Array.isArray(designRef.sub_designs) ? designRef.sub_designs : [];
+    var children = [];
+    if (designRef._containers && designRef._containers.floorplan) children.push(designRef._containers.floorplan);
+    if (designRef._containers && designRef._containers.ipconfig) children.push(designRef._containers.ipconfig);
     for (var i = 0; i < children.length; i++) {
       var child = children[i];
       var childBase = getDesignAbsDir(ui, child);
@@ -1407,6 +1435,30 @@
       if (found) return found;
     }
     return null;
+  }
+
+  function findDesignByName(list, name) {
+    list = Array.isArray(list) ? list : [];
+    for (var i = 0; i < list.length; i++) {
+      var design = list[i];
+      if (!design) continue;
+      if (!isFloorplanDesign(design) && !isIpconfigDesign(design) && text(design.name) === text(name)) return design;
+      var found = findDesignByName(design.sub_designs, name);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  function collectDesignNames(list, out) {
+    list = Array.isArray(list) ? list : [list];
+    out = out || [];
+    for (var i = 0; i < list.length; i++) {
+      var design = list[i];
+      if (!design || isFloorplanDesign(design) || isIpconfigDesign(design)) continue;
+      out.push(text(design.name || ''));
+      collectDesignNames(design.sub_designs, out);
+    }
+    return out;
   }
 
   function findOwningDesignBySelectedKey(list, selectedKey) {
@@ -1482,16 +1534,13 @@
     await syncDesignMetadataTree(ui, designRef);
   }
 
-  async function loadExternalDesignTree(ui, absDir) {
+  async function loadExternalDesignTree(ui, absDir, ctx) {
+    ctx = ctx || {};
     var meta = await readDesignManifest(absDir);
     var design = makeDesignRecord(meta.name, absDir, { dirRel: [sanitizeName(meta.name)], kind: text(meta.kind || '') || null });
     design.pages = Array.isArray(meta.pages) ? meta.pages.slice() : [];
     design.page_meta = meta.page_meta && typeof meta.page_meta === 'object' ? JSON.parse(JSON.stringify(meta.page_meta)) : {};
-    if (!usesProjectFlow(design)) ensureDefaultContainerChildren(design, null);
-    else if (meta.containers && meta.containers.floorplan) {
-      var sharedFloorplan = makeContainerDesignRecord('floorplan', design, ui);
-      design.sub_designs.push(sharedFloorplan);
-    }
+    ensureDesignContainers(design, ui);
 
     var floorplan = findDirectContainer(design, 'floorplan');
     if (floorplan && meta.containers && meta.containers.floorplan) {
@@ -1506,15 +1555,19 @@
         ? JSON.parse(JSON.stringify(meta.containers.ipconfig.page_meta)) : {};
     }
 
-    var entries = [];
-    try { entries = await listDir(absDir); } catch (e) { entries = []; }
-    for (var i = 0; i < entries.length; i++) {
-      var entry = parseDirEntry(absDir, entries[i]);
-      if (!entry || !entry.isDir) continue;
-      var lower = normalizedName(entry.name);
-      if (lower === 'page' || lower === 'floorplan' || lower === 'ipconfig' || lower === 'db') continue;
-      if (!await statExistsExact(designMetaPath(entry.path))) continue;
-      design.sub_designs.push(await loadExternalDesignTree(ui, entry.path));
+    var loadRoot = normalizePath(ctx.rootDir || dirnamePath(absDir));
+    var visited = ctx.visited || Object.create(null);
+    var visitKey = normalizePath(absDir);
+    if (visited[visitKey]) return design;
+    visited[visitKey] = true;
+
+    var children = Array.isArray(meta.children) ? meta.children : [];
+    for (var i = 0; i < children.length; i++) {
+      var childRef = text(children[i] && (children[i].ref || children[i].name) || '').trim();
+      if (!childRef) continue;
+      var childAbs = joinPath(loadRoot, sanitizeName(childRef));
+      if (!await statExistsExact(designMetaPath(childAbs))) throw new Error('Child design metadata not found: ' + childRef);
+      design.sub_designs.push(await loadExternalDesignTree(ui, childAbs, { rootDir: loadRoot, visited: visited }));
     }
     await reconcileDesignTreeWithDisk(ui, design);
     return design;
@@ -1525,12 +1578,11 @@
     var srcKids = Array.isArray(sourceDesign.sub_designs) ? sourceDesign.sub_designs : [];
     for (var i = 0; i < srcKids.length; i++) {
       var child = srcKids[i];
-      var childName = isFloorplanDesign(child) ? 'floorplan' : (isIpconfigDesign(child) ? 'ipconfig' : (child.name || 'design'));
-      var childDirRel = (clone._dirRel || []).concat([sanitizeName(childName)]);
-      var childAbs = targetAbs ? joinPath(targetAbs, sanitizeName(childName)) : '';
-      clone.sub_designs.push(buildClonedDesignTree(ui, child, childName, childAbs, childDirRel));
+      var childName = child.name || 'design';
+      var childAbs = joinPath(getProjectStorageRoot(ui), sanitizeName(childName));
+      clone.sub_designs.push(buildClonedDesignTree(ui, child, childName, childAbs, [sanitizeName(childName)]));
     }
-    if (!isFloorplanDesign(clone) && !isIpconfigDesign(clone)) ensureDefaultContainerChildren(clone, ui);
+    if (!isFloorplanDesign(clone) && !isIpconfigDesign(clone)) ensureDesignContainers(clone, ui);
     return clone;
   }
 
@@ -1540,27 +1592,31 @@
     if (designNameError) throw new Error(designNameError);
 
     var siblings = siblingListForParent(ui, parentDesign);
-    for (var i = 0; i < siblings.length; i++) {
-      var sibling = siblings[i];
-      if (sibling && sibling.name === name) throw new Error('Design already exists: ' + name);
+    var existingByName = findDesignByName(ensureModel(ui).designs, name);
+    if (existingByName) throw new Error('Design already exists: ' + name);
+    if (sourceDesign) {
+      var importNames = collectDesignNames(sourceDesign.sub_designs || [], []);
+      for (var n = 0; n < importNames.length; n++) {
+        if (findDesignByName(ensureModel(ui).designs, importNames[n])) {
+          throw new Error('Import name conflict: ' + importNames[n]);
+        }
+      }
     }
 
-    var parentAbs = parentDesign ? getDesignAbsDir(ui, parentDesign) : getProjectStorageRoot(ui);
-    if (!parentAbs) throw new Error('Create or open a project first.');
-    var targetAbs = joinPath(parentAbs, sanitizeName(name));
+    var storageRoot = getProjectStorageRoot(ui);
+    if (!storageRoot) throw new Error('Create or open a project first.');
+    var targetAbs = joinPath(storageRoot, sanitizeName(name));
     var sourceAbs = sourceDesign ? getDesignAbsDir(ui, sourceDesign) : '';
     if (sourceAbs && pathWithinRoot(sourceAbs, targetAbs)) {
       throw new Error('Cannot copy a design into itself or one of its descendants.');
     }
-    var targetDirRel = parentDesign
-      ? (parentDesign._dirRel || []).concat([sanitizeName(name)])
-      : (relSegsFromRoot(getProjectStorageRoot(ui), targetAbs) || [sanitizeName(name)]);
+    var targetDirRel = [sanitizeName(name)];
 
     var design = sourceDesign
       ? buildClonedDesignTree(ui, sourceDesign, name, targetAbs, targetDirRel)
       : makeDesignRecord(name, targetAbs, { dirRel: targetDirRel });
 
-    if (!sourceDesign) ensureDefaultContainerChildren(design, ui);
+    if (!sourceDesign) ensureDesignContainers(design, ui);
     siblings.push(design);
     markProjectReady(ensureModel(ui));
     hydrateDesignDirs(ui);
@@ -1669,7 +1725,7 @@
     });
     model.designs.push(design);
     markProjectReady(model);
-    if (!usesProjectFlow(design)) ensureDefaultContainerChildren(design, ui);
+    ensureDesignContainers(design, ui);
     hydrateDesignDirs(ui);
 
     var designAbs = getDesignAbsDir(ui, design);
@@ -1706,15 +1762,13 @@
       return;
     }
     designRef.sub_designs = Array.isArray(designRef.sub_designs) ? designRef.sub_designs : [];
-    for (var i = 0; i < designRef.sub_designs.length; i++) {
-      if (designRef.sub_designs[i] && designRef.sub_designs[i].name === name) {
-        global.alert('Sub-design already exists: ' + name);
-        return;
-      }
+    if (findDesignByName(ensureModel(ui).designs, name)) {
+      global.alert('Design already exists: ' + name);
+      return;
     }
-    var child = makeDesignRecord(name, joinPath(getDesignAbsDir(ui, designRef), sanitizeName(name)), { dirRel: (designRef._dirRel || []).concat([sanitizeName(name)]) });
+    var child = makeDesignRecord(name, joinPath(getProjectStorageRoot(ui), sanitizeName(name)), { dirRel: [sanitizeName(name)] });
     designRef.sub_designs.push(child);
-    ensureDefaultContainerChildren(child, ui);
+    ensureDesignContainers(child, ui);
     hydrateDesignDirs(ui);
     try {
       await ensureDirs(getDesignAbsDir(ui, child));
@@ -2440,6 +2494,10 @@
       for (var fl = 0; fl < flatPages.length; fl++) {
         renderPageLeaf(ui, panel, state, designKey + ':flat:' + fl + ':' + flatPages[fl].pageName, depth + 1, flatPages[fl].designRef, flatPages[fl].pageName);
       }
+      if (isModuleDesign(design)) {
+        var childDesigns = Array.isArray(design.sub_designs) ? design.sub_designs : [];
+        for (var cd = 0; cd < childDesigns.length; cd++) renderDesignBranch(ui, panel, childDesigns[cd], depth + 1, query);
+      }
       return true;
     }
 
@@ -3147,7 +3205,11 @@
   NS.openAddDesignDialog = openAddDesignDialog;
   NS.createProject = createProject;
   NS.createTopLevelDesign = createTopLevelDesign;
+  NS.createDesignInContext = createDesignInContext;
   NS.createFloorplanPages = createFloorplanPages;
   NS.resolvePageFileAbs = resolveLocalPageFileAbs;
   NS.createPageFileSlot = createPageFileSlot;
+  NS.loadExternalDesignTree = loadExternalDesignTree;
+  NS.promptValue = promptValue;
+  NS.validateScopedName = validateScopedName;
 })(window);

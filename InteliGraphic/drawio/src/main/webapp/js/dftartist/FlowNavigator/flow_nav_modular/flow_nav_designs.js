@@ -20,6 +20,46 @@
     return null;
   }
 
+  function findParentDesign(ui, childRef, list) {
+    list = Array.isArray(list) ? list : ((Shared.getProject(ui) || {}).designs || []);
+    for (var i = 0; i < list.length; i++) {
+      var design = list[i];
+      if (!design) continue;
+      if (design._containers) {
+        if (design._containers.floorplan === childRef || design._containers.ipconfig === childRef) return design;
+      }
+      var kids = Array.isArray(design.sub_designs) ? design.sub_designs : [];
+      for (var j = 0; j < kids.length; j++) {
+        if (kids[j] === childRef) return design;
+      }
+      var found = findParentDesign(ui, childRef, kids);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  function findDesignByName(list, name) {
+    list = Array.isArray(list) ? list : [];
+    for (var i = 0; i < list.length; i++) {
+      var design = list[i];
+      if (!design) continue;
+      if (String(design.name || '') === String(name || '')) return design;
+      var found = findDesignByName(design.sub_designs, name);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  function getGenerationOwner(ui) {
+    var ctx = ui && ui._activeProjectPageCtx ? ui._activeProjectPageCtx : null;
+    var designRef = ctx && ctx.designRef ? ctx.designRef : (Shared.getCurrentDesign ? Shared.getCurrentDesign(ui) : null);
+    if (!designRef) return null;
+    var kind = String(designRef.__kind || '').toLowerCase();
+    if (kind === 'module-design') return designRef;
+    if (kind === 'floorplan-container') return findParentDesign(ui, designRef);
+    return null;
+  }
+
   function normalizeModuleDesignShape(design) {
     if (!design) return design;
     design.__kind = 'module-design';
@@ -39,18 +79,56 @@
     return (pm && pm.path) || ui._projectRootPath || ui._projectYamlDir || '';
   }
 
-  async function ensureTopLevelDesign(ui, name) {
-    var existing = findTopLevelDesign(ui, name);
+  async function ensureTopLevelDesign(ui, name, parentDesign) {
+    var existing = findDesignByName((Shared.getProject(ui) || {}).designs || [], name);
     if (existing) return { design: normalizeModuleDesignShape(existing), created: false };
     var root = getProjectRoot(ui);
     if (!root) throw new Error('Project root path is unavailable.');
-    if (!global.DFTProjectExplorerPhase2 || typeof global.DFTProjectExplorerPhase2.createTopLevelDesign !== 'function') {
-      throw new Error('Project Explorer createTopLevelDesign helper is not available.');
+    if (!global.DFTProjectExplorerPhase2 || typeof global.DFTProjectExplorerPhase2.createDesignInContext !== 'function') {
+      throw new Error('Project Explorer createDesignInContext helper is not available.');
     }
-    var design = await global.DFTProjectExplorerPhase2.createTopLevelDesign(ui, name, root, {
-      kind: 'module-design'
-    });
+    var design = await global.DFTProjectExplorerPhase2.createDesignInContext(ui, parentDesign || null, name, null);
+    design.__kind = 'module-design';
     return { design: normalizeModuleDesignShape(design), created: true };
+  }
+
+  async function promptForUniqueModuleNames(ui, moduleNames, parentDesign) {
+    var project = Shared.getProject(ui) || {};
+    var roots = Array.isArray(project.designs) ? project.designs : [];
+    var used = Object.create(null);
+    var out = [];
+    for (var i = 0; i < moduleNames.length; i++) {
+      var original = String(moduleNames[i] || '').trim();
+      if (!original) continue;
+      var candidate = original;
+      while (true) {
+        var existing = findDesignByName(roots, candidate);
+        var conflictWithProject = existing && existing !== parentDesign && findParentDesign(ui, existing) !== parentDesign;
+        var conflictInBatch = !!used[candidate];
+        if (!conflictWithProject && !conflictInBatch) break;
+        if (!global.DFTProjectExplorerPhase2 || typeof global.DFTProjectExplorerPhase2.promptValue !== 'function') {
+          throw new Error('Duplicate module name: ' + candidate);
+        }
+        candidate = await global.DFTProjectExplorerPhase2.promptValue(
+          ui,
+          'Rename module "' + original + '"',
+          'Enter a unique module name',
+          candidate
+        );
+        candidate = String(candidate || '').trim();
+        var nameError = global.DFTProjectExplorerPhase2.validateScopedName
+          ? global.DFTProjectExplorerPhase2.validateScopedName(candidate, 'Module name', { disallowReserved: true })
+          : '';
+        if (!candidate) throw new Error('Module generation cancelled.');
+        if (nameError) {
+          global.alert(nameError);
+          continue;
+        }
+      }
+      used[candidate] = true;
+      out.push(candidate);
+    }
+    return out;
   }
 
   async function ensurePage(ui, design, pageName) {
@@ -1258,7 +1336,9 @@
     opts = opts || {};
     analysis = analysis || Analysis.analyzeDataflow(ui);
     var designInputs = Designs.collectDesignInputs(ui);
-    var moduleNames = Object.keys(designInputs).sort();
+    var sourceModuleNames = Object.keys(designInputs).sort();
+    var parentDesign = getGenerationOwner(ui);
+    var moduleNames = await promptForUniqueModuleNames(ui, sourceModuleNames, parentDesign);
     if (!moduleNames.length) throw new Error('No generated floorplan interfaces found. Generate interfaces first.');
     var pageOrder = MODULE_INTERFACE_LAYER_ORDER.slice();
     var archLayerOrder = MODULE_LAYER_ORDER.slice();
@@ -1268,12 +1348,13 @@
     try {
       for (var i = 0; i < moduleNames.length; i++) {
         var moduleName = moduleNames[i];
+        var sourceModuleName = sourceModuleNames[i];
         var archPageName = (Shared.sanitizeName ? Shared.sanitizeName(moduleName) : String(moduleName).replace(/[^a-zA-Z0-9]+/g, '_')) + '_arch';
-        var markerEntries = designInputs[moduleName];
+        var markerEntries = designInputs[sourceModuleName];
         var layerInputs = groupMarkersByLayer(markerEntries);
-        var modulePlan = modulePlans[moduleName] || null;
+        var modulePlan = modulePlans[sourceModuleName] || null;
         var sourceModuleCell = modulePlan && modulePlan.moduleCell ? modulePlan.moduleCell : null;
-        var ensured = await ensureTopLevelDesign(ui, moduleName);
+        var ensured = await ensureTopLevelDesign(ui, moduleName, parentDesign);
         var design = ensured.design;
         var floorplan = ensureFloorplanContainer(ui, design);
         var shellPageName = (Shared.sanitizeName ? Shared.sanitizeName(moduleName) : String(moduleName).replace(/[^a-zA-Z0-9]+/g, '_')) + '_dataflow';
