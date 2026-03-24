@@ -8,6 +8,7 @@
   var Designs = Mod.Designs = Mod.Designs || {};
   var MODULE_LAYER_ORDER = ['base', 'ssn', 'bscan', 'ijtag', 'bisr', 'other'];
   var MODULE_INTERFACE_LAYER_ORDER = ['ssn', 'bscan', 'ijtag', 'bisr', 'other'];
+  var LEGACY_ARCH_PAGE_NAME = 'arch';
   if (!Shared || !Analysis) throw new Error('flow_nav_shared.js and flow_nav_analysis.js must be loaded before flow_nav_designs.js');
 
   function findTopLevelDesign(ui, name) {
@@ -1261,13 +1262,13 @@
     if (!moduleNames.length) throw new Error('No generated floorplan interfaces found. Generate interfaces first.');
     var pageOrder = MODULE_INTERFACE_LAYER_ORDER.slice();
     var archLayerOrder = MODULE_LAYER_ORDER.slice();
-    var archPageName = 'arch';
     var previousCtx = captureCurrentPageCtx(ui);
     var results = [];
     var modulePlans = analysis && analysis.interfacePlan && analysis.interfacePlan.modulePlans ? analysis.interfacePlan.modulePlans : {};
     try {
       for (var i = 0; i < moduleNames.length; i++) {
         var moduleName = moduleNames[i];
+        var archPageName = (Shared.sanitizeName ? Shared.sanitizeName(moduleName) : String(moduleName).replace(/[^a-zA-Z0-9]+/g, '_')) + '_arch';
         var markerEntries = designInputs[moduleName];
         var layerInputs = groupMarkersByLayer(markerEntries);
         var modulePlan = modulePlans[moduleName] || null;
@@ -1275,7 +1276,7 @@
         var ensured = await ensureTopLevelDesign(ui, moduleName);
         var design = ensured.design;
         var floorplan = ensureFloorplanContainer(ui, design);
-        var shellPageName = Shared.sanitizeName ? (Shared.sanitizeName(moduleName) + '_floorplan') : (String(moduleName).replace(/[^a-zA-Z0-9]+/g, '_') + '_floorplan');
+        var shellPageName = (Shared.sanitizeName ? Shared.sanitizeName(moduleName) : String(moduleName).replace(/[^a-zA-Z0-9]+/g, '_')) + '_dataflow';
         if (floorplan) {
           await ensurePage(ui, floorplan, shellPageName);
           await withOpenedPage(ui, floorplan, shellPageName, (function () {
@@ -1329,12 +1330,21 @@
           markerCount: markerEntries.length
         });
         if (design.page_meta && design.page_meta[archPageName]) delete design.page_meta[archPageName];
+        var legacyArchIdx = Array.isArray(design.pages) ? design.pages.indexOf(LEGACY_ARCH_PAGE_NAME) : -1;
+        if (legacyArchIdx >= 0) design.pages.splice(legacyArchIdx, 1);
+        if (design.page_meta && design.page_meta[LEGACY_ARCH_PAGE_NAME]) delete design.page_meta[LEGACY_ARCH_PAGE_NAME];
         var legacyPageOrder = ['ssn', 'ijtag', 'bscan', 'bisr'];
         for (var k = 0; k < legacyPageOrder.length; k++) {
           var legacyPageName = legacyPageOrder[k];
           var idx = Array.isArray(design.pages) ? design.pages.indexOf(legacyPageName) : -1;
           if (idx >= 0) design.pages.splice(idx, 1);
           if (design.page_meta && design.page_meta[legacyPageName]) delete design.page_meta[legacyPageName];
+        }
+        if (floorplan) {
+          var legacyShellPageName = (Shared.sanitizeName ? Shared.sanitizeName(moduleName) : String(moduleName).replace(/[^a-zA-Z0-9]+/g, '_')) + '_floorplan';
+          var legacyShellIdx = Array.isArray(floorplan.pages) ? floorplan.pages.indexOf(legacyShellPageName) : -1;
+          if (legacyShellIdx >= 0) floorplan.pages.splice(legacyShellIdx, 1);
+          if (floorplan.page_meta && floorplan.page_meta[legacyShellPageName]) delete floorplan.page_meta[legacyShellPageName];
         }
       }
     } finally {

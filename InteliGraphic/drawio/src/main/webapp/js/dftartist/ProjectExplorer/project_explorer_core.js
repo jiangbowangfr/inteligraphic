@@ -571,6 +571,43 @@
     return 'Arch';
   }
 
+  function isTopLevelFloorplanDesign(ui, design) {
+    var model = ensureModel(ui);
+    var designs = model && Array.isArray(model.designs) ? model.designs : [];
+    return !!design && isFloorplanDesign(design) && designs.indexOf(design) >= 0;
+  }
+
+  function designDisplayLabel(ui, design) {
+    if (isTopLevelFloorplanDesign(ui, design)) return 'dfxplanner';
+    if (isFloorplanDesign(design)) return 'floorplan';
+    if (isIpconfigDesign(design)) return 'ipconfig';
+    return design && design.name ? design.name : 'design';
+  }
+
+  function isModuleDesign(design) {
+    return !!design && String(design.__kind || '').toLowerCase() === 'module-design';
+  }
+
+  function renderPageLeaf(ui, panel, state, key, depth, designRef, pageName) {
+    var meta = designRef && designRef.page_meta && designRef.page_meta[pageName] && designRef.page_meta[pageName].structure
+      ? ('[' + designRef.page_meta[pageName].structure + ']') : '';
+    panel.appendChild(createNode(ui, {
+      key: key,
+      depth: depth,
+      icon: '□',
+      label: pageName,
+      meta: meta,
+      activePage: isActiveDesignPage(ui, designRef, pageName),
+      onClick: function () { state.selectedKey = key; openPage(ui, designRef, pageName); },
+      menuItems: [
+        { label: 'Open', handler: function () { openPage(ui, designRef, pageName); } },
+        { label: 'Rename', handler: function () { renamePage(ui, designRef, pageName); } },
+        { label: 'Duplicate', handler: function () { duplicatePage(ui, designRef, pageName); } },
+        { label: 'Delete', handler: function () { deletePageAction(ui, designRef, pageName); } }
+      ]
+    }));
+  }
+
   function setActivePageCtx(ui, designRef, pageName, absPath) {
     if (global.DFTPageSessionManager && typeof global.DFTPageSessionManager.setActiveContext === 'function') {
       return global.DFTPageSessionManager.setActiveContext(ui, designRef, pageName, absPath);
@@ -1752,8 +1789,9 @@
     return true;
   }
 
-  function floorplanPageName(projectName) {
-    return sanitizeName(projectName || 'project') + '_floorplan';
+  function floorplanPageName(ownerDesign) {
+    if (isModuleDesign(ownerDesign)) return sanitizeName(ownerDesign.name || 'module') + '_dataflow';
+    return 'dataflow';
   }
 
   async function showFloorplanPageDialog(ui) {
@@ -1834,7 +1872,7 @@
     fp.page_meta = fp.page_meta || {};
     var created = [];
     var skipped = [];
-    var pageName = floorplanPageName((pageOwner && pageOwner.name) || model.name || 'project');
+    var pageName = floorplanPageName(pageOwner || null);
     if (Array.isArray(fp.pages) && fp.pages.indexOf(pageName) >= 0) {
       skipped.push(pageName);
       fp.page_meta[pageName] = { structure: selection.structure, kind: 'floorplan' };
@@ -2195,6 +2233,7 @@
 
   function designMatchesQuery(design, query) {
     if (!query) return true;
+    if (isFloorplanDesign(design) && contains('dfxplanner', query)) return true;
     if (contains(design.name, query) || (!isIpconfigDesign(design) && contains(design.env_file, query)) || contains(isFloorplanDesign(design) ? 'floorplan-container' : design.__kind, query)) return true;
     var pages = Array.isArray(design.pages) ? design.pages : [];
     for (var i = 0; i < pages.length; i++) if (contains(pages[i], query)) return true;
@@ -2358,7 +2397,7 @@
       key: designKey,
       depth: depth,
       icon: isFloorplan ? '▦' : (isIpconfig ? '◆' : '◆'),
-      label: isFloorplan ? 'floorplan' : (isIpconfig ? 'ipconfig' : (design.name || 'design')),
+      label: designDisplayLabel(ui, design),
       hasChildren: true,
       open: openDesign,
       onToggle: function () { toggleExpanded(ui, designKey, true); },
@@ -2384,6 +2423,30 @@
     }
 
     var pages = Array.isArray(design.pages) ? design.pages : [];
+    var moduleFloorplan = isModuleDesign(design) ? findDirectContainer(design, 'floorplan') : null;
+    var moduleFloorplanPages = Array.isArray(moduleFloorplan && moduleFloorplan.pages) ? moduleFloorplan.pages : [];
+    var flattenPages = isModuleDesign(design) || isTopLevelFloorplanDesign(ui, design);
+
+    if (flattenPages) {
+      var flatPages = [];
+      for (var fp = 0; fp < pages.length; fp++) {
+        if (!query || contains(pages[fp], query)) flatPages.push({ designRef: design, pageName: pages[fp] });
+      }
+      if (moduleFloorplan) {
+        for (var mf = 0; mf < moduleFloorplanPages.length; mf++) {
+          if (!query || contains(moduleFloorplanPages[mf], query)) flatPages.push({ designRef: moduleFloorplan, pageName: moduleFloorplanPages[mf] });
+        }
+      }
+      for (var fl = 0; fl < flatPages.length; fl++) {
+        renderPageLeaf(ui, panel, state, designKey + ':flat:' + fl + ':' + flatPages[fl].pageName, depth + 1, flatPages[fl].designRef, flatPages[fl].pageName);
+      }
+      return true;
+    }
+
+    if (isIpconfig) {
+      return true;
+    }
+
     var visiblePages = [];
     var pageGroupLabel = designPageGroupLabel(design);
     for (var i = 0; i < pages.length; i++) if (!query || contains(pages[i], query) || contains(pageGroupLabel, query)) visiblePages.push(pages[i]);
@@ -2407,28 +2470,13 @@
       if (openPages) {
         for (var p = 0; p < visiblePages.length; p++) {
           (function (pageName) {
-            var meta = design.page_meta && design.page_meta[pageName] && design.page_meta[pageName].structure ? ('[' + design.page_meta[pageName].structure + ']') : '';
-            panel.appendChild(createNode(ui, {
-              key: pagesKey + ':' + pageName,
-              depth: depth + 2,
-              icon: '□',
-              label: pageName,
-              meta: meta,
-              activePage: isActiveDesignPage(ui, design, pageName),
-              onClick: function () { state.selectedKey = pagesKey + ':' + pageName; openPage(ui, design, pageName); },
-              menuItems: [
-                { label: 'Open', handler: function () { openPage(ui, design, pageName); } },
-                { label: 'Rename', handler: function () { renamePage(ui, design, pageName); } },
-                { label: 'Duplicate', handler: function () { duplicatePage(ui, design, pageName); } },
-                { label: 'Delete', handler: function () { deletePageAction(ui, design, pageName); } }
-              ]
-            }));
+            renderPageLeaf(ui, panel, state, pagesKey + ':' + pageName, depth + 2, design, pageName);
           })(visiblePages[p]);
         }
       }
     }
 
-    if (!isContainerDesign) {
+    if (!isContainerDesign && !isModuleDesign(design)) {
       var kids = Array.isArray(design.sub_designs) ? design.sub_designs : [];
       for (var k = 0; k < kids.length; k++) renderDesignBranch(ui, panel, kids[k], depth + 1, query);
     }
