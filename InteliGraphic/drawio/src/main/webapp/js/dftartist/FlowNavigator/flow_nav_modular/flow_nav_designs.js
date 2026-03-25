@@ -293,9 +293,56 @@
     return String(Shared.styleValue(style, 'dftsFlowNavGeneratedModule', '0')) === '1';
   }
 
+  function trimString(value) {
+    return String(value == null ? '' : value).trim();
+  }
+
+  function normalizeGeneratedInterfaceMeta(meta, graph, cell) {
+    if (!meta || typeof meta !== 'object') return null;
+    var out = {
+      moduleName: trimString(meta.moduleName || meta.sourceModule || ''),
+      layerName: trimString(meta.layerName || ''),
+      interfaceType: trimString(meta.interfaceType || ''),
+      pairId: trimString(meta.pairId || ''),
+      side: trimString(meta.side || ''),
+      bundleId: trimString(meta.bundleId || ''),
+      chainId: trimString(meta.chainId || ''),
+      sideStackIndex: Number(meta.sideStackIndex == null || meta.sideStackIndex === '' ? 0 : meta.sideStackIndex),
+      id: trimString(meta.id || meta.markerId || '')
+    };
+    if (!isFinite(out.sideStackIndex)) out.sideStackIndex = 0;
+    if ((!out.moduleName || !out.layerName || !out.interfaceType) && graph && cell) {
+      var style = String(cell.style || '');
+      if (!out.moduleName) out.moduleName = trimString(Shared.styleValue(style, 'flowModule', '') || Shared.styleValue(style, 'dftsFloorplan_moduleName', '') || '');
+      if (!out.layerName) out.layerName = trimString(Shared.styleValue(style, 'flowLayer', '') || '');
+      if (!out.interfaceType) out.interfaceType = trimString(Shared.styleValue(style, 'flowInterfaceType', '') || '');
+    }
+    if (!out.moduleName || !out.layerName || !out.interfaceType) return null;
+    return out;
+  }
+
+  function readPersistedGeneratedInterfaceMeta(graph, cell) {
+    if (!cell || typeof cell !== 'object') return null;
+    var candidates = [];
+    if (cell.__flowDesignMarkerMeta && typeof cell.__flowDesignMarkerMeta === 'object') candidates.push(cell.__flowDesignMarkerMeta);
+    if (cell.value && typeof cell.value === 'object') candidates.push(cell.value);
+    for (var key in cell) {
+      if (!Object.prototype.hasOwnProperty.call(cell, key)) continue;
+      if (key === '__flowDesignMarkerMeta' || key === 'value' || key === 'children' || key === 'parent' || key === 'source' || key === 'target') continue;
+      var value = cell[key];
+      if (!value || typeof value !== 'object') continue;
+      if (value.moduleName || value.layerName || value.interfaceType || value.sourceModule) candidates.push(value);
+    }
+    for (var i = 0; i < candidates.length; i++) {
+      var normalized = normalizeGeneratedInterfaceMeta(candidates[i], graph, cell);
+      if (normalized) return normalized;
+    }
+    return null;
+  }
+
   function isGeneratedDesignInterface(cell) {
     if (!cell) return false;
-    if (cell.__flowDesignMarkerMeta && cell.__flowDesignMarkerMeta.moduleName) return true;
+    if (readPersistedGeneratedInterfaceMeta(null, cell)) return true;
     return String(Shared.styleValue(cell.style || '', 'flowGeneratedDesignInterface', '0')) === '1';
   }
 
@@ -393,6 +440,45 @@
     return out;
   }
 
+  function pushUniqueCells(target, cells) {
+    target = Array.isArray(target) ? target : [];
+    cells = Array.isArray(cells) ? cells : [];
+    for (var i = 0; i < cells.length; i++) {
+      if (cells[i] && target.indexOf(cells[i]) < 0) target.push(cells[i]);
+    }
+    return target;
+  }
+
+  function collectLinkedModuleMoveCells(graph, cells) {
+    var out = Array.isArray(cells) ? cells.slice() : [];
+    if (!graph || !out.length) return out;
+    var handledModules = Object.create(null);
+    for (var i = 0; i < cells.length; i++) {
+      var cell = cells[i];
+      if (!isFlowModuleShell(cell) && !isGeneratedModuleBody(cell)) continue;
+      var moduleName = moduleNameForCell(cell);
+      if (!moduleName || handledModules[moduleName]) continue;
+      handledModules[moduleName] = true;
+      pushUniqueCells(out, collectModuleInterfacesForTransform(graph, moduleName, [cell]));
+    }
+    return out;
+  }
+
+  function movedCellsContainLinkedInterfaces(graph, cells, moduleName, excludedRoots) {
+    if (!graph || !moduleName || !cells || !cells.length) return false;
+    var model = graph.getModel ? graph.getModel() : null;
+    if (!model) return false;
+    for (var i = 0; i < cells.length; i++) {
+      var cell = cells[i];
+      if (!isGeneratedDesignInterface(cell)) continue;
+      var meta = extractGeneratedInterfaceMeta(graph, cell);
+      if (!meta || String(meta.moduleName || '').trim() !== moduleName) continue;
+      if (isDescendantOfAny(model, cell, excludedRoots)) continue;
+      return true;
+    }
+    return false;
+  }
+
   function cloneRectLike(geo) {
     return geo && geo.clone ? geo.clone() : new mxGeometry(geo.x, geo.y, geo.width, geo.height);
   }
@@ -469,6 +555,7 @@
           global.DftsIP.Symbol.relayout(graph, targets[i]);
         }
       } catch (e) {}
+      persistGeneratedInterfaceMeta(graph, targets[i], extractGeneratedInterfaceMeta(graph, targets[i]));
     }
     try {
       if (typeof graph.refresh === 'function') graph.refresh();
@@ -507,6 +594,7 @@
           global.DftsIP.Symbol.relayout(graph, targets[i]);
         }
       } catch (e) {}
+      persistGeneratedInterfaceMeta(graph, targets[i], extractGeneratedInterfaceMeta(graph, targets[i]));
     }
     try {
       if (typeof graph.refresh === 'function') graph.refresh();
@@ -535,9 +623,29 @@
     };
   }
 
+  function installLinkedModuleMovePreviewBehavior(graph) {
+    var handler = graph && graph.graphHandler ? graph.graphHandler : null;
+    if (!handler || handler.__flowLinkedModuleMovePreviewInstalled) return;
+    handler.__flowLinkedModuleMovePreviewInstalled = true;
+    if (typeof handler.maxLivePreview === 'number') handler.maxLivePreview = Math.max(handler.maxLivePreview, 256);
+    handler.allowLivePreview = true;
+    var originalGetCells = handler.getCells;
+    if (typeof originalGetCells !== 'function') return;
+    handler.getCells = function (cell, cells) {
+      var moved = originalGetCells.apply(this, arguments);
+      var expanded = collectLinkedModuleMoveCells(this.graph || graph, moved);
+      emitDesignLog('graph-handler-get-cells', {
+        requestedCount: moved ? moved.length : 0,
+        expandedCount: expanded ? expanded.length : 0
+      });
+      return expanded;
+    };
+  }
+
   function installShellResizeBehavior(graph) {
     if (!graph || graph.__flowModuleShellResizeInstalled) return;
     graph.__flowModuleShellResizeInstalled = true;
+    installLinkedModuleMovePreviewBehavior(graph);
     var originalCellsResized = graph.cellsResized;
     var originalCellsMoved = graph.cellsMoved;
     var originalResizeCell = graph.resizeCell;
@@ -726,6 +834,13 @@
           var absoluteNewGeo = toAbsoluteRect(model2, plan.shell, newGeo);
           var actualDx = Number(absoluteNewGeo.x || 0) - Number(plan.oldGeo.x || 0);
           var actualDy = Number(absoluteNewGeo.y || 0) - Number(plan.oldGeo.y || 0);
+          if (movedCellsContainLinkedInterfaces(this, cells, plan.moduleName, [plan.shell])) {
+            emitDesignLog('cells-moved-hook-skip-linked-sync', {
+              moduleName: plan.moduleName,
+              reason: 'Linked interfaces already participated in the drag move.'
+            });
+            continue;
+          }
           syncLinkedModuleInterfacesByMove(this, plan.moduleName, actualDx, actualDy, [plan.shell]);
         }
       } finally {
@@ -814,8 +929,8 @@
     if (!cell) return null;
     var style = String(cell.style || '');
     if (style.indexOf('dftsIP_chipBody=1') < 0) return null;
-    var direct = cell.__flowDesignMarkerMeta ? Shared.cloneJson(cell.__flowDesignMarkerMeta) : null;
-    if (direct && direct.moduleName) return direct;
+    var direct = readPersistedGeneratedInterfaceMeta(graph, cell);
+    if (direct) return direct;
     if (String(Shared.getCellStyleValue(graph, cell, 'flowGeneratedDesignInterface', '0')) !== '1') return null;
     var fromStyle = {
       moduleName: String(Shared.getCellStyleValue(graph, cell, 'flowModule', '') || ''),
@@ -828,8 +943,7 @@
       sideStackIndex: Number(Shared.getCellStyleValue(graph, cell, 'flowSideStackIndex', '') || 0),
       id: String(Shared.getCellStyleValue(graph, cell, 'flowMarkerId', '') || '')
     };
-    if (!fromStyle.moduleName || !fromStyle.layerName || !fromStyle.interfaceType) return null;
-    return fromStyle;
+    return normalizeGeneratedInterfaceMeta(fromStyle, graph, cell);
   }
 
   function collectGeneratedMarkerMeta(ui) {
@@ -1071,6 +1185,17 @@
     return Shared.styleValue ? Shared.styleValue(styleText, key, fallback) : fallback;
   }
 
+  function persistGeneratedInterfaceMeta(graph, cell, markerMeta) {
+    if (!graph || !cell || !markerMeta) return;
+    var normalized = normalizeGeneratedInterfaceMeta(markerMeta, graph, cell);
+    if (!normalized) return;
+    cell.__flowDesignMarkerMeta = Shared.cloneJson(normalized);
+    var model = graph.getModel ? graph.getModel() : null;
+    var nextStyle = makeInterfaceStyle(String(cell.style || ''), normalized);
+    if (model && typeof model.setStyle === 'function') model.setStyle(cell, nextStyle);
+    else cell.style = nextStyle;
+  }
+
   function applyMarkerAppearanceToInterface(graph, cell, sourceCell, markerMeta) {
     if (!graph || !cell || !sourceCell) return;
     var sourceGeo = sourceCell.geometry || null;
@@ -1114,6 +1239,7 @@
         });
       }
     }
+    persistGeneratedInterfaceMeta(graph, cell, markerMeta);
 
     emitDesignLog('interface-marker-appearance-applied', {
       moduleName: markerMeta && markerMeta.moduleName || '',
