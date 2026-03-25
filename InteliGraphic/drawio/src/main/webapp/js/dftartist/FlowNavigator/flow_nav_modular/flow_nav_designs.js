@@ -8,7 +8,6 @@
   var Designs = Mod.Designs = Mod.Designs || {};
   var MODULE_LAYER_ORDER = ['base', 'ssn', 'bscan', 'ijtag', 'bisr', 'other'];
   var MODULE_INTERFACE_LAYER_ORDER = ['ssn', 'bscan', 'ijtag', 'bisr', 'other'];
-  var LEGACY_ARCH_PAGE_NAME = 'arch';
   if (!Shared || !Analysis) throw new Error('flow_nav_shared.js and flow_nav_analysis.js must be loaded before flow_nav_designs.js');
 
   function findTopLevelDesign(ui, name) {
@@ -69,8 +68,15 @@
       if (!child) return false;
       var kind = String(child.__kind || '').toLowerCase();
       var name = String(child.name || '').trim().toLowerCase();
-      return kind !== 'ipconfig-container' && name !== 'ipconfig';
+      return kind !== 'ipconfig-container' &&
+        kind !== 'floorplan-container' &&
+        name !== 'ipconfig' &&
+        name !== 'floorplan';
     });
+    if (design._containers) {
+      delete design._containers.floorplan;
+      delete design._containers.ipconfig;
+    }
     return design;
   }
 
@@ -87,7 +93,7 @@
     if (!global.DFTProjectExplorerPhase2 || typeof global.DFTProjectExplorerPhase2.createDesignInContext !== 'function') {
       throw new Error('Project Explorer createDesignInContext helper is not available.');
     }
-    var design = await global.DFTProjectExplorerPhase2.createDesignInContext(ui, parentDesign || null, name, null);
+    var design = await global.DFTProjectExplorerPhase2.createDesignInContext(ui, parentDesign || null, name, null, { kind: 'module-design' });
     design.__kind = 'module-design';
     return { design: normalizeModuleDesignShape(design), created: true };
   }
@@ -391,6 +397,29 @@
     return geo && geo.clone ? geo.clone() : new mxGeometry(geo.x, geo.y, geo.width, geo.height);
   }
 
+  function toAbsoluteRect(model, cell, geo) {
+    var out = cloneRectLike(geo);
+    var cur = cell;
+    while (cur && model) {
+      try {
+        cur = model.getParent(cur);
+      } catch (e0) {
+        cur = null;
+      }
+      if (!cur) break;
+      var parentGeo = null;
+      try {
+        parentGeo = model.getGeometry(cur);
+      } catch (e1) {
+        parentGeo = null;
+      }
+      if (!parentGeo) continue;
+      out.x = Number(out.x || 0) + Number(parentGeo.x || 0);
+      out.y = Number(out.y || 0) + Number(parentGeo.y || 0);
+    }
+    return out;
+  }
+
   function transformGeometryBetweenRects(geo, fromRect, toRect) {
     if (!geo || !fromRect || !toRect) return geo;
     var out = cloneRectLike(geo);
@@ -550,8 +579,8 @@
           shellPlans.push({
             shell: cell,
             moduleName: moduleNameForCell(cell),
-            oldGeo: oldGeo.clone ? oldGeo.clone() : new mxGeometry(oldGeo.x, oldGeo.y, oldGeo.width, oldGeo.height),
-            newGeo: new mxGeometry(newGeo.x, newGeo.y, newGeo.width, newGeo.height)
+            oldGeo: toAbsoluteRect(model, cell, oldGeo),
+            newGeo: toAbsoluteRect(model, cell, new mxGeometry(newGeo.x, newGeo.y, newGeo.width, newGeo.height))
           });
         }
       }
@@ -665,7 +694,7 @@
           movePlans.push({
             shell: cell,
             moduleName: moduleNameForCell(cell),
-            oldGeo: cloneRectLike(geo)
+            oldGeo: toAbsoluteRect(model, cell, geo)
           });
         }
       }
@@ -694,8 +723,9 @@
           var plan = movePlans[p];
           var newGeo = model2.getGeometry(plan.shell);
           if (!newGeo) continue;
-          var actualDx = Number(newGeo.x || 0) - Number(plan.oldGeo.x || 0);
-          var actualDy = Number(newGeo.y || 0) - Number(plan.oldGeo.y || 0);
+          var absoluteNewGeo = toAbsoluteRect(model2, plan.shell, newGeo);
+          var actualDx = Number(absoluteNewGeo.x || 0) - Number(plan.oldGeo.x || 0);
+          var actualDy = Number(absoluteNewGeo.y || 0) - Number(plan.oldGeo.y || 0);
           syncLinkedModuleInterfacesByMove(this, plan.moduleName, actualDx, actualDy, [plan.shell]);
         }
       } finally {
@@ -1673,33 +1703,34 @@
       for (var i = 0; i < moduleNames.length; i++) {
         var moduleName = moduleNames[i];
         var sourceModuleName = sourceModuleNames[i];
-        var archPageName = (Shared.sanitizeName ? Shared.sanitizeName(moduleName) : String(moduleName).replace(/[^a-zA-Z0-9]+/g, '_')) + '_arch';
+        var archPageName = 'arch';
         var markerEntries = designInputs[sourceModuleName];
         var layerInputs = groupMarkersByLayer(markerEntries);
         var modulePlan = modulePlans[sourceModuleName] || null;
         var sourceModuleCell = modulePlan && modulePlan.moduleCell ? modulePlan.moduleCell : null;
         var ensured = await ensureTopLevelDesign(ui, moduleName, parentDesign);
         var design = ensured.design;
-        var floorplan = ensureFloorplanContainer(ui, design);
-        var shellPageName = (Shared.sanitizeName ? Shared.sanitizeName(moduleName) : String(moduleName).replace(/[^a-zA-Z0-9]+/g, '_')) + '_dataflow';
-        if (floorplan) {
-          await ensurePage(ui, floorplan, shellPageName);
-          await withOpenedPage(ui, floorplan, shellPageName, (function () {
-            return async function () {
-              await materializeModulePage(ui, moduleName, [], {
-                includeInterfaces: false,
-                sourceModuleCell: sourceModuleCell
-              });
-            };
-          })());
-          results.push({
-            module: moduleName,
-            design: floorplan,
-            createdDesign: false,
-            page: shellPageName,
-            markerCount: 0
-          });
-        }
+        var shellPageName = 'dataflow';
+        await ensurePage(ui, design, shellPageName);
+        await withOpenedPage(ui, design, shellPageName, (function () {
+          return async function () {
+            var layerParents = ensureNamedLayers(ui, MODULE_LAYER_ORDER);
+            var baseLayerParent = layerParents.base || Shared.getDefaultParent(ui);
+            await materializeModulePage(ui, moduleName, [], {
+              includeInterfaces: false,
+              sourceModuleCell: sourceModuleCell,
+              targetParent: baseLayerParent,
+              clearMode: 'layer'
+            });
+          };
+        })());
+        results.push({
+          module: moduleName,
+          design: design,
+          createdDesign: ensured.created,
+          page: shellPageName,
+          markerCount: 0
+        });
         await ensurePage(ui, design, archPageName);
         await withOpenedPage(ui, design, archPageName, (function (currentSourceModuleCell, currentLayerInputs) {
           return async function () {
@@ -1730,26 +1761,24 @@
         results.push({
           module: moduleName,
           design: design,
-          createdDesign: ensured.created,
+          createdDesign: false,
           page: archPageName,
           markerCount: markerEntries.length
         });
-        if (design.page_meta && design.page_meta[archPageName]) delete design.page_meta[archPageName];
-        var legacyArchIdx = Array.isArray(design.pages) ? design.pages.indexOf(LEGACY_ARCH_PAGE_NAME) : -1;
-        if (legacyArchIdx >= 0) design.pages.splice(legacyArchIdx, 1);
-        if (design.page_meta && design.page_meta[LEGACY_ARCH_PAGE_NAME]) delete design.page_meta[LEGACY_ARCH_PAGE_NAME];
+        var legacyPrefix = Shared.sanitizeName ? Shared.sanitizeName(moduleName) : String(moduleName).replace(/[^a-zA-Z0-9]+/g, '_');
+        var legacyNamedPages = [legacyPrefix + '_arch', legacyPrefix + '_dataflow', legacyPrefix + '_floorplan'];
+        for (var lp = 0; lp < legacyNamedPages.length; lp++) {
+          var legacyNamedPage = legacyNamedPages[lp];
+          var legacyNamedIdx = Array.isArray(design.pages) ? design.pages.indexOf(legacyNamedPage) : -1;
+          if (legacyNamedIdx >= 0) design.pages.splice(legacyNamedIdx, 1);
+          if (design.page_meta && design.page_meta[legacyNamedPage]) delete design.page_meta[legacyNamedPage];
+        }
         var legacyPageOrder = ['ssn', 'ijtag', 'bscan', 'bisr'];
         for (var k = 0; k < legacyPageOrder.length; k++) {
           var legacyPageName = legacyPageOrder[k];
           var idx = Array.isArray(design.pages) ? design.pages.indexOf(legacyPageName) : -1;
           if (idx >= 0) design.pages.splice(idx, 1);
           if (design.page_meta && design.page_meta[legacyPageName]) delete design.page_meta[legacyPageName];
-        }
-        if (floorplan) {
-          var legacyShellPageName = (Shared.sanitizeName ? Shared.sanitizeName(moduleName) : String(moduleName).replace(/[^a-zA-Z0-9]+/g, '_')) + '_floorplan';
-          var legacyShellIdx = Array.isArray(floorplan.pages) ? floorplan.pages.indexOf(legacyShellPageName) : -1;
-          if (legacyShellIdx >= 0) floorplan.pages.splice(legacyShellIdx, 1);
-          if (floorplan.page_meta && floorplan.page_meta[legacyShellPageName]) delete floorplan.page_meta[legacyShellPageName];
         }
       }
     } finally {

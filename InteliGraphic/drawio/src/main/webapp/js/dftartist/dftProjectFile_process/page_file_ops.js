@@ -142,9 +142,15 @@ function _isFloorplanDesignRef(designRef) {
     return name === 'floorplan' || dirRel === 'floorplan';
 }
 
+function _isModuleDesignRef(designRef) {
+    return !!(designRef && String(designRef.__kind || '').toLowerCase() === 'module-design');
+}
+
 function _syncLayersDialogForPage(ui, designRef) {
     if (!ui || typeof ui.showLayersDialog !== 'function') return;
-    if (!_isFloorplanDesignRef(designRef)) return;
+    const ctx = ui && ui._activeProjectPageCtx ? ui._activeProjectPageCtx : null;
+    const pageName = String(ctx && ctx.name || '').trim().toLowerCase();
+    if (!_isFloorplanDesignRef(designRef) && pageName !== 'arch' && pageName !== 'dataflow' && !/_arch$/.test(pageName) && !/_dataflow$/.test(pageName)) return;
     setTimeout(function () {
         try { ui.showLayersDialog(); } catch (_) { }
     }, 0);
@@ -193,7 +199,7 @@ function _pageDirPath(ui, designRef) {
     const root = _getProjectStorageRoot(ui);
     const segs = (designRef && designRef._dirRel) ||
         [_sanitizeFileName(designRef?.name || 'design')];
-    return _isFloorplanDesignRef(designRef) ? _joinPath(root, ...segs) : _joinPath(root, ...segs, 'page');
+    return _isFloorplanDesignRef(designRef) ? _joinPath(root, ...segs) : (_isModuleDesignRef(designRef) ? _joinPath(root, ...segs, 'arch') : _joinPath(root, ...segs, 'page'));
 }
 
 function _setActivePageCtx(ui, designRef, name, absOpt) {

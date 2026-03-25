@@ -150,22 +150,36 @@ async function _ensureDesignScaffold(ui, design, parentSegs) {
 
     const segs = (parentSegs || []).concat([_sanitizeFileName(design.name || 'design')]);
     const designDir = _joinPath(root, ...segs);
-    const pageDir = _joinPath(designDir, 'page');
+    const kind = String((design && design.__kind) || '').toLowerCase();
+    const isModuleDesign = kind === 'module-design';
+    const pageDir = isModuleDesign ? _joinPath(designDir, 'arch') : _joinPath(designDir, 'page');
+    const yamlDir = isModuleDesign ? _joinPath(designDir, 'yaml') : '';
+    const specDir = isModuleDesign ? _joinPath(designDir, 'spec') : '';
     const envAbs = _joinPath(designDir, 'env.json');
 
     try { await requestSync({ action: 'ensureDirs', path: pageDir }); } catch (_) { }
+    if (yamlDir) {
+        try { await requestSync({ action: 'ensureDirs', path: yamlDir }); } catch (_) { }
+    }
+    if (specDir) {
+        try { await requestSync({ action: 'ensureDirs', path: specDir }); } catch (_) { }
+    }
 
-    // env.json 不存在则写一个默认
-    let needWriteEnv = false;
-    try { await requestSync({ action: 'fileStat', file: envAbs }); }
-    catch (_) { needWriteEnv = true; }
-    if (needWriteEnv) {
-        const def = JSON.stringify({ name: design.name || '', createdAt: new Date().toISOString() }, null, 2);
-        await requestSync({ action: 'writeFile', path: envAbs, data: def, enc: 'utf-8' });
+    if (!isModuleDesign) {
+        // env.json 不存在则写一个默认
+        let needWriteEnv = false;
+        try { await requestSync({ action: 'fileStat', file: envAbs }); }
+        catch (_) { needWriteEnv = true; }
+        if (needWriteEnv) {
+            const def = JSON.stringify({ name: design.name || '', createdAt: new Date().toISOString() }, null, 2);
+            await requestSync({ action: 'writeFile', path: envAbs, data: def, enc: 'utf-8' });
+        }
+        design.env_file = segs.concat('env.json').join('/');
+    } else {
+        design.env_file = '';
     }
 
     // 回填模型
-    design.env_file = segs.concat('env.json').join('/');
     design._dirRel = segs;
 }
 
@@ -173,17 +187,18 @@ async function _createPageFileSlot(ui, design, pageName) {
     const root = _getProjectStorageRoot(ui);
     if (!root) { console.warn('[Project] root path missing; skip page slot'); return; }
     const kind = String((design && design.__kind) || '').toLowerCase();
+    const isModuleDesign = kind === 'module-design';
     const isFloorplan =
         !!(design && design._isFloorplan) ||
         kind === 'floorplan-container' ||
         String(design && design.name || '').trim().toLowerCase() === 'floorplan';
     const segs = (design._dirRel && design._dirRel.slice()) ||
         [_sanitizeFileName(design.name || 'design')];
-    const pageDir = isFloorplan ? _joinPath(root, ...segs) : _joinPath(root, ...segs, 'page');
+    const pageDir = isFloorplan ? _joinPath(root, ...segs) : (isModuleDesign ? _joinPath(root, ...segs, 'arch') : _joinPath(root, ...segs, 'page'));
     const abs = _joinPath(pageDir, _sanitizeFileName(pageName) + '.dftart');
 
     try { await requestSync({ action: 'ensureDirs', path: pageDir }); } catch (_) { }
-    const placeholder = isFloorplan
+    const placeholder = (isFloorplan || isModuleDesign)
         ? [
             '<mxfile host="app.diagrams.net"><diagram id="', _sanitizeFileName(pageName), '" name="', String(pageName || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;'),
             '"><mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0"><root>',

@@ -147,7 +147,7 @@
     if (isFloorplanRef(designRef)) return true;
     var ctx = getActiveContext(ui);
     var pageName = text(ctx && ctx.name || '').trim().toLowerCase();
-    return pageName === 'arch' || /_arch$/.test(pageName);
+    return pageName === 'arch' || pageName === 'dataflow' || /_arch$/.test(pageName) || /_dataflow$/.test(pageName);
   }
 
   function activateDrawingWorkspace(ui) {

@@ -13,6 +13,7 @@ async function _resolvePageFileAbs(ui, designRef, pageName) {
     if (!root) throw new Error('Please save project first.');
 
     const kind = String((designRef && designRef.__kind) || '').toLowerCase();
+    const isModuleDesign = kind === 'module-design';
     const isFloorplan =
         !!(designRef && designRef._isFloorplan) ||
         kind === 'floorplan-container' ||
@@ -33,7 +34,7 @@ async function _resolvePageFileAbs(ui, designRef, pageName) {
         baseDir = _joinPath(root, ...segs);
     }
 
-    const pageDir = isFloorplan ? baseDir : _joinPath(baseDir, 'page');
+    const pageDir = isFloorplan ? baseDir : (isModuleDesign ? _joinPath(baseDir, 'arch') : _joinPath(baseDir, 'page'));
 
     try { await requestSync({ action: 'ensureDirs', path: pageDir }); } catch (_) { }
 

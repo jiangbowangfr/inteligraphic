@@ -175,6 +175,23 @@
     return !!(design && design.__kind === 'module-design');
   }
 
+  function getDesignPageDir(ui, designRef) {
+    var base = getDesignAbsDir(ui, designRef);
+    if (!base) return '';
+    if (isFloorplanDesign(designRef)) return base;
+    return usesProjectFlow(designRef) ? joinPath(base, 'arch') : joinPath(base, 'page');
+  }
+
+  function getDesignYamlDir(ui, designRef) {
+    var base = getDesignAbsDir(ui, designRef);
+    return base ? joinPath(base, 'yaml') : '';
+  }
+
+  function getDesignSpecDir(ui, designRef) {
+    var base = getDesignAbsDir(ui, designRef);
+    return base ? joinPath(base, 'spec') : '';
+  }
+
   function getProjectFlowRelPath(ui) {
     var model = ensureModel(ui);
     return text(model && model.flow_file || 'env.json') || 'env.json';
@@ -869,8 +886,21 @@
       await copyIfExists(resolveLocalPageFileAbs(ui, sourceDesign, pageName), resolveLocalPageFileAbs(ui, targetDesign, pageName));
       if (isIpconfigDesign(sourceDesign)) {
         await copyIfExists(
-          joinPath(sourceAbs, 'yaml', sanitizeName(pageName) + '.yaml'),
-          joinPath(targetAbs, 'yaml', sanitizeName(pageName) + '.yaml')
+          joinPath(getDesignYamlDir(ui, sourceDesign), sanitizeName(pageName) + '.yaml'),
+          joinPath(getDesignYamlDir(ui, targetDesign), sanitizeName(pageName) + '.yaml')
+        );
+      } else if (usesProjectFlow(sourceDesign)) {
+        await copyIfExists(
+          joinPath(getDesignYamlDir(ui, sourceDesign), sanitizeName(pageName) + '.modules.yaml'),
+          joinPath(getDesignYamlDir(ui, targetDesign), sanitizeName(pageName) + '.modules.yaml')
+        );
+        await copyIfExists(
+          joinPath(getDesignYamlDir(ui, sourceDesign), sanitizeName(pageName) + '.interface-pairs.yaml'),
+          joinPath(getDesignYamlDir(ui, targetDesign), sanitizeName(pageName) + '.interface-pairs.yaml')
+        );
+        await copyIfExists(
+          joinPath(getDesignSpecDir(ui, sourceDesign), sanitizeName(pageName) + '.dofile'),
+          joinPath(getDesignSpecDir(ui, targetDesign), sanitizeName(pageName) + '.dofile')
         );
       }
     }
@@ -910,12 +940,9 @@
     if (!ui) throw new Error('UI not ready');
     if (!designRef) throw new Error('designRef is required');
     if (!pageName) throw new Error('pageName is required');
-    var base = getDesignAbsDir(ui, designRef);
-    if (!base) throw new Error('Please create or open a project first.');
-    if (isFloorplanDesign(designRef) || normalizePath(base).toLowerCase().replace(/\/$/, '').slice(-10) === '/floorplan' || normalizePath(base).toLowerCase() === 'floorplan') {
-      return joinPath(base, sanitizeName(pageName) + '.dftart');
-    }
-    return joinPath(base, 'page', sanitizeName(pageName) + '.dftart');
+    var pageDir = getDesignPageDir(ui, designRef);
+    if (!pageDir) throw new Error('Please create or open a project first.');
+    return joinPath(pageDir, sanitizeName(pageName) + '.dftart');
   }
 
   async function createPageFileSlot(ui, designRef, pageName) {
@@ -1395,7 +1422,7 @@
   function ensureDesignContainers(designRef, ui) {
     if (!designRef || isFloorplanDesign(designRef) || isIpconfigDesign(designRef)) return designRef;
     if (!designRef._containers || typeof designRef._containers !== 'object') designRef._containers = {};
-    if (!designRef._containers.floorplan) designRef._containers.floorplan = makeContainerDesignRecord('floorplan', designRef, ui);
+    if (!usesProjectFlow(designRef) && !designRef._containers.floorplan) designRef._containers.floorplan = makeContainerDesignRecord('floorplan', designRef, ui);
     if (!designRef._containers.ipconfig && !usesProjectFlow(designRef)) designRef._containers.ipconfig = makeContainerDesignRecord('ipconfig', designRef, ui);
     return designRef;
   }
@@ -1522,7 +1549,13 @@
     var designAbs = getDesignAbsDir(ui, designRef);
     if (!designAbs) return;
     await ensureDirs(designAbs);
-    if (!isFloorplanDesign(designRef)) await ensureDirs(joinPath(designAbs, 'page'));
+    if (usesProjectFlow(designRef)) {
+      await ensureDirs(getDesignPageDir(ui, designRef));
+      await ensureDirs(getDesignYamlDir(ui, designRef));
+      await ensureDirs(getDesignSpecDir(ui, designRef));
+    } else if (!isFloorplanDesign(designRef)) {
+      await ensureDirs(getDesignPageDir(ui, designRef));
+    }
     if (isIpconfigDesign(designRef)) await ensureDirs(joinPath(designAbs, 'yaml'));
     if (!isFloorplanDesign(designRef) && !isIpconfigDesign(designRef) && !usesProjectFlow(designRef)) {
       var storageRoot = getProjectStorageRoot(ui);
@@ -1586,7 +1619,8 @@
     return clone;
   }
 
-  async function createDesignInContext(ui, parentDesign, name, sourceDesign) {
+  async function createDesignInContext(ui, parentDesign, name, sourceDesign, opts) {
+    opts = opts || {};
     name = text(name).trim();
     var designNameError = validateScopedName(name, 'Design name', { disallowReserved: true });
     if (designNameError) throw new Error(designNameError);
@@ -1614,7 +1648,7 @@
 
     var design = sourceDesign
       ? buildClonedDesignTree(ui, sourceDesign, name, targetAbs, targetDirRel)
-      : makeDesignRecord(name, targetAbs, { dirRel: targetDirRel });
+      : makeDesignRecord(name, targetAbs, { dirRel: targetDirRel, kind: opts.kind || '' });
 
     if (!sourceDesign) ensureDesignContainers(design, ui);
     siblings.push(design);
@@ -1844,7 +1878,6 @@
   }
 
   function floorplanPageName(ownerDesign) {
-    if (isModuleDesign(ownerDesign)) return sanitizeName(ownerDesign.name || 'module') + '_dataflow';
     return 'dataflow';
   }
 

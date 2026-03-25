@@ -33,6 +33,27 @@
         return idx > 0 ? raw.slice(0, idx) : '';
     }
 
+    function projectStorageRoot(ui) {
+        var dbRoot = ui && ui._projectDbDirPath ? String(ui._projectDbDirPath) : '';
+        if (dbRoot) return dbRoot.replace(/\\/g, '/').replace(/\/+$/, '');
+        var root = ui && (ui._projectRootPath || ui._projectYamlDir) ? String(ui._projectRootPath || ui._projectYamlDir) : '';
+        root = root.replace(/\\/g, '/').replace(/\/+$/, '');
+        return root ? joinPath(root, 'db') : '';
+    }
+
+    function isModuleDesign(designRef) {
+        return !!(designRef && String(designRef.__kind || '').toLowerCase() === 'module-design');
+    }
+
+    function getDesignBaseDir(ui, designRef, ctx, pageAbs) {
+        if (designRef && designRef._absDir) return String(designRef._absDir).replace(/\\/g, '/').replace(/\/+$/, '');
+        var root = projectStorageRoot(ui);
+        var segs = ctx && Array.isArray(ctx.segs) ? ctx.segs.slice() : (designRef && Array.isArray(designRef._dirRel) ? designRef._dirRel.slice() : []);
+        if (root && segs.length) return joinPath.apply(null, [root].concat(segs));
+        if (pageAbs && isModuleDesign(designRef)) return dirnamePath(dirnamePath(pageAbs));
+        return pageAbs ? dirnamePath(pageAbs) : '';
+    }
+
     function styleValue(styleText, key, fallback) {
         var raw = String(styleText || '');
         if (!raw || !key) return fallback;
@@ -231,9 +252,12 @@
 
         if (!pageAbs) throw new Error('Active floorplan page path is unavailable.');
 
-        var floorplanDir = dirnamePath(pageAbs);
-        var targetAbs = joinPath(floorplanDir, sanitizeFileName(pageName) + '.modules.yaml');
-        await global.requestSync({ action: 'ensureDirs', path: floorplanDir });
+        var targetDir = dirnamePath(pageAbs);
+        if (isModuleDesign(designRef)) {
+            targetDir = joinPath(getDesignBaseDir(ui, designRef, ctx, pageAbs), 'yaml');
+        }
+        var targetAbs = joinPath(targetDir, sanitizeFileName(pageName) + '.modules.yaml');
+        await global.requestSync({ action: 'ensureDirs', path: targetDir });
         await global.requestSync({ action: 'writeFile', path: targetAbs, data: String(text || ''), enc: 'utf-8' });
         return targetAbs;
     }

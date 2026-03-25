@@ -412,6 +412,26 @@
     try { alert(msg + (targetAbs ? '\n' + targetAbs : '')); } catch (e3) {}
   }
 
+  function isModuleDesign(designRef) {
+    return !!(designRef && String(designRef.__kind || '').toLowerCase() === 'module-design');
+  }
+
+  function getProjectStorageRoot(ui) {
+    var dbRoot = ui && ui._projectDbDirPath ? String(ui._projectDbDirPath) : '';
+    if (dbRoot) return dbRoot.replace(/\\/g, '/').replace(/\/+$/, '');
+    var root = ui && (ui._projectRootPath || ui._projectYamlDir) ? String(ui._projectRootPath || ui._projectYamlDir) : '';
+    root = root.replace(/\\/g, '/').replace(/\/+$/, '');
+    return root ? joinPath(root, 'db') : '';
+  }
+
+  function getDesignBaseDir(ui, designRef, ctx) {
+    if (designRef && designRef._absDir) return String(designRef._absDir).replace(/\\/g, '/').replace(/\/+$/, '');
+    var root = getProjectStorageRoot(ui);
+    var segs = ctx && Array.isArray(ctx.segs) ? ctx.segs.slice() : (designRef && Array.isArray(designRef._dirRel) ? designRef._dirRel.slice() : []);
+    if (!root || !segs.length) return '';
+    return joinPath.apply(null, [root].concat(segs));
+  }
+
   async function saveDftspecToCurrentDesign(ui, text) {
     if (typeof global.requestSync !== 'function') throw new Error('requestSync unavailable');
 
@@ -419,13 +439,20 @@
     var fileName = sanitizeFileName(pageName) + '.dofile';
     var ctx = ui && ui._activeProjectPageCtx ? ui._activeProjectPageCtx : null;
     var designRef = ctx && ctx.designRef ? ctx.designRef : null;
+    var designBase = getDesignBaseDir(ui, designRef, ctx);
     var pageAbs = '';
+    var targetAbs = '';
 
-    if (global.DFTPageSessionManager && typeof global.DFTPageSessionManager.resolvePageFileAbs === 'function' && designRef) {
+    if (isModuleDesign(designRef)) {
+      if (!designBase) throw new Error('Active design path is unavailable.');
+      targetAbs = joinPath(designBase, 'spec', fileName);
+    }
+
+    if (!targetAbs && global.DFTPageSessionManager && typeof global.DFTPageSessionManager.resolvePageFileAbs === 'function' && designRef) {
       pageAbs = await global.DFTPageSessionManager.resolvePageFileAbs(ui, designRef, pageName);
-    } else if (ctx && ctx.abs) {
+    } else if (!targetAbs && ctx && ctx.abs) {
       pageAbs = String(ctx.abs);
-    } else {
+    } else if (!targetAbs) {
       var root = (ui && (ui._projectRootPath || ui._projectYamlDir)) || '';
       var segs = (ctx && Array.isArray(ctx.segs) ? ctx.segs.slice() : []);
       if (!root || !segs.length) throw new Error('Active design path is unavailable.');
@@ -434,7 +461,7 @@
       pageAbs = joinPath(base, isFloorplan ? fileName : joinPath('page', fileName));
     }
 
-    var targetAbs = joinPath(dirnamePath(pageAbs), fileName);
+    if (!targetAbs) targetAbs = joinPath(dirnamePath(pageAbs), fileName);
     await global.requestSync({ action: 'ensureDirs', path: dirnamePath(targetAbs) });
     await global.requestSync({ action: 'writeFile', path: targetAbs, data: String(text || ''), enc: 'utf-8' });
     return targetAbs;
