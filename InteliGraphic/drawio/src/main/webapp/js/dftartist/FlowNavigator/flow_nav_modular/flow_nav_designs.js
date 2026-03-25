@@ -8,6 +8,8 @@
   var Designs = Mod.Designs = Mod.Designs || {};
   var MODULE_LAYER_ORDER = ['base', 'ssn', 'bscan', 'ijtag', 'bisr', 'other'];
   var MODULE_INTERFACE_LAYER_ORDER = ['ssn', 'bscan', 'ijtag', 'bisr', 'other'];
+  var MODULE_INTERFACE_OUTER_GAP = 0;
+  var MODULE_INTERFACE_EDGE_OVERLAP = 0;
   if (!Shared || !Analysis) throw new Error('flow_nav_shared.js and flow_nav_analysis.js must be loaded before flow_nav_designs.js');
 
   function findTopLevelDesign(ui, name) {
@@ -1451,12 +1453,42 @@
     graph.resizeCell(shell, new mxRectangle(nextX, nextY, nextW, nextH), false);
   }
 
-  function interfaceVisualSize(cell, side) {
-    var geo = cell && cell.geometry ? cell.geometry : null;
+  function normalizeRotationDegrees(rotation) {
+    var value = Number(rotation);
+    if (!isFinite(value)) value = 0;
+    value = value % 360;
+    if (value < 0) value += 360;
+    return value;
+  }
+
+  function sideRotationDegrees(side) {
+    if (side === 'left') return 270;
+    if (side === 'right') return 90;
+    if (side === 'bottom') return 180;
+    return 0;
+  }
+
+  function interfacePlacementMetrics(cell, side, sourceCell) {
+    var geo = sourceCell && sourceCell.geometry ? sourceCell.geometry : (cell && cell.geometry ? cell.geometry : null);
     var w = Number(geo && geo.width || 190);
     var h = Number(geo && geo.height || 40);
-    if (side === 'left' || side === 'right') return { width: h, height: w };
-    return { width: w, height: h };
+    var styleText = String(sourceCell && sourceCell.style != null ? sourceCell.style : (cell && cell.style || ''));
+    var rotation = normalizeRotationDegrees(sourceStyleValue(styleText, 'rotation', sideRotationDegrees(side)));
+    var vertical = rotation === 90 || rotation === 270;
+    return {
+      width: vertical ? h : w,
+      height: vertical ? w : h,
+      offsetX: vertical ? (w - h) / 2 : 0,
+      offsetY: vertical ? (h - w) / 2 : 0
+    };
+  }
+
+  function placeInterfaceGeometry(metrics, visibleX, visibleY) {
+    metrics = metrics || { offsetX: 0, offsetY: 0 };
+    return {
+      x: Math.round(Number(visibleX || 0) - Number(metrics.offsetX || 0)),
+      y: Math.round(Number(visibleY || 0) - Number(metrics.offsetY || 0))
+    };
   }
 
   function parsePolyPoints(styleText, width, height) {
@@ -1570,6 +1602,54 @@
     return out;
   }
 
+  function clampNumber(value, min, max) {
+    if (!isFinite(value)) return min;
+    if (value < min) return min;
+    if (value > max) return max;
+    return value;
+  }
+
+  function effectiveBodyRect(bodyRect, bodyCell) {
+    var geo = bodyCell && bodyCell.geometry ? bodyCell.geometry : null;
+    if (geo) {
+      return {
+        x: Number(geo.x || 0),
+        y: Number(geo.y || 0),
+        width: Number(geo.width || 0),
+        height: Number(geo.height || 0)
+      };
+    }
+    return bodyRect || null;
+  }
+
+  function placeRelativeOutsideBody(bodyRect, bodyCell, side, size, relative) {
+    var rect = effectiveBodyRect(bodyRect, bodyCell);
+    if (!rect || !size || !relative) return null;
+    var gap = MODULE_INTERFACE_OUTER_GAP;
+    if (side === 'left' || side === 'right') {
+      return {
+        x: side === 'left'
+          ? Math.round(rect.x - size.width - gap + MODULE_INTERFACE_EDGE_OVERLAP)
+          : Math.round(rect.x + rect.width + gap - MODULE_INTERFACE_EDGE_OVERLAP),
+        y: Math.round(clampNumber(
+          rect.y + Number(relative.y || 0),
+          rect.y - size.height / 2,
+          rect.y + rect.height - size.height / 2
+        ))
+      };
+    }
+    return {
+      x: Math.round(clampNumber(
+        rect.x + Number(relative.x || 0),
+        rect.x - size.width / 2,
+        rect.x + rect.width - size.width / 2
+      )),
+      y: side === 'top'
+        ? Math.round(rect.y - size.height - gap + MODULE_INTERFACE_EDGE_OVERLAP)
+        : Math.round(rect.y + rect.height + gap - MODULE_INTERFACE_EDGE_OVERLAP)
+    };
+  }
+
   function positionInterfacesAroundBody(bodyRect, bySide, prototypes, bodyCell, sourceModuleCell) {
     var placements = [];
 
@@ -1578,14 +1658,17 @@
         var entry = list[i];
         var cell = prototypes[entry.meta.id];
         if (!cell) continue;
-        var size = interfaceVisualSize(cell, side);
+        var metrics = interfacePlacementMetrics(cell, side, entry && entry.cell ? entry.cell : null);
+        var size = { width: metrics.width, height: metrics.height };
         var relative = relativeInterfacePlacement(sourceModuleCell, entry);
         if (relative) {
+          var relativeOutside = placeRelativeOutsideBody(bodyRect, bodyCell, side, size, relative);
+          var relativeGeo = placeInterfaceGeometry(metrics, relativeOutside.x, relativeOutside.y);
           placements.push({
             marker: entry,
             cell: cell,
-            x: Math.round(bodyRect.x + relative.x),
-            y: Math.round(bodyRect.y + relative.y)
+            x: relativeGeo.x,
+            y: relativeGeo.y
           });
           continue;
         }
@@ -1596,32 +1679,33 @@
         var anchor = bodyCell ? boundaryAnchorForSide(bodyCell, side, offset) : null;
         if (anchor) {
           if (side === 'left') {
-            x = Math.round(anchor.x - size.width - 12);
+            x = Math.round(anchor.x - size.width - MODULE_INTERFACE_OUTER_GAP + MODULE_INTERFACE_EDGE_OVERLAP);
             y = Math.round(anchor.y - size.height / 2);
           } else if (side === 'right') {
-            x = Math.round(anchor.x + 12);
+            x = Math.round(anchor.x + MODULE_INTERFACE_OUTER_GAP - MODULE_INTERFACE_EDGE_OVERLAP);
             y = Math.round(anchor.y - size.height / 2);
           } else if (side === 'top') {
             x = Math.round(anchor.x - size.width / 2);
-            y = Math.round(anchor.y - size.height - 12);
+            y = Math.round(anchor.y - size.height - MODULE_INTERFACE_OUTER_GAP + MODULE_INTERFACE_EDGE_OVERLAP);
           } else {
             x = Math.round(anchor.x - size.width / 2);
-            y = Math.round(anchor.y + 12);
+            y = Math.round(anchor.y + MODULE_INTERFACE_OUTER_GAP - MODULE_INTERFACE_EDGE_OVERLAP);
           }
         } else if (side === 'left') {
-          x = bodyRect.x - size.width - 12;
+          x = bodyRect.x - size.width - MODULE_INTERFACE_OUTER_GAP + MODULE_INTERFACE_EDGE_OVERLAP;
           y = bodyRect.y + Math.round(offset * bodyRect.height - size.height / 2);
         } else if (side === 'right') {
-          x = bodyRect.x + bodyRect.width + 12;
+          x = bodyRect.x + bodyRect.width + MODULE_INTERFACE_OUTER_GAP - MODULE_INTERFACE_EDGE_OVERLAP;
           y = bodyRect.y + Math.round(offset * bodyRect.height - size.height / 2);
         } else if (side === 'top') {
           x = bodyRect.x + Math.round(offset * bodyRect.width - size.width / 2);
-          y = bodyRect.y - size.height - 12;
+          y = bodyRect.y - size.height - MODULE_INTERFACE_OUTER_GAP + MODULE_INTERFACE_EDGE_OVERLAP;
         } else {
           x = bodyRect.x + Math.round(offset * bodyRect.width - size.width / 2);
-          y = bodyRect.y + bodyRect.height + 12;
+          y = bodyRect.y + bodyRect.height + MODULE_INTERFACE_OUTER_GAP - MODULE_INTERFACE_EDGE_OVERLAP;
         }
-        placements.push({ marker: entry, cell: cell, x: x, y: y });
+        var placedGeo = placeInterfaceGeometry(metrics, x, y);
+        placements.push({ marker: entry, cell: cell, x: placedGeo.x, y: placedGeo.y });
       }
     }
 
@@ -1825,6 +1909,34 @@
     return groupMarkersByModule(collectGeneratedMarkerMeta(ui));
   };
 
+  async function populateModuleDesignPage(ui, moduleName, sourceModuleCell, layerInputs, pageOrder, layerOrder) {
+    var pageLayers = Array.isArray(layerOrder) && layerOrder.length ? layerOrder : MODULE_LAYER_ORDER;
+    var interfaceLayers = Array.isArray(pageOrder) && pageOrder.length ? pageOrder : MODULE_INTERFACE_LAYER_ORDER;
+    var layerParents = ensureNamedLayers(ui, pageLayers);
+    var baseLayerParent = layerParents.base || Shared.getDefaultParent(ui);
+    var baseResult = await materializeModulePage(ui, moduleName, [], {
+      includeBody: true,
+      includeInterfaces: false,
+      sourceModuleCell: sourceModuleCell,
+      targetParent: baseLayerParent,
+      clearMode: 'layer'
+    });
+    for (var j = 0; j < interfaceLayers.length; j++) {
+      var pageName = interfaceLayers[j];
+      var pageMarkers = layerInputs[pageName] || [];
+      var layerParent = layerParents[String(pageName || '').toLowerCase()] || Shared.getDefaultParent(ui);
+      await materializeModulePage(ui, moduleName, pageMarkers, {
+        includeBody: false,
+        includeInterfaces: true,
+        sourceModuleCell: sourceModuleCell,
+        referenceBodyCell: baseResult && baseResult.body ? baseResult.body : null,
+        targetParent: layerParent,
+        clearMode: 'layer'
+      });
+    }
+    return baseResult;
+  }
+
   Designs.generateTopLevelDesigns = async function generateTopLevelDesigns(ui, analysis, opts) {
     opts = opts || {};
     analysis = analysis || Analysis.analyzeDataflow(ui);
@@ -1851,50 +1963,22 @@
         var design = ensured.design;
         var shellPageName = 'dataflow';
         await ensurePage(ui, design, shellPageName);
-        await withOpenedPage(ui, design, shellPageName, (function () {
+        await withOpenedPage(ui, design, shellPageName, (function (currentSourceModuleCell, currentLayerInputs, currentPageOrder, currentArchLayerOrder) {
           return async function () {
-            var layerParents = ensureNamedLayers(ui, MODULE_LAYER_ORDER);
-            var baseLayerParent = layerParents.base || Shared.getDefaultParent(ui);
-            await materializeModulePage(ui, moduleName, [], {
-              includeInterfaces: false,
-              sourceModuleCell: sourceModuleCell,
-              targetParent: baseLayerParent,
-              clearMode: 'layer'
-            });
+            await populateModuleDesignPage(ui, moduleName, currentSourceModuleCell, currentLayerInputs, currentPageOrder, currentArchLayerOrder);
           };
-        })());
+        })(sourceModuleCell, layerInputs, pageOrder, archLayerOrder));
         results.push({
           module: moduleName,
           design: design,
           createdDesign: ensured.created,
           page: shellPageName,
-          markerCount: 0
+          markerCount: markerEntries.length
         });
         await ensurePage(ui, design, archPageName);
         await withOpenedPage(ui, design, archPageName, (function (currentSourceModuleCell, currentLayerInputs) {
           return async function () {
-            var layerParents = ensureNamedLayers(ui, archLayerOrder);
-            var baseLayerParent = layerParents.base || Shared.getDefaultParent(ui);
-            var baseResult = await materializeModulePage(ui, moduleName, [], {
-              includeBody: true,
-              includeInterfaces: false,
-              sourceModuleCell: currentSourceModuleCell,
-              targetParent: baseLayerParent,
-              clearMode: 'layer'
-            });
-            for (var j = 0; j < pageOrder.length; j++) {
-              var pageName = pageOrder[j];
-              var pageMarkers = currentLayerInputs[pageName] || [];
-              var layerParent = layerParents[String(pageName || '').toLowerCase()] || Shared.getDefaultParent(ui);
-              await materializeModulePage(ui, moduleName, pageMarkers, {
-                includeBody: false,
-                includeInterfaces: true,
-                sourceModuleCell: currentSourceModuleCell,
-                referenceBodyCell: baseResult && baseResult.body ? baseResult.body : null,
-                targetParent: layerParent,
-                clearMode: 'layer'
-              });
-            }
+            await populateModuleDesignPage(ui, moduleName, currentSourceModuleCell, currentLayerInputs, pageOrder, archLayerOrder);
           };
         })(sourceModuleCell, layerInputs));
         results.push({
