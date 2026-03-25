@@ -189,6 +189,17 @@
     } catch (e) {}
   }
 
+  function ensureFlowNavInteractionHooks(ui) {
+    try {
+      var mod = global.DFTFlowNavMod;
+      var designs = mod && mod.Designs;
+      if (designs && typeof designs.ensureArchInteractionHooks === 'function') {
+        return designs.ensureArchInteractionHooks(ui);
+      }
+    } catch (e) {}
+    return false;
+  }
+
   function syncLayersDialogForPage(ui, designRef) {
     if (!ui) return;
     if (!shouldShowLayersForPage(ui, designRef)) {
@@ -922,6 +933,7 @@
       activateDrawingWorkspace(ui);
       restoreViewState(ui, makeViewStateKey(designRef, pageName, abs || ''));
       syncLayersDialogForPage(ui, designRef);
+      ensureFlowNavInteractionHooks(ui);
 
       return {
         pageName: pageName,
@@ -981,6 +993,7 @@
     activateDrawingWorkspace(ui);
     restoreViewState(ui, makeViewStateKey(designRef, pageName, abs || ''));
     syncLayersDialogForPage(ui, designRef);
+    ensureFlowNavInteractionHooks(ui);
     resetUndoHistoryForCurrentPage(ui, exists ? 'open-page-loaded' : 'open-page-blank');
     
     return {

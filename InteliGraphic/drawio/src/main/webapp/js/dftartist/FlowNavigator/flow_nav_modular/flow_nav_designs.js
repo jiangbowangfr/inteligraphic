@@ -281,6 +281,211 @@
     return !!cell && String(Shared.styleValue(cell.style || '', 'flowModuleShell', '0')) === '1';
   }
 
+  function isGeneratedModuleBody(cell) {
+    if (!cell) return false;
+    var style = String(cell.style || '');
+    return String(Shared.styleValue(style, 'dftsFlowNavGeneratedModule', '0')) === '1';
+  }
+
+  function isGeneratedDesignInterface(cell) {
+    if (!cell) return false;
+    if (cell.__flowDesignMarkerMeta && cell.__flowDesignMarkerMeta.moduleName) return true;
+    return String(Shared.styleValue(cell.style || '', 'flowGeneratedDesignInterface', '0')) === '1';
+  }
+
+  function moduleNameForCell(cell) {
+    if (!cell) return '';
+    var style = String(cell.style || '');
+    return String(
+      Shared.styleValue(style, 'flowModule', '') ||
+      Shared.styleValue(style, 'dftsFloorplan_moduleName', '') ||
+      cell.value ||
+      ''
+    ).trim();
+  }
+
+  function getTopLevelLayersForGraph(graph) {
+    if (!graph || !graph.getModel || !graph.getDefaultParent) return [];
+    var model = graph.getModel();
+    var defaultParent = graph.getDefaultParent();
+    var layerRoot = null;
+    try {
+      layerRoot = model && defaultParent ? model.getParent(defaultParent) : null;
+    } catch (e) {
+      layerRoot = null;
+    }
+    if (!layerRoot) return defaultParent ? [defaultParent] : [];
+    var out = [];
+    try {
+      var count = model.getChildCount(layerRoot);
+      for (var i = 0; i < count; i++) {
+        var child = model.getChildAt(layerRoot, i);
+        if (child) out.push(child);
+      }
+    } catch (e2) {}
+    return out.length ? out : (defaultParent ? [defaultParent] : []);
+  }
+
+  function isDescendantOf(model, cell, ancestor) {
+    if (!model || !cell || !ancestor) return false;
+    var cur = cell;
+    while (cur) {
+      if (cur === ancestor) return true;
+      try {
+        cur = model.getParent(cur);
+      } catch (e) {
+        cur = null;
+      }
+    }
+    return false;
+  }
+
+  function isDescendantOfAny(model, cell, ancestors) {
+    if (!ancestors || !ancestors.length) return false;
+    for (var i = 0; i < ancestors.length; i++) {
+      if (isDescendantOf(model, cell, ancestors[i])) return true;
+    }
+    return false;
+  }
+
+  function collectModuleInterfacesForTransform(graph, moduleName, excludedRoots) {
+    if (!graph || !moduleName) return [];
+    var model = graph.getModel ? graph.getModel() : null;
+    if (!model) return [];
+    var layers = getTopLevelLayersForGraph(graph);
+    var vertices = [];
+    for (var i = 0; i < layers.length; i++) collectVertices(layers[i], model, vertices);
+    var out = [];
+    for (var j = 0; j < vertices.length; j++) {
+      var cell = vertices[j];
+      if (!isGeneratedDesignInterface(cell)) continue;
+      var meta = extractGeneratedInterfaceMeta(graph, cell);
+      if (!meta || String(meta.moduleName || '').trim() !== moduleName) continue;
+      if (isDescendantOfAny(model, cell, excludedRoots)) continue;
+      out.push(cell);
+    }
+    emitDesignLog('collect-module-interfaces-for-transform', {
+      moduleName: moduleName,
+      layerCount: layers.length,
+      excludedRootIds: (excludedRoots || []).map(function (cell) { return cell && cell.id ? cell.id : ''; }),
+      matchedCount: out.length,
+      matches: out.map(function (cell) {
+        var meta = extractGeneratedInterfaceMeta(graph, cell);
+        var geo = model.getGeometry(cell);
+        return {
+          cellId: cell && cell.id ? cell.id : '',
+          moduleName: meta && meta.moduleName ? meta.moduleName : '',
+          layerName: meta && meta.layerName ? meta.layerName : '',
+          interfaceType: meta && meta.interfaceType ? meta.interfaceType : '',
+          x: geo ? Number(geo.x || 0) : null,
+          y: geo ? Number(geo.y || 0) : null,
+          width: geo ? Number(geo.width || 0) : null,
+          height: geo ? Number(geo.height || 0) : null
+        };
+      })
+    });
+    return out;
+  }
+
+  function cloneRectLike(geo) {
+    return geo && geo.clone ? geo.clone() : new mxGeometry(geo.x, geo.y, geo.width, geo.height);
+  }
+
+  function transformGeometryBetweenRects(geo, fromRect, toRect) {
+    if (!geo || !fromRect || !toRect) return geo;
+    var out = cloneRectLike(geo);
+    var sx = Number(fromRect.width || 0) ? (Number(toRect.width || 0) / Number(fromRect.width || 1)) : 1;
+    var sy = Number(fromRect.height || 0) ? (Number(toRect.height || 0) / Number(fromRect.height || 1)) : 1;
+    out.x = Math.round(Number(toRect.x || 0) + (Number(geo.x || 0) - Number(fromRect.x || 0)) * sx);
+    out.y = Math.round(Number(toRect.y || 0) + (Number(geo.y || 0) - Number(fromRect.y || 0)) * sy);
+    out.width = Math.max(1, Math.round(Number(geo.width || 0) * sx));
+    out.height = Math.max(1, Math.round(Number(geo.height || 0) * sy));
+    return out;
+  }
+
+  function moveGeometryByDelta(geo, dx, dy) {
+    if (!geo) return geo;
+    var out = cloneRectLike(geo);
+    out.x = Math.round(Number(geo.x || 0) + Number(dx || 0));
+    out.y = Math.round(Number(geo.y || 0) + Number(dy || 0));
+    return out;
+  }
+
+  function syncLinkedModuleInterfacesByResize(graph, moduleName, fromRect, toRect, excludedRoots) {
+    if (!graph || !moduleName || !fromRect || !toRect) return;
+    var model = graph.getModel ? graph.getModel() : null;
+    if (!model) return;
+    var targets = collectModuleInterfacesForTransform(graph, moduleName, excludedRoots);
+    emitDesignLog('sync-linked-module-interfaces-resize', {
+      moduleName: moduleName,
+      fromRect: fromRect ? { x: fromRect.x, y: fromRect.y, width: fromRect.width, height: fromRect.height } : null,
+      toRect: toRect ? { x: toRect.x, y: toRect.y, width: toRect.width, height: toRect.height } : null,
+      targetCount: targets.length
+    });
+    if (!targets.length) return;
+    for (var i = 0; i < targets.length; i++) {
+      var geo = model.getGeometry(targets[i]);
+      if (!geo) continue;
+      var nextGeo = transformGeometryBetweenRects(geo, fromRect, toRect);
+      emitDesignLog('sync-linked-module-interfaces-resize-target', {
+        moduleName: moduleName,
+        index: i,
+        cellId: targets[i] && targets[i].id ? targets[i].id : '',
+        before: { x: Number(geo.x || 0), y: Number(geo.y || 0), width: Number(geo.width || 0), height: Number(geo.height || 0) },
+        after: { x: Number(nextGeo.x || 0), y: Number(nextGeo.y || 0), width: Number(nextGeo.width || 0), height: Number(nextGeo.height || 0) }
+      });
+      model.setGeometry(targets[i], nextGeo);
+      try {
+        if (global.DftsIP && global.DftsIP.Symbol && typeof global.DftsIP.Symbol.relayout === 'function') {
+          global.DftsIP.Symbol.relayout(graph, targets[i]);
+        }
+      } catch (e) {}
+    }
+    try {
+      if (typeof graph.refresh === 'function') graph.refresh();
+      if (graph.view && typeof graph.view.validate === 'function') graph.view.validate();
+      if (typeof graph.sizeDidChange === 'function') graph.sizeDidChange();
+    } catch (e2) {}
+  }
+
+  function syncLinkedModuleInterfacesByMove(graph, moduleName, dx, dy, excludedRoots) {
+    if (!graph || !moduleName) return;
+    if (!dx && !dy) return;
+    var model = graph.getModel ? graph.getModel() : null;
+    if (!model) return;
+    var targets = collectModuleInterfacesForTransform(graph, moduleName, excludedRoots);
+    emitDesignLog('sync-linked-module-interfaces-move', {
+      moduleName: moduleName,
+      dx: Number(dx || 0),
+      dy: Number(dy || 0),
+      targetCount: targets.length
+    });
+    if (!targets.length) return;
+    for (var i = 0; i < targets.length; i++) {
+      var geo = model.getGeometry(targets[i]);
+      if (!geo) continue;
+      var nextGeo = moveGeometryByDelta(geo, dx, dy);
+      emitDesignLog('sync-linked-module-interfaces-move-target', {
+        moduleName: moduleName,
+        index: i,
+        cellId: targets[i] && targets[i].id ? targets[i].id : '',
+        before: { x: Number(geo.x || 0), y: Number(geo.y || 0), width: Number(geo.width || 0), height: Number(geo.height || 0) },
+        after: { x: Number(nextGeo.x || 0), y: Number(nextGeo.y || 0), width: Number(nextGeo.width || 0), height: Number(nextGeo.height || 0) }
+      });
+      model.setGeometry(targets[i], nextGeo);
+      try {
+        if (global.DftsIP && global.DftsIP.Symbol && typeof global.DftsIP.Symbol.relayout === 'function') {
+          global.DftsIP.Symbol.relayout(graph, targets[i]);
+        }
+      } catch (e) {}
+    }
+    try {
+      if (typeof graph.refresh === 'function') graph.refresh();
+      if (graph.view && typeof graph.view.validate === 'function') graph.view.validate();
+      if (typeof graph.sizeDidChange === 'function') graph.sizeDidChange();
+    } catch (e2) {}
+  }
+
   function resizeCellDebugMeta(cell, geo) {
     var style = String(cell && cell.style || '');
     return {
@@ -305,27 +510,69 @@
     if (!graph || graph.__flowModuleShellResizeInstalled) return;
     graph.__flowModuleShellResizeInstalled = true;
     var originalCellsResized = graph.cellsResized;
+    var originalCellsMoved = graph.cellsMoved;
+    var originalResizeCell = graph.resizeCell;
+    emitDesignLog('install-shell-resize-behavior', {
+      hasCellsResized: typeof originalCellsResized === 'function',
+      hasCellsMoved: typeof originalCellsMoved === 'function',
+      hasResizeCell: typeof originalResizeCell === 'function'
+    });
+
+    graph.resizeCell = function (cell, bounds, recurse) {
+      emitDesignLog('resize-cell-invoked', {
+        cell: resizeCellDebugMeta(cell, this.getModel && cell ? this.getModel().getGeometry(cell) : null),
+        bounds: bounds ? { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height } : null,
+        recurse: !!recurse
+      });
+      return originalResizeCell.call(this, cell, bounds, recurse);
+    };
+
     graph.cellsResized = function (cells, bounds, recurse, constrain, extend) {
       var shellPlans = [];
+      emitDesignLog('cells-resized-hook-enter', {
+        cellCount: cells ? cells.length : 0,
+        boundCount: bounds ? bounds.length : 0,
+        cells: (cells || []).map(function (cell) {
+          return resizeCellDebugMeta(cell, graph.getModel && cell ? graph.getModel().getGeometry(cell) : null);
+        }),
+        bounds: (bounds || []).map(function (bound) {
+          return bound ? { x: bound.x, y: bound.y, width: bound.width, height: bound.height } : null;
+        })
+      });
       if (cells && bounds && cells.length === bounds.length && this.getModel) {
         var model = this.getModel();
         for (var i = 0; i < cells.length; i++) {
           var cell = cells[i];
-          if (!isFlowModuleShell(cell)) continue;
+          if (!isFlowModuleShell(cell) && !isGeneratedModuleBody(cell)) continue;
           var oldGeo = model.getGeometry(cell);
           var newGeo = bounds[i];
           if (!oldGeo || !newGeo) continue;
           shellPlans.push({
             shell: cell,
+            moduleName: moduleNameForCell(cell),
             oldGeo: oldGeo.clone ? oldGeo.clone() : new mxGeometry(oldGeo.x, oldGeo.y, oldGeo.width, oldGeo.height),
             newGeo: new mxGeometry(newGeo.x, newGeo.y, newGeo.width, newGeo.height)
           });
         }
       }
+      emitDesignLog('cells-resized-hook-targets', {
+        matchedCount: shellPlans.length,
+        targets: shellPlans.map(function (plan) {
+          return {
+            shellId: plan.shell && plan.shell.id ? plan.shell.id : '',
+            moduleName: plan.moduleName,
+            oldGeo: plan.oldGeo ? { x: plan.oldGeo.x, y: plan.oldGeo.y, width: plan.oldGeo.width, height: plan.oldGeo.height } : null,
+            newGeo: plan.newGeo ? { x: plan.newGeo.x, y: plan.newGeo.y, width: plan.newGeo.width, height: plan.newGeo.height } : null
+          };
+        })
+      });
 
       var result = originalCellsResized.call(this, cells, bounds, recurse, constrain, extend);
 
-      if (!shellPlans.length) return result;
+      if (!shellPlans.length) {
+        emitDesignLog('cells-resized-hook-no-target', { reason: 'No flow shell or generated module matched current resize selection.' });
+        return result;
+      }
 
       var model2 = this.getModel();
       model2.beginUpdate();
@@ -333,6 +580,7 @@
         for (var p = 0; p < shellPlans.length; p++) {
           var plan = shellPlans[p];
           var shell = plan.shell;
+          var moduleName = plan.moduleName;
           var oldGeo2 = plan.oldGeo;
           var newGeo2 = plan.newGeo;
           var sx = oldGeo2.width ? (newGeo2.width / oldGeo2.width) : 1;
@@ -388,6 +636,7 @@
             shellId: shell.id || '',
             children: afterChildren
           });
+          syncLinkedModuleInterfacesByResize(this, moduleName, oldGeo2, newGeo2, [shell]);
         }
       } finally {
         model2.endUpdate();
@@ -395,6 +644,78 @@
 
       return result;
     };
+
+    graph.cellsMoved = function (cells, dx, dy, disconnect, constrain, extend) {
+      var movePlans = [];
+      emitDesignLog('cells-moved-hook-enter', {
+        cellCount: cells ? cells.length : 0,
+        dx: Number(dx || 0),
+        dy: Number(dy || 0),
+        cells: (cells || []).map(function (cell) {
+          return resizeCellDebugMeta(cell, graph.getModel && cell ? graph.getModel().getGeometry(cell) : null);
+        })
+      });
+      if (cells && cells.length && this.getModel) {
+        var model = this.getModel();
+        for (var i = 0; i < cells.length; i++) {
+          var cell = cells[i];
+          if (!isFlowModuleShell(cell) && !isGeneratedModuleBody(cell)) continue;
+          var geo = model.getGeometry(cell);
+          if (!geo) continue;
+          movePlans.push({
+            shell: cell,
+            moduleName: moduleNameForCell(cell),
+            oldGeo: cloneRectLike(geo)
+          });
+        }
+      }
+      emitDesignLog('cells-moved-hook-targets', {
+        matchedCount: movePlans.length,
+        targets: movePlans.map(function (plan) {
+          return {
+            shellId: plan.shell && plan.shell.id ? plan.shell.id : '',
+            moduleName: plan.moduleName,
+            oldGeo: plan.oldGeo ? { x: plan.oldGeo.x, y: plan.oldGeo.y, width: plan.oldGeo.width, height: plan.oldGeo.height } : null
+          };
+        })
+      });
+
+      var result = originalCellsMoved.call(this, cells, dx, dy, disconnect, constrain, extend);
+
+      if (!movePlans.length) {
+        emitDesignLog('cells-moved-hook-no-target', { reason: 'No flow shell or generated module matched current move selection.' });
+        return result;
+      }
+
+      var model2 = this.getModel();
+      model2.beginUpdate();
+      try {
+        for (var p = 0; p < movePlans.length; p++) {
+          var plan = movePlans[p];
+          var newGeo = model2.getGeometry(plan.shell);
+          if (!newGeo) continue;
+          var actualDx = Number(newGeo.x || 0) - Number(plan.oldGeo.x || 0);
+          var actualDy = Number(newGeo.y || 0) - Number(plan.oldGeo.y || 0);
+          syncLinkedModuleInterfacesByMove(this, plan.moduleName, actualDx, actualDy, [plan.shell]);
+        }
+      } finally {
+        model2.endUpdate();
+      }
+
+      return result;
+    };
+  }
+
+  function ensureArchInteractionHooks(ui) {
+    var graph = Shared.graphOf(ui);
+    var pageName = ui && ui._activeProjectPageCtx ? String(ui._activeProjectPageCtx.name || '') : '';
+    emitDesignLog('ensure-arch-interaction-hooks', {
+      pageName: pageName,
+      hasGraph: !!graph
+    });
+    if (!graph) return false;
+    installShellResizeBehavior(graph);
+    return true;
   }
 
   function currentGraphSummary(ui) {
@@ -670,6 +991,7 @@
       var cloned = sourceModuleCell.clone();
       resetCellTreeIds(cloned);
       cloned.style = makeModuleShellStyle(cloned.style || '', opts);
+      cloned.style = mxUtils.setStyle(cloned.style || '', 'flowModule', moduleName || '');
       var srcGeo = sourceModuleCell.geometry || cloned.geometry || new mxGeometry(0, 0, width, height);
       cloned.geometry = new mxGeometry(0, 0, Number(srcGeo.width || width), Number(srcGeo.height || height));
       if (srcGeo.points && srcGeo.points.length) {
@@ -693,6 +1015,7 @@
     });
     cell.geometry = new mxGeometry(0, 0, width, height);
     cell.style = makeModuleShellStyle(cell.style || '', opts);
+    cell.style = mxUtils.setStyle(cell.style || '', 'flowModule', moduleName || '');
     return cell;
   }
 
@@ -1328,6 +1651,7 @@
   }
 
   Designs.collectGeneratedMarkerMeta = collectGeneratedMarkerMeta;
+  Designs.ensureArchInteractionHooks = ensureArchInteractionHooks;
   Designs.collectDesignInputs = function collectDesignInputs(ui) {
     return groupMarkersByModule(collectGeneratedMarkerMeta(ui));
   };
