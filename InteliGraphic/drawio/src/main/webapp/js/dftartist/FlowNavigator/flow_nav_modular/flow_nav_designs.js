@@ -526,15 +526,37 @@
     return out;
   }
 
+  function scaleCellChildrenGeometries(model, parentCell, sx, sy) {
+    if (!model || !parentCell) return;
+    sx = isFinite(Number(sx)) && Number(sx) > 0 ? Number(sx) : 1;
+    sy = isFinite(Number(sy)) && Number(sy) > 0 ? Number(sy) : 1;
+    var childCount = model.getChildCount(parentCell);
+    for (var i = 0; i < childCount; i++) {
+      var child = model.getChildAt(parentCell, i);
+      var childGeo = model.getGeometry(child);
+      if (!child || !childGeo) continue;
+      var nextGeo = childGeo.clone ? childGeo.clone() : new mxGeometry(childGeo.x, childGeo.y, childGeo.width, childGeo.height);
+      nextGeo.x = Math.round(Number(childGeo.x || 0) * sx);
+      nextGeo.y = Math.round(Number(childGeo.y || 0) * sy);
+      nextGeo.width = Math.max(1, Math.round(Number(childGeo.width || 0) * sx));
+      nextGeo.height = Math.max(1, Math.round(Number(childGeo.height || 0) * sy));
+      model.setGeometry(child, nextGeo);
+    }
+  }
+
   function syncLinkedModuleInterfacesByResize(graph, moduleName, fromRect, toRect, excludedRoots) {
     if (!graph || !moduleName || !fromRect || !toRect) return;
     var model = graph.getModel ? graph.getModel() : null;
     if (!model) return;
+    var sx = Number(fromRect.width || 0) ? (Number(toRect.width || 0) / Number(fromRect.width || 1)) : 1;
+    var sy = Number(fromRect.height || 0) ? (Number(toRect.height || 0) / Number(fromRect.height || 1)) : 1;
     var targets = collectModuleInterfacesForTransform(graph, moduleName, excludedRoots);
     emitDesignLog('sync-linked-module-interfaces-resize', {
       moduleName: moduleName,
       fromRect: fromRect ? { x: fromRect.x, y: fromRect.y, width: fromRect.width, height: fromRect.height } : null,
       toRect: toRect ? { x: toRect.x, y: toRect.y, width: toRect.width, height: toRect.height } : null,
+      sx: sx,
+      sy: sy,
       targetCount: targets.length
     });
     if (!targets.length) return;
@@ -550,11 +572,7 @@
         after: { x: Number(nextGeo.x || 0), y: Number(nextGeo.y || 0), width: Number(nextGeo.width || 0), height: Number(nextGeo.height || 0) }
       });
       model.setGeometry(targets[i], nextGeo);
-      try {
-        if (global.DftsIP && global.DftsIP.Symbol && typeof global.DftsIP.Symbol.relayout === 'function') {
-          global.DftsIP.Symbol.relayout(graph, targets[i]);
-        }
-      } catch (e) {}
+      scaleCellChildrenGeometries(model, targets[i], sx, sy);
       persistGeneratedInterfaceMeta(graph, targets[i], extractGeneratedInterfaceMeta(graph, targets[i]));
     }
     try {
@@ -589,11 +607,6 @@
         after: { x: Number(nextGeo.x || 0), y: Number(nextGeo.y || 0), width: Number(nextGeo.width || 0), height: Number(nextGeo.height || 0) }
       });
       model.setGeometry(targets[i], nextGeo);
-      try {
-        if (global.DftsIP && global.DftsIP.Symbol && typeof global.DftsIP.Symbol.relayout === 'function') {
-          global.DftsIP.Symbol.relayout(graph, targets[i]);
-        }
-      } catch (e) {}
       persistGeneratedInterfaceMeta(graph, targets[i], extractGeneratedInterfaceMeta(graph, targets[i]));
     }
     try {
