@@ -379,7 +379,6 @@
   }
 
   function notifyFloorplanModuleYamlGenerated(ui, targetAbs) {
-    var msg = 'Floorplan module YAML generated successfully.';
     try {
       if (ui && typeof ui.showTemporaryMessage === 'function') {
         ui.showTemporaryMessage('Floorplan YAML generated', 1800);
@@ -387,16 +386,13 @@
       }
     } catch (e) {}
     try {
-      if (typeof global.mxUtils !== 'undefined' && global.mxUtils && typeof global.mxUtils.alert === 'function') {
-        global.mxUtils.alert(msg + (targetAbs ? '\n' + targetAbs : ''));
-        return;
+      if (ui && ui.editor && typeof ui.editor.setStatus === 'function') {
+        ui.editor.setStatus('Floorplan YAML generated' + (targetAbs ? ': ' + targetAbs : ''));
       }
     } catch (e2) {}
-    try { alert(msg + (targetAbs ? '\n' + targetAbs : '')); } catch (e3) {}
   }
 
   function notifyFloorplanInterfacePairYamlGenerated(ui, targetAbs) {
-    var msg = 'Floorplan interface pair YAML generated successfully.';
     try {
       if (ui && typeof ui.showTemporaryMessage === 'function') {
         ui.showTemporaryMessage('Floorplan pair YAML generated', 1800);
@@ -404,12 +400,10 @@
       }
     } catch (e) {}
     try {
-      if (typeof global.mxUtils !== 'undefined' && global.mxUtils && typeof global.mxUtils.alert === 'function') {
-        global.mxUtils.alert(msg + (targetAbs ? '\n' + targetAbs : ''));
-        return;
+      if (ui && ui.editor && typeof ui.editor.setStatus === 'function') {
+        ui.editor.setStatus('Floorplan pair YAML generated' + (targetAbs ? ': ' + targetAbs : ''));
       }
     } catch (e2) {}
-    try { alert(msg + (targetAbs ? '\n' + targetAbs : '')); } catch (e3) {}
   }
 
   function isModuleDesign(designRef) {
