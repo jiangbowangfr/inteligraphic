@@ -1962,18 +1962,21 @@
         var ensured = await ensureTopLevelDesign(ui, moduleName, parentDesign);
         var design = ensured.design;
         var shellPageName = 'dataflow';
-        await ensurePage(ui, design, shellPageName);
-        await withOpenedPage(ui, design, shellPageName, (function (currentSourceModuleCell, currentLayerInputs, currentPageOrder, currentArchLayerOrder) {
-          return async function () {
-            await populateModuleDesignPage(ui, moduleName, currentSourceModuleCell, currentLayerInputs, currentPageOrder, currentArchLayerOrder);
-          };
-        })(sourceModuleCell, layerInputs, pageOrder, archLayerOrder));
+        var shellPageState = await ensurePage(ui, design, shellPageName);
+        if (shellPageState && shellPageState.created) {
+          await withOpenedPage(ui, design, shellPageName, (function (currentSourceModuleCell, currentLayerInputs, currentPageOrder, currentArchLayerOrder) {
+            return async function () {
+              await populateModuleDesignPage(ui, moduleName, currentSourceModuleCell, currentLayerInputs, currentPageOrder, currentArchLayerOrder);
+            };
+          })(sourceModuleCell, layerInputs, pageOrder, archLayerOrder));
+        }
         results.push({
           module: moduleName,
           design: design,
           createdDesign: ensured.created,
           page: shellPageName,
-          markerCount: markerEntries.length
+          markerCount: markerEntries.length,
+          updated: !!(shellPageState && shellPageState.created)
         });
         await ensurePage(ui, design, archPageName);
         await withOpenedPage(ui, design, archPageName, (function (currentSourceModuleCell, currentLayerInputs) {
