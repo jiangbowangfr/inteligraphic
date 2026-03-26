@@ -1147,7 +1147,7 @@
       }
     } catch (e) {}
     if (sourceModuleCell && typeof sourceModuleCell.clone === 'function') {
-      var cloned = sourceModuleCell.clone();
+      var cloned = cloneCellTree(sourceModuleCell);
       resetCellTreeIds(cloned);
       cloned.style = makeModuleShellStyle(cloned.style || '', opts);
       cloned.style = mxUtils.setStyle(cloned.style || '', 'flowModule', moduleName || '');
@@ -1176,6 +1176,19 @@
     cell.style = makeModuleShellStyle(cell.style || '', opts);
     cell.style = mxUtils.setStyle(cell.style || '', 'flowModule', moduleName || '');
     return cell;
+  }
+
+  function cloneCellTree(cell) {
+    if (!cell || typeof cell.clone !== 'function') return null;
+    var cloned = cell.clone();
+    cloned.children = null;
+    if (cell.children && cell.children.length && typeof cloned.insert === 'function') {
+      for (var i = 0; i < cell.children.length; i++) {
+        var childClone = cloneCellTree(cell.children[i]);
+        if (childClone) cloned.insert(childClone);
+      }
+    }
+    return cloned;
   }
 
   function makeInterfaceStyle(style, markerMeta) {
