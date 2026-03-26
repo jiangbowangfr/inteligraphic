@@ -21,17 +21,83 @@
     return null;
   }
 
+  function normalizePathText(value) {
+    return String(value == null ? '' : value).replace(/\\/g, '/').replace(/\/+$/, '');
+  }
+
+  function designDirKey(design) {
+    if (!design) return '';
+    if (Array.isArray(design._dirRel) && design._dirRel.length) return design._dirRel.join('/');
+    if (design._absDir) return normalizePathText(design._absDir);
+    return '';
+  }
+
+  function sameDesignRef(a, b) {
+    if (!a || !b) return false;
+    if (a === b) return true;
+    var aDirKey = designDirKey(a);
+    var bDirKey = designDirKey(b);
+    if (aDirKey && bDirKey && aDirKey === bDirKey) return true;
+    var aKind = String(a.__kind || '').toLowerCase();
+    var bKind = String(b.__kind || '').toLowerCase();
+    if (aKind && bKind && aKind === bKind && String(a.name || '') === String(b.name || '')) {
+      var aAbs = normalizePathText(a._absDir || '');
+      var bAbs = normalizePathText(b._absDir || '');
+      if (aAbs && bAbs && aAbs === bAbs) return true;
+    }
+    return false;
+  }
+
+  function walkProjectDesigns(ui, visitor) {
+    var roots = ((Shared.getProject(ui) || {}).designs || []);
+    function walk(design, parentDesign) {
+      if (!design) return null;
+      var result = visitor(design, parentDesign);
+      if (result) return result;
+      if (design._containers) {
+        result = walk(design._containers.floorplan, design);
+        if (result) return result;
+        result = walk(design._containers.ipconfig, design);
+        if (result) return result;
+      }
+      var kids = Array.isArray(design.sub_designs) ? design.sub_designs : [];
+      for (var i = 0; i < kids.length; i++) {
+        result = walk(kids[i], design);
+        if (result) return result;
+      }
+      return null;
+    }
+    for (var i = 0; i < roots.length; i++) {
+      var match = walk(roots[i], null);
+      if (match) return match;
+    }
+    return null;
+  }
+
+  function resolveProjectDesignRef(ui, designRef) {
+    if (!designRef) return null;
+    return walkProjectDesigns(ui, function (candidate) {
+      return sameDesignRef(candidate, designRef) ? candidate : null;
+    }) || null;
+  }
+
   function findParentDesign(ui, childRef, list) {
-    list = Array.isArray(list) ? list : ((Shared.getProject(ui) || {}).designs || []);
+    childRef = resolveProjectDesignRef(ui, childRef) || childRef;
+    if (!childRef) return null;
+    if (!Array.isArray(list)) {
+      return walkProjectDesigns(ui, function (candidate, parentDesign) {
+        return sameDesignRef(candidate, childRef) ? (parentDesign || null) : null;
+      });
+    }
     for (var i = 0; i < list.length; i++) {
       var design = list[i];
       if (!design) continue;
       if (design._containers) {
-        if (design._containers.floorplan === childRef || design._containers.ipconfig === childRef) return design;
+        if (sameDesignRef(design._containers.floorplan, childRef) || sameDesignRef(design._containers.ipconfig, childRef)) return design;
       }
       var kids = Array.isArray(design.sub_designs) ? design.sub_designs : [];
       for (var j = 0; j < kids.length; j++) {
-        if (kids[j] === childRef) return design;
+        if (sameDesignRef(kids[j], childRef)) return design;
       }
       var found = findParentDesign(ui, childRef, kids);
       if (found) return found;
@@ -55,6 +121,7 @@
     var ctx = ui && ui._activeProjectPageCtx ? ui._activeProjectPageCtx : null;
     var designRef = ctx && ctx.designRef ? ctx.designRef : (Shared.getCurrentDesign ? Shared.getCurrentDesign(ui) : null);
     if (!designRef) return null;
+    designRef = resolveProjectDesignRef(ui, designRef) || designRef;
     var kind = String(designRef.__kind || '').toLowerCase();
     if (kind === 'module-design') return designRef;
     if (kind === 'floorplan-container') return findParentDesign(ui, designRef);
@@ -1148,6 +1215,7 @@
     } catch (e) {}
     if (sourceModuleCell && typeof sourceModuleCell.clone === 'function') {
       var cloned = cloneCellTree(sourceModuleCell);
+      tagClonedCellTreeWithSourceRefs(sourceModuleCell, cloned);
       resetCellTreeIds(cloned);
       cloned.style = makeModuleShellStyle(cloned.style || '', opts);
       cloned.style = mxUtils.setStyle(cloned.style || '', 'flowModule', moduleName || '');
@@ -1189,6 +1257,59 @@
       }
     }
     return cloned;
+  }
+
+  function tagClonedCellTreeWithSourceRefs(sourceCell, clonedCell) {
+    if (!sourceCell || !clonedCell) return;
+    clonedCell.__flowSourceCellId = sourceCell.id != null ? String(sourceCell.id) : '';
+    clonedCell.__flowSourceCellName = Shared.displayNameOfCell(null, sourceCell) || Shared.labelOf(sourceCell) || '';
+    var sourceChildren = sourceCell.children || [];
+    var clonedChildren = clonedCell.children || [];
+    var count = Math.min(sourceChildren.length, clonedChildren.length);
+    for (var i = 0; i < count; i++) tagClonedCellTreeWithSourceRefs(sourceChildren[i], clonedChildren[i]);
+  }
+
+  function isFloorplanModuleCell(cell) {
+    if (!cell || !cell.vertex) return false;
+    var style = String(cell.style || '');
+    return style.indexOf('dftsFloorplan_type=module') >= 0 || style.indexOf('dftsIP_type=floorplan_module') >= 0;
+  }
+
+  function collectModuleCellsInTree(root, out) {
+    if (!root) return;
+    if (isFloorplanModuleCell(root)) out.push(root);
+    var children = root.children || [];
+    for (var i = 0; i < children.length; i++) collectModuleCellsInTree(children[i], out);
+  }
+
+  function buildModuleCellLookup(root) {
+    var lookup = {
+      bySourceId: Object.create(null),
+      byId: Object.create(null),
+      byName: Object.create(null)
+    };
+    var cells = [];
+    collectModuleCellsInTree(root, cells);
+    for (var i = 0; i < cells.length; i++) {
+      var cell = cells[i];
+      var cellId = cell && cell.id != null ? String(cell.id) : '';
+      var sourceId = cell && cell.__flowSourceCellId != null ? String(cell.__flowSourceCellId) : '';
+      var name = String(Shared.displayNameOfCell(null, cell) || Shared.labelOf(cell) || '').trim();
+      if (sourceId && !lookup.bySourceId[sourceId]) lookup.bySourceId[sourceId] = cell;
+      if (cellId && !lookup.byId[cellId]) lookup.byId[cellId] = cell;
+      if (name && !lookup.byName[name]) lookup.byName[name] = cell;
+    }
+    return lookup;
+  }
+
+  function resolveMarkerModuleCell(lookup, markerMeta, fallbackCell) {
+    if (!lookup) return fallbackCell || null;
+    var moduleId = String(markerMeta && markerMeta.moduleId || '').trim();
+    var moduleName = String(markerMeta && markerMeta.moduleName || '').trim();
+    if (moduleId && lookup.bySourceId[moduleId]) return lookup.bySourceId[moduleId];
+    if (moduleId && lookup.byId[moduleId]) return lookup.byId[moduleId];
+    if (moduleName && lookup.byName[moduleName]) return lookup.byName[moduleName];
+    return fallbackCell || null;
   }
 
   function makeInterfaceStyle(style, markerMeta) {
@@ -1545,10 +1666,10 @@
   }
 
   function boundaryAnchorForSide(bodyCell, side, offset) {
-    var geo = bodyCell && bodyCell.geometry;
-    if (!geo) return null;
-    var width = Number(geo.width || 0);
-    var height = Number(geo.height || 0);
+    var rect = bodyCell ? Shared.rectOfCell(bodyCell) : null;
+    if (!rect) return null;
+    var width = Number(rect.width || 0);
+    var height = Number(rect.height || 0);
     var points = parsePolyPoints(bodyCell.style || '', width, height);
     if (!points.length) return null;
     var axis = (side === 'left' || side === 'right') ? 'y' : 'x';
@@ -1568,7 +1689,7 @@
       else if (side === 'top' && hits[j].y < best.y) best = hits[j];
       else if (side === 'bottom' && hits[j].y > best.y) best = hits[j];
     }
-    return { x: Number(geo.x || 0) + best.x, y: Number(geo.y || 0) + best.y };
+    return { x: Number(rect.x || 0) + best.x, y: Number(rect.y || 0) + best.y };
   }
 
   function countBySide(markers) {
@@ -1585,31 +1706,49 @@
     return out;
   }
 
-  function relativeInterfacePlacement(sourceModuleCell, markerEntry) {
-    var srcModuleGeo = sourceModuleCell && sourceModuleCell.geometry;
+  function relativeInterfacePlacement(sourceModuleCell, markerEntry, side, size) {
+    var srcModuleRect = sourceModuleCell ? Shared.rectOfCell(sourceModuleCell) : null;
     var srcCell = markerEntry && markerEntry.cell;
-    var srcGeo = srcCell && srcCell.geometry;
-    if (!srcModuleGeo || !srcGeo) return null;
-    var out = {
-      x: Number(srcGeo.x || 0) - Number(srcModuleGeo.x || 0),
-      y: Number(srcGeo.y || 0) - Number(srcModuleGeo.y || 0)
-    };
+    var srcRect = srcCell ? Shared.rectOfCell(srcCell) : null;
+    if (!srcModuleRect) return null;
+    var out = null;
+    if (srcRect) {
+      out = {
+        x: Number(srcRect.x || 0) - Number(srcModuleRect.x || 0),
+        y: Number(srcRect.y || 0) - Number(srcModuleRect.y || 0)
+      };
+    } else if (markerEntry && markerEntry.meta) {
+      var anchorX = Number(markerEntry.meta.anchorX);
+      var anchorY = Number(markerEntry.meta.anchorY);
+      if (isFinite(anchorX) && isFinite(anchorY)) {
+        size = size || { width: 0, height: 0 };
+        out = {
+          x: (side === 'top' || side === 'bottom')
+            ? Math.round(anchorX - Number(srcModuleRect.x || 0) - Number(size.width || 0) / 2)
+            : Math.round(anchorX - Number(srcModuleRect.x || 0)),
+          y: (side === 'left' || side === 'right')
+            ? Math.round(anchorY - Number(srcModuleRect.y || 0) - Number(size.height || 0) / 2)
+            : Math.round(anchorY - Number(srcModuleRect.y || 0))
+        };
+      }
+    }
+    if (!out) return null;
     emitDesignLog('relative-interface-placement', {
       moduleName: markerEntry && markerEntry.meta ? markerEntry.meta.moduleName || '' : '',
       layerName: markerEntry && markerEntry.meta ? markerEntry.meta.layerName || '' : '',
       interfaceType: markerEntry && markerEntry.meta ? markerEntry.meta.interfaceType || '' : '',
       sourceModuleGeo: {
-        x: Number(srcModuleGeo.x || 0),
-        y: Number(srcModuleGeo.y || 0),
-        width: Number(srcModuleGeo.width || 0),
-        height: Number(srcModuleGeo.height || 0)
+        x: Number(srcModuleRect.x || 0),
+        y: Number(srcModuleRect.y || 0),
+        width: Number(srcModuleRect.width || 0),
+        height: Number(srcModuleRect.height || 0)
       },
-      sourceInterfaceGeo: {
-        x: Number(srcGeo.x || 0),
-        y: Number(srcGeo.y || 0),
-        width: Number(srcGeo.width || 0),
-        height: Number(srcGeo.height || 0)
-      },
+      sourceInterfaceGeo: srcRect ? {
+        x: Number(srcRect.x || 0),
+        y: Number(srcRect.y || 0),
+        width: Number(srcRect.width || 0),
+        height: Number(srcRect.height || 0)
+      } : null,
       relative: out
     });
     return out;
@@ -1623,13 +1762,13 @@
   }
 
   function effectiveBodyRect(bodyRect, bodyCell) {
-    var geo = bodyCell && bodyCell.geometry ? bodyCell.geometry : null;
-    if (geo) {
+    var rect = bodyCell ? Shared.rectOfCell(bodyCell) : null;
+    if (rect) {
       return {
-        x: Number(geo.x || 0),
-        y: Number(geo.y || 0),
-        width: Number(geo.width || 0),
-        height: Number(geo.height || 0)
+        x: Number(rect.x || 0),
+        y: Number(rect.y || 0),
+        width: Number(rect.width || 0),
+        height: Number(rect.height || 0)
       };
     }
     return bodyRect || null;
@@ -1665,17 +1804,23 @@
 
   function positionInterfacesAroundBody(bodyRect, bySide, prototypes, bodyCell, sourceModuleCell) {
     var placements = [];
+    var sourceLookup = buildModuleCellLookup(sourceModuleCell);
+    var targetLookup = buildModuleCellLookup(bodyCell);
 
     function placeSide(side, list) {
       for (var i = 0; i < list.length; i++) {
         var entry = list[i];
         var cell = prototypes[entry.meta.id];
         if (!cell) continue;
+        var targetModuleCell = resolveMarkerModuleCell(targetLookup, entry && entry.meta, bodyCell);
+        var sourcePlacementModule = resolveMarkerModuleCell(sourceLookup, entry && entry.meta, sourceModuleCell);
+        var targetRect = effectiveBodyRect(bodyRect, targetModuleCell || bodyCell);
+        if (!targetRect) continue;
         var metrics = interfacePlacementMetrics(cell, side, entry && entry.cell ? entry.cell : null);
         var size = { width: metrics.width, height: metrics.height };
-        var relative = relativeInterfacePlacement(sourceModuleCell, entry);
+        var relative = relativeInterfacePlacement(sourcePlacementModule || sourceModuleCell, entry, side, size);
         if (relative) {
-          var relativeOutside = placeRelativeOutsideBody(bodyRect, bodyCell, side, size, relative);
+          var relativeOutside = placeRelativeOutsideBody(targetRect, targetModuleCell || bodyCell, side, size, relative);
           var relativeGeo = placeInterfaceGeometry(metrics, relativeOutside.x, relativeOutside.y);
           placements.push({
             marker: entry,
@@ -1687,9 +1832,9 @@
         }
         var offset = Number(entry.meta.bundleCenterOffset != null ? entry.meta.bundleCenterOffset : entry.meta.offset);
         if (!isFinite(offset)) offset = (i + 1) / (list.length + 1);
-        var x = bodyRect.x;
-        var y = bodyRect.y;
-        var anchor = bodyCell ? boundaryAnchorForSide(bodyCell, side, offset) : null;
+        var x = targetRect.x;
+        var y = targetRect.y;
+        var anchor = targetModuleCell ? boundaryAnchorForSide(targetModuleCell, side, offset) : null;
         if (anchor) {
           if (side === 'left') {
             x = Math.round(anchor.x - size.width - MODULE_INTERFACE_OUTER_GAP + MODULE_INTERFACE_EDGE_OVERLAP);
@@ -1705,17 +1850,17 @@
             y = Math.round(anchor.y + MODULE_INTERFACE_OUTER_GAP - MODULE_INTERFACE_EDGE_OVERLAP);
           }
         } else if (side === 'left') {
-          x = bodyRect.x - size.width - MODULE_INTERFACE_OUTER_GAP + MODULE_INTERFACE_EDGE_OVERLAP;
-          y = bodyRect.y + Math.round(offset * bodyRect.height - size.height / 2);
+          x = targetRect.x - size.width - MODULE_INTERFACE_OUTER_GAP + MODULE_INTERFACE_EDGE_OVERLAP;
+          y = targetRect.y + Math.round(offset * targetRect.height - size.height / 2);
         } else if (side === 'right') {
-          x = bodyRect.x + bodyRect.width + MODULE_INTERFACE_OUTER_GAP - MODULE_INTERFACE_EDGE_OVERLAP;
-          y = bodyRect.y + Math.round(offset * bodyRect.height - size.height / 2);
+          x = targetRect.x + targetRect.width + MODULE_INTERFACE_OUTER_GAP - MODULE_INTERFACE_EDGE_OVERLAP;
+          y = targetRect.y + Math.round(offset * targetRect.height - size.height / 2);
         } else if (side === 'top') {
-          x = bodyRect.x + Math.round(offset * bodyRect.width - size.width / 2);
-          y = bodyRect.y - size.height - MODULE_INTERFACE_OUTER_GAP + MODULE_INTERFACE_EDGE_OVERLAP;
+          x = targetRect.x + Math.round(offset * targetRect.width - size.width / 2);
+          y = targetRect.y - size.height - MODULE_INTERFACE_OUTER_GAP + MODULE_INTERFACE_EDGE_OVERLAP;
         } else {
-          x = bodyRect.x + Math.round(offset * bodyRect.width - size.width / 2);
-          y = bodyRect.y + bodyRect.height + MODULE_INTERFACE_OUTER_GAP - MODULE_INTERFACE_EDGE_OVERLAP;
+          x = targetRect.x + Math.round(offset * targetRect.width - size.width / 2);
+          y = targetRect.y + targetRect.height + MODULE_INTERFACE_OUTER_GAP - MODULE_INTERFACE_EDGE_OVERLAP;
         }
         var placedGeo = placeInterfaceGeometry(metrics, x, y);
         placements.push({ marker: entry, cell: cell, x: placedGeo.x, y: placedGeo.y });
@@ -1922,6 +2067,59 @@
     return groupMarkersByModule(collectGeneratedMarkerMeta(ui));
   };
 
+  function collectModuleDesignInputsFromAnalysis(ui, analysis) {
+    var owner = getGenerationOwner(ui);
+    var ownerKind = owner && owner.__kind ? String(owner.__kind).toLowerCase() : '';
+    if (ownerKind !== 'module-design' || !owner || !owner.name || !analysis || !analysis.interfacePlan || !Array.isArray(analysis.interfacePlan.markers) || !analysis.interfacePlan.markers.length) {
+      return null;
+    }
+    var ownerName = String(owner.name);
+    var existingEntries = collectGeneratedMarkerMeta(ui);
+    var existingByKey = Object.create(null);
+    for (var i = 0; i < existingEntries.length; i++) {
+      var existingKey = makeMetaKey(existingEntries[i] && existingEntries[i].meta ? existingEntries[i].meta : null);
+      if (existingKey && !existingByKey[existingKey]) existingByKey[existingKey] = existingEntries[i];
+    }
+    var out = Object.create(null);
+    var usedKeys = Object.create(null);
+    out[ownerName] = [];
+    analysis.interfacePlan.markers.forEach(function (marker) {
+      var markerMeta = Shared.cloneJson(marker);
+      var key = makeMetaKey(markerMeta);
+      var existing = key ? existingByKey[key] : null;
+      var entry = {
+        meta: markerMeta,
+        cell: existing && existing.cell ? existing.cell : null,
+        __fromAnalysis: true
+      };
+      var moduleName = String(markerMeta && markerMeta.moduleName || '').trim();
+      out[ownerName].push(entry);
+      if (moduleName && moduleName !== ownerName) {
+        if (!out[moduleName]) out[moduleName] = [];
+        out[moduleName].push({
+          meta: Shared.cloneJson(markerMeta),
+          cell: existing && existing.cell ? existing.cell : null,
+          __fromAnalysis: true
+        });
+      }
+      if (key) usedKeys[key] = true;
+    });
+    for (i = 0; i < existingEntries.length; i++) {
+      var existingEntry = existingEntries[i];
+      var existingMeta = existingEntry && existingEntry.meta ? existingEntry.meta : null;
+      if (!existingMeta || String(existingMeta.moduleName || '') !== ownerName) continue;
+      var existingOwnerKey = makeMetaKey(existingMeta);
+      if (existingOwnerKey && usedKeys[existingOwnerKey]) continue;
+      if (existingOwnerKey) usedKeys[existingOwnerKey] = true;
+      out[ownerName].push({
+        meta: Shared.cloneJson(existingMeta),
+        cell: existingEntry && existingEntry.cell ? existingEntry.cell : null,
+        __fromExistingOwner: true
+      });
+    }
+    return out;
+  }
+
   async function populateModuleDesignPage(ui, moduleName, sourceModuleCell, layerInputs, pageOrder, layerOrder) {
     var pageLayers = Array.isArray(layerOrder) && layerOrder.length ? layerOrder : MODULE_LAYER_ORDER;
     var interfaceLayers = Array.isArray(pageOrder) && pageOrder.length ? pageOrder : MODULE_INTERFACE_LAYER_ORDER;
@@ -1953,7 +2151,7 @@
   Designs.generateTopLevelDesigns = async function generateTopLevelDesigns(ui, analysis, opts) {
     opts = opts || {};
     analysis = analysis || Analysis.analyzeDataflow(ui);
-    var designInputs = Designs.collectDesignInputs(ui);
+    var designInputs = collectModuleDesignInputsFromAnalysis(ui, analysis) || Designs.collectDesignInputs(ui);
     var sourceModuleNames = Object.keys(designInputs).sort();
     var parentDesign = getGenerationOwner(ui);
     var moduleNames = await promptForUniqueModuleNames(ui, sourceModuleNames, parentDesign);
