@@ -10,6 +10,8 @@
   var MODULE_INTERFACE_LAYER_ORDER = ['ssn', 'bscan', 'ijtag', 'bisr', 'other'];
   var MODULE_INTERFACE_OUTER_GAP = 0;
   var MODULE_INTERFACE_EDGE_OVERLAP = 0;
+  var GENERATED_INTERFACE_DEFAULT_WIDTH = 44;
+  var GENERATED_INTERFACE_DEFAULT_HEIGHT = 30;
   if (!Shared || !Analysis) throw new Error('flow_nav_shared.js and flow_nav_analysis.js must be loaded before flow_nav_designs.js');
 
   function findTopLevelDesign(ui, name) {
@@ -1007,6 +1009,11 @@
     ].join('|');
   }
 
+  function markerPrototypeKey(meta) {
+    var key = makeMetaKey(meta);
+    return key || String(meta && meta.id || '').trim();
+  }
+
   function extractGeneratedInterfaceMeta(graph, cell) {
     if (!cell) return null;
     var style = String(cell.style || '');
@@ -1432,7 +1439,7 @@
         height: Number(sourceCell.geometry.height || 0)
       } : null
     });
-    var cloned = sourceCell.clone();
+    var cloned = cloneCellTree(sourceCell);
     resetCellTreeIds(cloned);
     cloned.style = makeInterfaceStyle(cloned.style || '', markerMeta);
     if (cloned.geometry) {
@@ -1464,8 +1471,10 @@
   function createInterfaceCell(graph, markerEntry) {
     var markerMeta = markerEntry && markerEntry.meta ? markerEntry.meta : markerEntry;
     var sourceCell = markerEntry && markerEntry.cell ? markerEntry.cell : null;
+    var sourceIsGeneratedInterface = !!extractGeneratedInterfaceMeta(graph, sourceCell);
     var cloned = cloneInterfaceCellFromSource(sourceCell, markerMeta);
     if (cloned) {
+      cloned.__flowPreserveSourceAppearance = sourceIsGeneratedInterface ? 1 : 0;
       emitDesignLog('create-interface-using-clone', {
         moduleName: markerMeta && markerMeta.moduleName || '',
         layerName: markerMeta && markerMeta.layerName || '',
@@ -1542,6 +1551,47 @@
     geo.y = y;
     graph.getModel().setGeometry(added, geo);
     return added;
+  }
+
+  function normalizeGeneratedInterfaceWithoutSource(graph, cell, markerMeta) {
+    if (!graph || !cell) return;
+    var model = graph.getModel ? graph.getModel() : null;
+    var currentGeo = graph.getCellGeometry ? graph.getCellGeometry(cell) : (cell.geometry || null);
+    var nextGeo = currentGeo && typeof currentGeo.clone === 'function'
+      ? currentGeo.clone()
+      : new mxGeometry(
+        Number(currentGeo && currentGeo.x || 0),
+        Number(currentGeo && currentGeo.y || 0),
+        Number(currentGeo && currentGeo.width || 0),
+        Number(currentGeo && currentGeo.height || 0)
+      );
+    nextGeo.width = GENERATED_INTERFACE_DEFAULT_WIDTH;
+    nextGeo.height = GENERATED_INTERFACE_DEFAULT_HEIGHT;
+    if (model && typeof model.setGeometry === 'function') model.setGeometry(cell, nextGeo);
+    else cell.geometry = nextGeo;
+
+    if (global.DftsIP && global.DftsIP.Symbol) {
+      try {
+        var sym = global.DftsIP.Symbol;
+        var symModel = sym.getModel && sym.getModel(cell);
+        if (symModel) {
+          symModel = Shared.cloneJson(symModel);
+          if (!symModel.transform) symModel.transform = {};
+          symModel.transform.rotation = sideRotationDegrees(String(markerMeta && markerMeta.side || '').toLowerCase());
+          if (sym.setModel) sym.setModel(cell, symModel);
+        }
+        if (sym.relayout) sym.relayout(graph, cell);
+      } catch (e) {
+        emitDesignLog('normalize-generated-interface-without-source-error', {
+          moduleName: markerMeta && markerMeta.moduleName || '',
+          layerName: markerMeta && markerMeta.layerName || '',
+          interfaceType: markerMeta && markerMeta.interfaceType || '',
+          error: e && e.message ? e.message : String(e)
+        });
+      }
+    }
+
+    persistGeneratedInterfaceMeta(graph, cell, markerMeta);
   }
 
   function resetCellTreeIds(cell) {
@@ -1810,7 +1860,7 @@
     function placeSide(side, list) {
       for (var i = 0; i < list.length; i++) {
         var entry = list[i];
-        var cell = prototypes[entry.meta.id];
+        var cell = prototypes[markerPrototypeKey(entry && entry.meta ? entry.meta : null)];
         if (!cell) continue;
         var targetModuleCell = resolveMarkerModuleCell(targetLookup, entry && entry.meta, bodyCell);
         var sourcePlacementModule = resolveMarkerModuleCell(sourceLookup, entry && entry.meta, sourceModuleCell);
@@ -1934,7 +1984,7 @@
     if (includeInterfaces) {
       for (var i = 0; i < entries.length; i++) {
         try {
-          interfacePrototypes[entries[i].meta.id] = createInterfaceCell(graph, entries[i]);
+          interfacePrototypes[markerPrototypeKey(entries[i] && entries[i].meta ? entries[i].meta : null)] = createInterfaceCell(graph, entries[i]);
         } catch (protoErr) {
           emitDesignLog('interface-prototype-error', {
             moduleName: moduleName,
@@ -2016,7 +2066,19 @@
         });
         for (var p = 0; p < placements.length; p++) {
           var addedInterface = addCellAt(graph, parent, placements[p].cell, placements[p].x, placements[p].y);
-          applyMarkerAppearanceToInterface(graph, addedInterface, placements[p].marker && placements[p].marker.cell ? placements[p].marker.cell : null, placements[p].marker && placements[p].marker.meta ? placements[p].marker.meta : null);
+          var sourceInterfaceCell = placements[p].marker && placements[p].marker.cell ? placements[p].marker.cell : null;
+          var markerMeta = placements[p].marker && placements[p].marker.meta ? placements[p].marker.meta : null;
+          if (addedInterface && addedInterface.__flowPreserveSourceAppearance) {
+            persistGeneratedInterfaceMeta(
+              graph,
+              addedInterface,
+              markerMeta
+            );
+          } else if (!sourceInterfaceCell) {
+            normalizeGeneratedInterfaceWithoutSource(graph, addedInterface, markerMeta);
+          } else {
+            applyMarkerAppearanceToInterface(graph, addedInterface, sourceInterfaceCell, markerMeta);
+          }
           addedInterfaces.push(addedInterface);
         }
       }
