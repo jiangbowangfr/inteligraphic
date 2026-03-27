@@ -828,18 +828,12 @@
             var child = model2.getChildAt(shell, c);
             var childGeo = model2.getGeometry(child);
             if (!child || !childGeo) continue;
-            var nextGeo = childGeo.clone ? childGeo.clone() : new mxGeometry(childGeo.x, childGeo.y, childGeo.width, childGeo.height);
-            nextGeo.x = Math.round(Number(childGeo.x || 0) * sx);
-            nextGeo.y = Math.round(Number(childGeo.y || 0) * sy);
-            nextGeo.width = Math.max(1, Math.round(Number(childGeo.width || 0) * sx));
-            nextGeo.height = Math.max(1, Math.round(Number(childGeo.height || 0) * sy));
             emitDesignLog('shell-resize-child-step', {
               shellId: shell.id || '',
               index: c,
               before: resizeCellDebugMeta(child, childGeo),
-              after: resizeCellDebugMeta(child, nextGeo)
+              after: resizeCellDebugMeta(child, childGeo)
             });
-            model2.setGeometry(child, nextGeo);
             if (global.DftsIP && global.DftsIP.Symbol && typeof global.DftsIP.Symbol.relayout === 'function') {
               try {
                 if (String(Shared.styleValue(child.style || '', 'dftsIP_chipBody', '0')) === '1') {
