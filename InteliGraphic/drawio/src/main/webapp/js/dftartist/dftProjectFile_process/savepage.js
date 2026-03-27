@@ -111,7 +111,7 @@ function _isFloorplanDesign(design) {
     if (kind === 'floorplan-container') return true;
     const name = String(design.name || '').trim().toLowerCase();
     const dirRel = (Array.isArray(design._dirRel) ? design._dirRel.join('/') : '').trim().toLowerCase();
-    return name === 'floorplan' || dirRel === 'floorplan';
+    return name === 'floorplan' || name === 'top' || dirRel === 'floorplan' || dirRel === 'top';
 }
 
 function _isModuleDesign(design) {

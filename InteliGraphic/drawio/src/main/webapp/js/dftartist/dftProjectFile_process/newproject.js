@@ -191,7 +191,8 @@ async function _createPageFileSlot(ui, design, pageName) {
     const isFloorplan =
         !!(design && design._isFloorplan) ||
         kind === 'floorplan-container' ||
-        String(design && design.name || '').trim().toLowerCase() === 'floorplan';
+        String(design && design.name || '').trim().toLowerCase() === 'floorplan' ||
+        String(design && design.name || '').trim().toLowerCase() === 'top';
     const segs = (design._dirRel && design._dirRel.slice()) ||
         [_sanitizeFileName(design.name || 'design')];
     const pageDir = isFloorplan ? _joinPath(root, ...segs) : (isModuleDesign ? _joinPath(root, ...segs, 'arch') : _joinPath(root, ...segs, 'page'));

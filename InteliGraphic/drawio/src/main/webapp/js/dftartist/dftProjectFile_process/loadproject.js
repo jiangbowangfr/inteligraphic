@@ -14,6 +14,7 @@ function _joinPath() {
     return parts.join('/').replace(/\/+/g, '/');
 }
 function _sanitizeFileName(s) { return String(s || '').replace(/[\\/:*?"<>|]+/g, '_').trim() || 'design'; }
+const _ROOT_FLOORPLAN_DIR = 'top';
 
 // 从 env_file 推导出目录段；没有就用名字
 function _hydrateDesignDirsFromYaml(ui) {
@@ -31,7 +32,7 @@ function _hydrateDesignDirsFromYaml(ui) {
             d.__kind = 'ipconfig-container';
             return;
         }
-        if (String(d && d.name || '').trim().toLowerCase() === 'floorplan' || dirRel === 'floorplan' || /(^|\/)floorplan$/.test(dirRel)) {
+        if (String(d && d.name || '').trim().toLowerCase() === 'floorplan' || String(d && d.name || '').trim().toLowerCase() === _ROOT_FLOORPLAN_DIR || dirRel === 'floorplan' || dirRel === _ROOT_FLOORPLAN_DIR || /(^|\/)(floorplan|top)$/.test(dirRel)) {
             d.__kind = 'floorplan-container';
         }
     }
@@ -307,7 +308,7 @@ function handleDftartProject(path, data) {
                     const rebuilt = [];
                     for (const item of topLevel) {
                         const lower = String(item && item.name || '').trim().toLowerCase();
-                        if (lower === 'floorplan' || lower === 'ipconfig') {
+                        if (lower === 'floorplan' || lower === _ROOT_FLOORPLAN_DIR || lower === 'ipconfig') {
                             rebuilt.push(item);
                             continue;
                         }

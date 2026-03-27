@@ -142,7 +142,8 @@
       return kind !== 'ipconfig-container' &&
         kind !== 'floorplan-container' &&
         name !== 'ipconfig' &&
-        name !== 'floorplan';
+        name !== 'floorplan' &&
+        name !== 'top';
     });
     if (design._containers) {
       delete design._containers.floorplan;

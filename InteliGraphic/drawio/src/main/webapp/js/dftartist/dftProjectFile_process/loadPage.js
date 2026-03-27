@@ -17,7 +17,8 @@ async function _resolvePageFileAbs(ui, designRef, pageName) {
     const isFloorplan =
         !!(designRef && designRef._isFloorplan) ||
         kind === 'floorplan-container' ||
-        String(designRef && designRef.name || '').trim().toLowerCase() === 'floorplan';
+        String(designRef && designRef.name || '').trim().toLowerCase() === 'floorplan' ||
+        String(designRef && designRef.name || '').trim().toLowerCase() === 'top';
 
     let baseDir =
         (designRef && designRef._absDir)

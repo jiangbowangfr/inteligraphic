@@ -129,24 +129,26 @@
   function contains(hay, needle) { return text(hay).toLowerCase().indexOf(text(needle).toLowerCase()) >= 0; }
 
   function normalizedName(value) { return text(value).trim().toLowerCase(); }
+  var ROOT_FLOORPLAN_DIR = 'top';
 
   function looksLikeFloorplanEnv(envFile) {
     envFile = normalizePath(text(envFile)).toLowerCase();
-    return !envFile || /(^|\/)floorplan\/env\.json$/.test(envFile);
+    return !envFile || /(^|\/)(floorplan|top)\/env\.json$/.test(envFile);
   }
 
   function isFloorplanDesign(design) {
     if (!design) return false;
     if (design.__kind === 'floorplan-container') return true;
-    if (normalizedName(design.name) !== 'floorplan') return false;
+    if (normalizedName(design.name) !== 'floorplan' && normalizedName(design.name) !== ROOT_FLOORPLAN_DIR) return false;
 
     var dirRel = Array.isArray(design._dirRel) ? design._dirRel.join('/').toLowerCase() : '';
     var absDir = normalizePath(design._absDir || '').toLowerCase();
     var envFile = normalizePath(design.env_file || '').toLowerCase();
 
     var match = dirRel === 'floorplan'
-      || /(^|\/)floorplan$/.test(dirRel)
-      || /(^|\/)floorplan$/.test(absDir)
+      || dirRel === ROOT_FLOORPLAN_DIR
+      || /(^|\/)(floorplan|top)$/.test(dirRel)
+      || /(^|\/)(floorplan|top)$/.test(absDir)
       || looksLikeFloorplanEnv(envFile);
 
     if (match) design.__kind = 'floorplan-container';
@@ -223,7 +225,7 @@
     if (sanitizeName(trimmed) !== trimmed) return label + ' contains unsupported characters.';
     if (opts.disallowReserved) {
       var lower = trimmed.toLowerCase();
-      if (lower === 'floorplan' || lower === 'ipconfig') return label + ' "' + trimmed + '" is reserved.';
+      if (lower === 'floorplan' || lower === ROOT_FLOORPLAN_DIR || lower === 'ipconfig') return label + ' "' + trimmed + '" is reserved.';
     }
     return '';
   }
@@ -371,8 +373,8 @@
     var root = getProjectStorageRoot(ui);
     var segs = Array.isArray(design._dirRel) ? design._dirRel.slice() : [];
     if (isFloorplanDesign(design)) {
-      if (root) return joinPath(root, 'floorplan');
-      return joinPath.apply(null, segs.length ? segs : ['floorplan']);
+      if (root && isTopLevelFloorplanDesign(ui, design)) return joinPath(root, ROOT_FLOORPLAN_DIR);
+      return joinPath.apply(null, segs.length ? segs : [isTopLevelFloorplanDesign(ui, design) ? ROOT_FLOORPLAN_DIR : 'floorplan']);
     }
     if (root && segs.length) return joinPath.apply(null, [root].concat(segs));
     if (root && design.name) return joinPath(root, sanitizeName(design.name));
@@ -413,9 +415,11 @@
       }
 
       if (isFloorplanDesign(design)) {
-        design.name = 'floorplan';
-        if (!Array.isArray(design._dirRel) || !design._dirRel.length || normalizedName(design._dirRel[design._dirRel.length - 1]) !== 'floorplan') {
-          design._dirRel = (parentSegs || []).concat(['floorplan']);
+        var isTopLevelFloorplan = !(parentSegs && parentSegs.length);
+        var floorplanDirName = isTopLevelFloorplan ? ROOT_FLOORPLAN_DIR : 'floorplan';
+        design.name = floorplanDirName;
+        if (!Array.isArray(design._dirRel) || !design._dirRel.length || normalizedName(design._dirRel[design._dirRel.length - 1]) !== floorplanDirName) {
+          design._dirRel = (parentSegs || []).concat([floorplanDirName]);
         }
         if (!design._absDir && root) design._absDir = joinPath.apply(null, [root].concat(design._dirRel));
         design.env_file = '';
@@ -459,14 +463,15 @@
     }
     if (!createIfMissing) return null;
     var fp = {
-      name: 'floorplan',
+      name: ROOT_FLOORPLAN_DIR,
       __kind: 'floorplan-container',
       pages: [],
       sub_designs: [],
       env_file: '',
       page_meta: {}
     };
-    if (getProjectStorageRoot(ui)) fp._absDir = joinPath(getProjectStorageRoot(ui), 'floorplan');
+    fp._dirRel = [ROOT_FLOORPLAN_DIR];
+    if (getProjectStorageRoot(ui)) fp._absDir = joinPath(getProjectStorageRoot(ui), ROOT_FLOORPLAN_DIR);
     model.designs.unshift(fp);
     markProjectReady(model);
     hydrateDesignDirs(ui);
@@ -597,7 +602,7 @@
   }
 
   function designDisplayLabel(ui, design) {
-    if (isTopLevelFloorplanDesign(ui, design)) return 'dfxplanner';
+    if (isTopLevelFloorplanDesign(ui, design)) return ROOT_FLOORPLAN_DIR;
     if (isFloorplanDesign(design)) return 'floorplan';
     if (isIpconfigDesign(design)) return 'ipconfig';
     return design && design.name ? design.name : 'design';
@@ -2320,7 +2325,7 @@
 
   function designMatchesQuery(design, query) {
     if (!query) return true;
-    if (isFloorplanDesign(design) && contains('dfxplanner', query)) return true;
+    if (isFloorplanDesign(design) && contains(ROOT_FLOORPLAN_DIR, query)) return true;
     if (contains(design.name, query) || (!isIpconfigDesign(design) && contains(design.env_file, query)) || contains(isFloorplanDesign(design) ? 'floorplan-container' : design.__kind, query)) return true;
     var pages = Array.isArray(design.pages) ? design.pages : [];
     for (var i = 0; i < pages.length; i++) if (contains(pages[i], query)) return true;
@@ -2645,7 +2650,7 @@
       key: key,
       depth: depth,
       icon: isFloorplanDesign(design) ? '▦' : (isIpconfigDesign(design) ? '◆' : '◇'),
-      label: isFloorplanDesign(design) ? 'floorplan' : (isIpconfigDesign(design) ? 'ipconfig' : (design.name || 'design')),
+      label: isFloorplanDesign(design) ? designDisplayLabel(ui, design) : (isIpconfigDesign(design) ? 'ipconfig' : (design.name || 'design')),
       hasChildren: !!((design.sub_designs && design.sub_designs.length) || (design.pages && design.pages.length)),
       open: open,
       onToggle: function () { toggleExpanded(ui, key, true); },
