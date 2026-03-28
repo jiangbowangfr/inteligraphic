@@ -1193,6 +1193,7 @@
     style = mxUtils.setStyle(style, 'rotatable', '0');
     style = mxUtils.setStyle(style, 'connectable', '0');
     style = mxUtils.setStyle(style, 'dftsFlowNavGeneratedModule', '1');
+    style = mxUtils.setStyle(style, 'dftsFlowNavHideInstanceName', '1');
     try {
       if (global.console && typeof global.console.debug === 'function') {
         global.console.debug('[FlowNavDesigns] makeModuleShellStyle:after', {
@@ -1230,6 +1231,9 @@
           cloned.geometry.points.push(new mxPoint(Number(srcPt && srcPt.x || 0), Number(srcPt && srcPt.y || 0)));
         }
       }
+      if (global.DftsFloorplan && typeof global.DftsFloorplan.syncFloorplanModuleCell === 'function') {
+        global.DftsFloorplan.syncFloorplanModuleCell(graph, cloned);
+      }
       return cloned;
     }
 
@@ -1245,6 +1249,9 @@
     cell.geometry = new mxGeometry(0, 0, width, height);
     cell.style = makeModuleShellStyle(cell.style || '', opts);
     cell.style = mxUtils.setStyle(cell.style || '', 'flowModule', moduleName || '');
+    if (global.DftsFloorplan && typeof global.DftsFloorplan.syncFloorplanModuleCell === 'function') {
+      global.DftsFloorplan.syncFloorplanModuleCell(graph, cell);
+    }
     return cell;
   }
 

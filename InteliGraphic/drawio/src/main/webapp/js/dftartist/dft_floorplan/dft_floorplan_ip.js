@@ -83,6 +83,10 @@
         return !!fallback;
     }
 
+    function normalizeStyleToken(v) {
+        return trim(v).toLowerCase().replace(/[\s-]+/g, '_');
+    }
+
     function parseNumberStyle(v, fallback) {
         var n = parseFloat(v);
         return isNaN(n) ? fallback : n;
@@ -195,6 +199,13 @@
         var model = graph.getModel();
         var parent = model ? model.getParent(cell) : null;
         return isFloorplanModuleCell(graph, parent) ? parent : null;
+    }
+
+    function shouldHideInstanceName(styleText) {
+        var designLevel = normalizeStyleToken(styleValue(styleText, 'dftsFloorplan_designLevel', ''));
+        if (designLevel === 'chip') return true;
+        if (parseBoolStyle(styleValue(styleText, 'dftsFloorplan_hideInstanceName', ''), false)) return true;
+        return parseBoolStyle(styleValue(styleText, 'dftsFlowNavHideInstanceName', ''), false);
     }
 
     function getMuxPortLabelCell(moduleCell, key) {
@@ -312,12 +323,13 @@
         var model = graph.getModel();
         var style = String(moduleCell.style || '');
         var instanceName = trim(styleValue(style, 'dftsFloorplan_instanceName', ''));
+        var hideInstance = shouldHideInstanceName(style);
         var child = getInstanceLabelCell(graph, moduleCell);
         var rotation = normalizeRotation(styleValue(style, 'rotation', '0'));
         var baseFontSize = parseInt(styleValue(style, 'fontSize', '20'), 10) || 20;
         var moduleFontSize = Math.max(11, Math.round(baseFontSize * 0.8));
         var instanceFontSize = Math.max(9, Math.round(baseFontSize * 0.55));
-        if (!instanceName) {
+        if (!instanceName || hideInstance) {
             if (child) {
                 model.beginUpdate();
                 try {
@@ -355,7 +367,7 @@
                 model.endUpdate();
             }
         }
-        if (child && !instanceName) {
+        if (child && (!instanceName || hideInstance)) {
             child = null;
         }
         if (child && String(child.value || '') !== String(instanceName)) {
@@ -435,13 +447,14 @@
             try { style = cell && cell.style ? String(cell.style) : ''; } catch (e) {}
             var moduleName = trim(styleValue(style, 'dftsFloorplan_moduleName', '')) || firstMeaningfulLine(text);
             var instanceName = trim(styleValue(style, 'dftsFloorplan_instanceName', ''));
+            var hideInstance = shouldHideInstanceName(style);
             var baseFontSize = parseInt(styleValue(style, 'fontSize', '20'), 10) || 20;
             var moduleFontSize = Math.max(11, Math.round(baseFontSize * 0.8));
             var instanceFontSize = Math.max(9, Math.round(baseFontSize * 0.55));
             var hasInstanceChild = !!getInstanceLabelCell(this, cell);
             var html = '<div style="text-align:left;line-height:1.15;padding:4px 0 0 6px;">';
             html += '<div style="font-size:' + moduleFontSize + 'px;color:#111111;font-weight:400;">' + mxUtils.htmlEntities(moduleName || '') + '</div>';
-            if (instanceName && !hasInstanceChild) {
+            if (instanceName && !hasInstanceChild && !hideInstance) {
                 html += '<div style="margin-top:1px;font-size:' + instanceFontSize + 'px;color:#666666;font-weight:400;">' + mxUtils.htmlEntities(instanceName) + '</div>';
             }
             html += '</div>';
