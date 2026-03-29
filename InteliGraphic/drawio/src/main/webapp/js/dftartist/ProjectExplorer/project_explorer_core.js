@@ -194,6 +194,16 @@
     return base ? joinPath(base, 'spec') : '';
   }
 
+  function getDftspecSidecarFileNames(pageName) {
+    var base = sanitizeName(pageName);
+    var suffixes = ['bisr', 'tap', 'ist', 'lbist', 'occ', 'scan', 'edt'];
+    var files = [];
+    for (var i = 0; i < suffixes.length; i++) {
+      files.push(base + '.' + suffixes[i] + '.dofile');
+    }
+    return files;
+  }
+
   function getProjectFlowRelPath(ui) {
     var model = ensureModel(ui);
     return text(model && model.flow_file || 'env.json') || 'env.json';
@@ -907,6 +917,13 @@
           joinPath(getDesignSpecDir(ui, sourceDesign), sanitizeName(pageName) + '.dofile'),
           joinPath(getDesignSpecDir(ui, targetDesign), sanitizeName(pageName) + '.dofile')
         );
+        var sidecars = getDftspecSidecarFileNames(pageName);
+        for (var sc = 0; sc < sidecars.length; sc++) {
+          await copyIfExists(
+            joinPath(getDesignSpecDir(ui, sourceDesign), sidecars[sc]),
+            joinPath(getDesignSpecDir(ui, targetDesign), sidecars[sc])
+          );
+        }
       }
     }
 

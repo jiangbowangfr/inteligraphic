@@ -430,7 +430,78 @@
     return joinPath.apply(null, [root].concat(segs));
   }
 
-  async function saveDftspecToCurrentDesign(ui, text) {
+  function joinTextSegments(segments) {
+    var out = '';
+    for (var i = 0; i < segments.length; i++) {
+      var segment = segments[i];
+      if (!segment) continue;
+      out += String(segment);
+      if (out && !/\n$/.test(out)) out += '\n';
+    }
+    return out;
+  }
+
+  function buildSourceCommand(fileName) {
+    var fileExpr = '[file join [file dirname [info script]] ' + JSON.stringify(String(fileName || '')) + ']';
+    return 'if {[file exists ' + fileExpr + ']} {\n  source ' + fileExpr + '\n}\n';
+  }
+
+  function buildSplitDftspecFiles(pageName, fullText, partMap) {
+    var baseName = sanitizeFileName(pageName || 'page-1');
+    var mainFileName = baseName + '.dofile';
+    if (!partMap || typeof partMap !== 'object') {
+      return { mainFileName: mainFileName, mainText: String(fullText || ''), sidecars: [] };
+    }
+
+    var header = String(partMap.header || '#dftspec DFT_SPEC\n');
+    var beforeSsn = [
+      { key: 'bisr', suffix: 'bisr' },
+      { key: 'tap', suffix: 'tap' },
+      { key: 'ist', suffix: 'ist' },
+      { key: 'lbist', suffix: 'lbist' },
+      { key: 'occ', suffix: 'occ' },
+      { key: 'scan', suffix: 'scan' }
+    ];
+    var afterSsn = [
+      { key: 'edt', suffix: 'edt' }
+    ];
+    var sidecars = [];
+    var beforeSource = [];
+    var afterSource = [];
+
+    function collect(group, target) {
+      for (var i = 0; i < group.length; i++) {
+        var item = group[i];
+        var body = partMap[item.key];
+        if (!body || !String(body).trim()) continue;
+        var fileName = baseName + '.' + item.suffix + '.dofile';
+        sidecars.push({
+          key: item.key,
+          fileName: fileName,
+          text: joinTextSegments([header, body])
+        });
+        target.push(buildSourceCommand(fileName));
+      }
+    }
+
+    collect(beforeSsn, beforeSource);
+    collect(afterSsn, afterSource);
+
+    var mainText = joinTextSegments([
+      header,
+      beforeSource.join(''),
+      partMap.ssn || '',
+      afterSource.join('')
+    ]);
+
+    return {
+      mainFileName: mainFileName,
+      mainText: mainText,
+      sidecars: sidecars
+    };
+  }
+
+  async function saveDftspecToCurrentDesign(ui, text, partMap) {
     if (typeof global.requestSync !== 'function') throw new Error('requestSync unavailable');
 
     var pageName = Shared.getActivePageName(ui) || 'page-1';
@@ -460,9 +531,17 @@
     }
 
     if (!targetAbs) targetAbs = joinPath(dirnamePath(pageAbs), fileName);
+    var fileSet = buildSplitDftspecFiles(pageName, text, partMap);
     await global.requestSync({ action: 'ensureDirs', path: dirnamePath(targetAbs) });
-    await global.requestSync({ action: 'writeFile', path: targetAbs, data: String(text || ''), enc: 'utf-8' });
-    return targetAbs;
+    await global.requestSync({ action: 'writeFile', path: targetAbs, data: String(fileSet.mainText || ''), enc: 'utf-8' });
+    var written = [targetAbs];
+    for (var i = 0; i < fileSet.sidecars.length; i++) {
+      var sidecar = fileSet.sidecars[i];
+      var sidecarAbs = joinPath(dirnamePath(targetAbs), sidecar.fileName);
+      await global.requestSync({ action: 'writeFile', path: sidecarAbs, data: String(sidecar.text || ''), enc: 'utf-8' });
+      written.push(sidecarAbs);
+    }
+    return { main: targetAbs, files: written, sidecarCount: Math.max(0, written.length - 1) };
   }
 
   async function buildDftspecUsingConverters(ui) {
@@ -478,11 +557,17 @@
     if (yaml && typeof yaml.then === 'function') yaml = await yaml;
     if (!yaml || typeof yaml !== 'string' || yaml.trim() === '') throw new Error('YAML 数据为空或格式错误');
 
+    var parts = null;
+    if (typeof global.convertYamlToDftspecParts === 'function') {
+      parts = global.convertYamlToDftspecParts(yaml);
+      if (parts && typeof parts.then === 'function') parts = await parts;
+    }
+
     var dftspec = global.convertYamlToDftspec(yaml);
     if (dftspec && typeof dftspec.then === 'function') dftspec = await dftspec;
     if (!dftspec || typeof dftspec !== 'string' || dftspec.trim() === '') throw new Error('DFTSPEC 数据为空或格式错误');
 
-    return { yaml: yaml, dftspec: dftspec };
+    return { yaml: yaml, dftspec: dftspec, parts: parts };
   }
 
   async function runGenerateDftspecViaConverters(ui, saveAfterBuild, showPreview) {
@@ -501,10 +586,14 @@
   async function runGenerateDftspec(ui) {
     if (!Shared.isProjectReady(ui)) throw new Error('Create or open a project first.');
     if (!Shared.getActivePageReady(ui)) throw new Error('Open a page before generating dftspec.');
-    var text = await runGenerateDftspecViaConverters(ui, true, false);
-    var target = await saveDftspecToCurrentDesign(ui, text);
-    Shared.logDock(ui, 'Saved DFTSPEC: ' + target, 'success');
-    notifyGenerated(ui, target);
+    var built = await buildDftspecUsingConverters(ui);
+    var text = built.dftspec;
+    Shared.ensureState(ui).lastDftspec = text;
+    var target = await saveDftspecToCurrentDesign(ui, text, built.parts);
+    Shared.logDock(ui, 'Saved DFTSPEC: ' + target.main + (target.sidecarCount ? ' (+' + target.sidecarCount + ' split files)' : ''), 'success');
+    Shared.setReports(ui, [{ title: 'Generate DFTSPEC', items: { bytes: text.length, lines: text.split('\n').length, status: 'generated', sidecars: target.sidecarCount } }]);
+    Shared.setJobs(ui, [{ name: 'generate_dftspec', status: 'success', detail: target.sidecarCount ? ('Saved with ' + target.sidecarCount + ' split files') : 'Saved', progress: 100 }]);
+    notifyGenerated(ui, target.main);
     return true;
   }
 

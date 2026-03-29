@@ -1,47 +1,82 @@
-// convertYaml2Dftspec.js 
+// convertYaml2Dftspec.js
 // Usage inside action:
 //   const xml = c.getFileData(true);
 //   const yaml = convertXmlToyaml(xml, true);
 //   const spec = convertYaml2Dftspec(yaml, true);
 //   c.saveData("diagramyaml.yaml", "yaml", b64(yaml), "text/plain", true);
 
-function convertYamlToDftspec(yamlString) {
-    let dftspec = '';
-    const spec = readYAML(yamlString);
-    dftspec += '#dftspec DFT_SPEC\n';
+function joinDftspecSegments(segments) {
+    let out = '';
+    (segments || []).forEach((segment) => {
+        if (!segment) return;
+        out += String(segment);
+        if (out && !out.endsWith('\n')) out += '\n';
+    });
+    return out;
+}
 
-    if (spec && spec.MGC_REPAIR_INS_SPEC) {
-        dftspec += convertBisrYamlToDftspec(spec);
-    }
-    if (spec && spec.MGC_IJTAG_INS_SPEC) {
-        dftspec += convertTapYamlToDftspec(spec);
-    }
-    if (spec && spec.MGC_IST_INS_SPEC) {
-        dftspec += convertISTYamlToDftspec(spec);
-    }
-    if (spec && spec.MGC_LBIST_INS_SPEC) {
-        dftspec += convertLBISTYamlToDftspec(spec);
-    }
-    if (spec && spec.MGC_OCC_INS_SPEC) {
-        dftspec += convertOCCYamlToDftspec(spec);
-    }
-    if (spec && spec.MGC_SCAN_INS_SPEC) {
-        dftspec += convertSCANMC(spec);
-    }
+function buildDftspecParts(spec) {
+    const parts = {
+        header: '#dftspec DFT_SPEC\n',
+        bisr: '',
+        tap: '',
+        ist: '',
+        lbist: '',
+        occ: '',
+        scan: '',
+        ssn: '',
+        edt: '',
+    };
+
+    if (spec && spec.MGC_REPAIR_INS_SPEC) parts.bisr = convertBisrYamlToDftspec(spec);
+    if (spec && spec.MGC_IJTAG_INS_SPEC) parts.tap = convertTapYamlToDftspec(spec);
+    if (spec && spec.MGC_IST_INS_SPEC) parts.ist = convertISTYamlToDftspec(spec);
+    if (spec && spec.MGC_LBIST_INS_SPEC) parts.lbist = convertLBISTYamlToDftspec(spec);
+    if (spec && spec.MGC_OCC_INS_SPEC) parts.occ = convertOCCYamlToDftspec(spec);
+    if (spec && spec.MGC_SCAN_INS_SPEC) parts.scan = convertSCANMC(spec);
     if (spec && spec.MGC_SCAN_DATA_SPEC) {
-        dftspec += convertEDTYamlToDftspec(spec);
+        const scanDataParts = convertEDTYamlToDftspecParts(spec);
+        parts.ssn = scanDataParts.ssn || '';
+        parts.edt = scanDataParts.edt || '';
     }
-    return dftspec;
+
+    return parts;
+}
+
+function convertYamlToDftspecParts(yamlString) {
+    const spec = readYAML(yamlString);
+    return buildDftspecParts(spec);
+}
+
+function convertYamlToDftspec(yamlString) {
+    const parts = convertYamlToDftspecParts(yamlString);
+    return joinDftspecSegments([
+        parts.header,
+        parts.bisr,
+        parts.tap,
+        parts.ist,
+        parts.lbist,
+        parts.occ,
+        parts.scan,
+        parts.ssn,
+        parts.edt,
+    ]);
 }
 
 function convertEDTYamlToDftspec(spec) {
+    const parts = convertEDTYamlToDftspecParts(spec);
+    return joinDftspecSegments([parts.ssn, parts.edt]);
+}
+
+function convertEDTYamlToDftspecParts(spec) {
     if (!spec || !spec.MGC_SCAN_DATA_SPEC) {
         console.log("MGC_SCAN_DATA_SPEC not found in YAML, skipping conversion");
-        return "";
+        return { ssn: '', edt: '' };
     }
 
     const scanDataSpec = spec.MGC_SCAN_DATA_SPEC;
-    let result = '';
+    let ssnResult = '';
+    let edtResult = '';
 
     // 递归处理配置对象
     const processConfig = (config, indentLevel) => {
@@ -829,7 +864,7 @@ function convertEDTYamlToDftspec(spec) {
                 ssnBlock += emitDatapathBlock(dpName, dpCfg, 4);
             });
             ssnBlock += `\n  }\n}\n`;
-            result += ssnBlock;
+            ssnResult += ssnBlock;
         }
     }
 
@@ -860,11 +895,14 @@ function convertEDTYamlToDftspec(spec) {
             }
 
             edtBlock += `\n  }\n}\n`;
-            result += edtBlock;
+            edtResult += edtBlock;
         }
     }
 
-    return result;
+    return {
+        ssn: ssnResult,
+        edt: edtResult,
+    };
 }
 
 // 值格式化函数
