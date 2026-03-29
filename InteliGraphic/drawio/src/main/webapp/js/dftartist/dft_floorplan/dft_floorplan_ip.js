@@ -428,6 +428,62 @@
         for (var i = 0; i < cells.length; i++) syncFloorplanModuleCell(graph, cells[i]);
     }
 
+    function isAncestorCell(model, ancestor, cell) {
+        if (!model || !ancestor || !cell) return false;
+        var cur = cell;
+        while (cur) {
+            if (cur === ancestor) return true;
+            try {
+                cur = model.getParent(cur);
+            } catch (e) {
+                cur = null;
+            }
+        }
+        return false;
+    }
+
+    function resolveFloorplanDragRoot(graph, cell) {
+        if (!graph || !cell) return null;
+        if (isFloorplanModuleCell(graph, cell)) return cell;
+        return getFloorplanModuleParent(graph, cell);
+    }
+
+    function installFloorplanDropTargetSupport(graph) {
+        if (!graph || graph.__dftsFloorplanDropTargetInstalled) return;
+        graph.__dftsFloorplanDropTargetInstalled = true;
+
+        var baseIsValidDropTarget = graph.isValidDropTarget;
+        graph.isValidDropTarget = function (target, cells, evt) {
+            if (target && isFloorplanModuleCell(this, target) && !this.isCellLocked(target)) {
+                var list = Array.isArray(cells) ? cells : [];
+                var model = this.getModel ? this.getModel() : null;
+                var hasFloorplanRoot = false;
+                var invalid = false;
+
+                for (var i = 0; i < list.length; i++) {
+                    var root = resolveFloorplanDragRoot(this, list[i]);
+                    if (!root) continue;
+                    hasFloorplanRoot = true;
+                    if (root === target) {
+                        invalid = true;
+                        break;
+                    }
+                    if (model && isAncestorCell(model, root, target)) {
+                        invalid = true;
+                        break;
+                    }
+                }
+
+                if (hasFloorplanRoot && !invalid) return true;
+            }
+            return baseIsValidDropTarget ? baseIsValidDropTarget.apply(this, arguments) : false;
+        };
+
+        try {
+            if (typeof graph.setDropEnabled === 'function') graph.setDropEnabled(true);
+        } catch (e) {}
+    }
+
     function installFloorplanLabelRenderer() {
         if (global.__DFTS_FLOORPLAN_LABEL_RENDER_PATCHED__) return;
         var GraphCtor = global.Graph || global.mxGraph;
@@ -849,6 +905,7 @@
         if (!realUi) return;
         installFloorplanLabelRenderer();
         var graph = realUi.editor && realUi.editor.graph ? realUi.editor.graph : null;
+        if (graph) installFloorplanDropTargetSupport(graph);
         if (graph && !graph.__dftsFloorplanSyncInstalled) {
             graph.__dftsFloorplanSyncInstalled = true;
             var syncBusy = false;
