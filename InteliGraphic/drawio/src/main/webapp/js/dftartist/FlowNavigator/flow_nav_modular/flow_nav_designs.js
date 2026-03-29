@@ -1437,6 +1437,51 @@
     };
   }
 
+  function scalePoint(point, sx, sy) {
+    if (!point) return null;
+    return new mxPoint(
+      Math.round(Number(point.x || 0) * sx),
+      Math.round(Number(point.y || 0) * sy)
+    );
+  }
+
+  function scaleCellTreeGeometry(cell, sx, sy) {
+    if (!cell || !cell.children || !cell.children.length) return;
+    for (var i = 0; i < cell.children.length; i++) {
+      var child = cell.children[i];
+      var geo = child && child.geometry ? child.geometry : null;
+      if (geo) {
+        var nextGeo = typeof geo.clone === 'function'
+          ? geo.clone()
+          : new mxGeometry(Number(geo.x || 0), Number(geo.y || 0), Number(geo.width || 0), Number(geo.height || 0));
+        if (!geo.relative) {
+          nextGeo.x = Math.round(Number(geo.x || 0) * sx);
+          nextGeo.y = Math.round(Number(geo.y || 0) * sy);
+        }
+        nextGeo.width = Math.round(Number(geo.width || 0) * sx);
+        nextGeo.height = Math.round(Number(geo.height || 0) * sy);
+        nextGeo.sourcePoint = scalePoint(geo.sourcePoint, sx, sy);
+        nextGeo.targetPoint = scalePoint(geo.targetPoint, sx, sy);
+        nextGeo.offset = scalePoint(geo.offset, sx, sy);
+        if (geo.points && geo.points.length) {
+          nextGeo.points = [];
+          for (var p = 0; p < geo.points.length; p++) {
+            nextGeo.points.push(scalePoint(geo.points[p], sx, sy));
+          }
+        }
+        child.geometry = nextGeo;
+      }
+      scaleCellTreeGeometry(child, sx, sy);
+    }
+  }
+
+  function syncFloorplanModulesInTree(graph, root) {
+    if (!graph || !root || !global.DftsFloorplan || typeof global.DftsFloorplan.syncFloorplanModuleCell !== 'function') return;
+    var modules = [];
+    collectModuleCellsInTree(root, modules);
+    for (var i = 0; i < modules.length; i++) global.DftsFloorplan.syncFloorplanModuleCell(graph, modules[i]);
+  }
+
   function createFloorplanModuleCell(graph, moduleName, width, height, sourceModuleCell, opts) {
     opts = opts || {};
     try {
@@ -1456,6 +1501,8 @@
       cloned.style = mxUtils.setStyle(cloned.style || '', 'flowModule', moduleName || '');
       var srcGeo = sourceModuleCell.geometry || cloned.geometry || new mxGeometry(0, 0, width, height);
       var fittedSize = fitAspectSize(srcGeo.width, srcGeo.height, width, height);
+      var sx = Number(srcGeo.width || 0) > 0 ? (fittedSize.width / Number(srcGeo.width || 1)) : 1;
+      var sy = Number(srcGeo.height || 0) > 0 ? (fittedSize.height / Number(srcGeo.height || 1)) : 1;
       cloned.geometry = new mxGeometry(0, 0, fittedSize.width, fittedSize.height);
       if (srcGeo.points && srcGeo.points.length) {
         cloned.geometry.points = [];
@@ -1464,9 +1511,8 @@
           cloned.geometry.points.push(new mxPoint(Number(srcPt && srcPt.x || 0), Number(srcPt && srcPt.y || 0)));
         }
       }
-      if (global.DftsFloorplan && typeof global.DftsFloorplan.syncFloorplanModuleCell === 'function') {
-        global.DftsFloorplan.syncFloorplanModuleCell(graph, cloned);
-      }
+      scaleCellTreeGeometry(cloned, sx, sy);
+      syncFloorplanModulesInTree(graph, cloned);
       return cloned;
     }
 
@@ -2059,6 +2105,20 @@
     return bodyRect || null;
   }
 
+  function scaleRelativePlacementToTarget(relative, sourceModuleCell, targetRect) {
+    if (!relative) return null;
+    var sourceRect = sourceModuleCell ? Shared.rectOfCell(sourceModuleCell) : null;
+    if (!sourceRect || !targetRect) return relative;
+    var sx = Number(sourceRect.width || 0) > 0 ? (Number(targetRect.width || 0) / Number(sourceRect.width || 1)) : 1;
+    var sy = Number(sourceRect.height || 0) > 0 ? (Number(targetRect.height || 0) / Number(sourceRect.height || 1)) : 1;
+    if (!isFinite(sx) || sx <= 0) sx = 1;
+    if (!isFinite(sy) || sy <= 0) sy = 1;
+    return {
+      x: Math.round(Number(relative.x || 0) * sx),
+      y: Math.round(Number(relative.y || 0) * sy)
+    };
+  }
+
   function placeRelativeOutsideBody(bodyRect, bodyCell, side, size, relative) {
     var rect = effectiveBodyRect(bodyRect, bodyCell);
     if (!rect || !size || !relative) return null;
@@ -2105,7 +2165,8 @@
         var size = { width: metrics.width, height: metrics.height };
         var relative = relativeInterfacePlacement(sourcePlacementModule || sourceModuleCell, entry, side, size);
         if (relative) {
-          var relativeOutside = placeRelativeOutsideBody(targetRect, targetModuleCell || bodyCell, side, size, relative);
+          var mappedRelative = scaleRelativePlacementToTarget(relative, sourcePlacementModule || sourceModuleCell, targetRect);
+          var relativeOutside = placeRelativeOutsideBody(targetRect, targetModuleCell || bodyCell, side, size, mappedRelative);
           var relativeGeo = placeInterfaceGeometry(metrics, relativeOutside.x, relativeOutside.y);
           placements.push({
             marker: entry,
