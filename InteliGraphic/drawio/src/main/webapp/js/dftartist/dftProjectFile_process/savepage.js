@@ -111,7 +111,11 @@ function _isFloorplanDesign(design) {
     if (kind === 'floorplan-container') return true;
     const name = String(design.name || '').trim().toLowerCase();
     const dirRel = (Array.isArray(design._dirRel) ? design._dirRel.join('/') : '').trim().toLowerCase();
-    return name === 'floorplan' || dirRel === 'floorplan';
+    return name === 'floorplan' || name === 'top' || dirRel === 'floorplan' || dirRel === 'top';
+}
+
+function _isModuleDesign(design) {
+    return !!(design && String(design.__kind || '').toLowerCase() === 'module-design');
 }
 
 // 统计 diagram 数
@@ -241,7 +245,8 @@ window.DftSaveProjectIndividually = async function (editorUi, opts) {
         const segs = (ownerDesign && ownerDesign._dirRel && ownerDesign._dirRel.slice()) || [_sanitizeFileName(ownerDesign && ownerDesign.name || 'design')];
         const designDir = _joinPath(projectRoot, ...segs);
         const isFloorplan = _isFloorplanDesign(ownerDesign);
-        const pageDir = isFloorplan ? designDir : _joinPath(designDir, 'page');
+        const isModuleDesign = _isModuleDesign(ownerDesign);
+        const pageDir = isFloorplan ? designDir : (isModuleDesign ? _joinPath(designDir, 'arch') : _joinPath(designDir, 'page'));
         targetAbs = _joinPath(pageDir, _sanitizeFileName(curPage) + '.dftart');
     }
     await requestSync({ action: 'ensureDirs', path: _dirname(targetAbs) });

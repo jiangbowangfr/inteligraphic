@@ -110,13 +110,31 @@
     return ui && ui._activeProjectPageCtx && ui._activeProjectPageCtx.name ? String(ui._activeProjectPageCtx.name) : '';
   };
 
+  function isDataflowPageName(pageName) {
+    var normalized = trim(pageName).toLowerCase();
+    return normalized === 'dataflow' || /_dataflow$/.test(normalized);
+  }
+
   Shared.isFloorplanPageOpen = function isFloorplanPageOpen(ui) {
     var pageName = Shared.getActivePageName(ui);
     if (!pageName) return false;
     var ctx = ui && ui._activeProjectPageCtx;
-    if (ctx && ctx.designRef && ctx.designRef.__kind === 'floorplan-container') return true;
+    if (ctx && ctx.designRef) return ctx.designRef.__kind === 'floorplan-container';
     var floorplan = Shared.getFloorplanContainer(ui);
     return !!(floorplan && Array.isArray(floorplan.pages) && floorplan.pages.indexOf(pageName) >= 0);
+  };
+
+  Shared.isModuleDataflowPageOpen = function isModuleDataflowPageOpen(ui) {
+    var pageName = Shared.getActivePageName(ui);
+    if (!isDataflowPageName(pageName)) return false;
+    var ctx = ui && ui._activeProjectPageCtx;
+    return !!(ctx && ctx.designRef && String(ctx.designRef.__kind || '').toLowerCase() === 'module-design');
+  };
+
+  Shared.isFlowDesignPageOpen = function isFlowDesignPageOpen(ui) {
+    var pageName = Shared.getActivePageName(ui);
+    if (!isDataflowPageName(pageName)) return false;
+    return Shared.isFloorplanPageOpen(ui) || Shared.isModuleDataflowPageOpen(ui);
   };
 
   Shared.getActivePageReady = function getActivePageReady(ui) {
@@ -202,16 +220,35 @@
     return null;
   };
 
+  function collectLayerDescendants(graph, parent, outVertices, outEdges) {
+    if (!graph || !parent || !graph.getModel) return;
+    var model = graph.getModel();
+    var count = 0;
+    try { count = model.getChildCount(parent); } catch (e) { count = 0; }
+    for (var i = 0; i < count; i++) {
+      var child = null;
+      try { child = model.getChildAt(parent, i); } catch (e2) { child = null; }
+      if (!child) continue;
+      if (outVertices && child.vertex) outVertices.push(child);
+      if (outEdges && child.edge) outEdges.push(child);
+      collectLayerDescendants(graph, child, outVertices, outEdges);
+    }
+  }
+
   Shared.getLayerVertices = function getLayerVertices(ui, layerCell) {
     var graph = Shared.graphOf(ui);
-    if (!graph || !layerCell || !graph.getChildVertices) return [];
-    try { return graph.getChildVertices(layerCell) || []; } catch (e) { return []; }
+    if (!graph || !layerCell) return [];
+    var out = [];
+    collectLayerDescendants(graph, layerCell, out, null);
+    return out;
   };
 
   Shared.getLayerEdges = function getLayerEdges(ui, layerCell) {
     var graph = Shared.graphOf(ui);
-    if (!graph || !layerCell || !graph.getChildEdges) return [];
-    try { return graph.getChildEdges(layerCell) || []; } catch (e) { return []; }
+    if (!graph || !layerCell) return [];
+    var out = [];
+    collectLayerDescendants(graph, layerCell, null, out);
+    return out;
   };
 
   Shared.labelOf = function labelOf(cell) {
@@ -333,7 +370,19 @@
   Shared.rectOfCell = function rectOfCell(cell) {
     var geo = cell && cell.geometry;
     if (!geo) return null;
-    var x = Number(geo.x || 0), y = Number(geo.y || 0), w = Number(geo.width || 0), h = Number(geo.height || 0);
+    var x = Number(geo.x || 0);
+    var y = Number(geo.y || 0);
+    var w = Number(geo.width || 0);
+    var h = Number(geo.height || 0);
+    var parent = cell && cell.parent;
+    while (parent) {
+      var parentGeo = parent.geometry;
+      if (parentGeo) {
+        x += Number(parentGeo.x || 0);
+        y += Number(parentGeo.y || 0);
+      }
+      parent = parent.parent;
+    }
     return { x: x, y: y, width: w, height: h, left: x, top: y, right: x + w, bottom: y + h };
   };
 

@@ -50,6 +50,34 @@
         return g;
     }
 
+    function cloneUndoManagerState(ui) {
+        var realUi = normalizeUi(ui);
+        var undoManager = realUi && realUi.editor ? realUi.editor.undoManager : null;
+        if (!undoManager) return null;
+
+        return {
+            history: (undoManager.history || []).slice(),
+            indexOfNextAdd: typeof undoManager.indexOfNextAdd === 'number'
+                ? undoManager.indexOfNextAdd
+                : (undoManager.history || []).length
+        };
+    }
+
+    function restoreUndoManagerState(ui, state) {
+        var realUi = normalizeUi(ui);
+        var undoManager = realUi && realUi.editor ? realUi.editor.undoManager : null;
+        if (!undoManager || !state) return;
+
+        undoManager.history = (state.history || []).slice();
+        undoManager.indexOfNextAdd = typeof state.indexOfNextAdd === 'number'
+            ? state.indexOfNextAdd
+            : undoManager.history.length;
+
+        if (typeof mxEventObject !== 'undefined' && typeof mxEvent !== 'undefined') {
+            undoManager.fireEvent(new mxEventObject(mxEvent.CLEAR));
+        }
+    }
+
     function samePoint(a, b) {
         if (!a && !b) return true;
         if (!a || !b) return false;
@@ -444,6 +472,7 @@
 
         if (samePoint(pt, oldEnd)) {
             graph.getModel().setGeometry(tool.edge, cloneLineGeometry(tool.baseGeo));
+            restoreUndoManagerState(tool.ui, tool.undoState);
             return;
         }
 
@@ -460,6 +489,7 @@
         }
 
         graph.getModel().setGeometry(tool.edge, g);
+        restoreUndoManagerState(tool.ui, tool.undoState);
     }
 
     function orthSnap(baseGeo, rawPt, mode) {
@@ -525,8 +555,6 @@
         if (!tool) return false;
         if (!tool.edge || !tool.baseGeo || !tool.history || tool.history.length <= 1) return false;
 
-        graph.getModel().setGeometry(tool.edge, cloneLineGeometry(tool.baseGeo));
-
         tool.history.pop();
         var prev = cloneLineGeometry(tool.history[tool.history.length - 1]);
 
@@ -534,6 +562,7 @@
         try {
             graph.getModel().setGeometry(tool.edge, prev);
             tool.baseGeo = cloneLineGeometry(prev);
+            tool.previewSnap = null;
             if (graph.getSelectionCell && graph.getSelectionCell() !== tool.edge) {
                 graph.setSelectionCell(tool.edge);
             }
@@ -548,6 +577,7 @@
         if (!tool) return;
         if (tool.edge && tool.baseGeo) {
             graph.getModel().setGeometry(tool.edge, cloneLineGeometry(tool.baseGeo));
+            restoreUndoManagerState(tool.ui, tool.undoState);
         }
         tool.active = false;
         tool.mode = 'draw';
@@ -559,6 +589,7 @@
             tool.history = [];
             tool.options = null;
             tool.previewSnap = null;
+            tool.undoState = null;
         }
         if (tool.prevCursor != null) {
             graph.container.style.cursor = tool.prevCursor;
@@ -575,6 +606,7 @@
         enableFloorplanFreeConnect(realUi);
 
         var tool = {
+            ui: realUi,
             active: false,
             mode: 'draw',
             continueMode: 'tail',
@@ -585,6 +617,7 @@
             history: [],
             options: null,
             previewSnap: null,
+            undoState: null,
             ignoreNextMouseDown: false,
             branchSourceEdge: null
         };
@@ -600,10 +633,35 @@
             tool.history = tool.baseGeo ? [cloneLineGeometry(tool.baseGeo)] : [];
             tool.options = opt || null;
             tool.previewSnap = null;
+            tool.undoState = cloneUndoManagerState(realUi);
             tool.ignoreNextMouseDown = false;
             tool.branchSourceEdge = null;
             if (tool.prevCursor == null) tool.prevCursor = graph.container.style.cursor;
             graph.container.style.cursor = 'crosshair';
+        }
+
+        function hasLocalLineSession() {
+            return !!(tool.edge && tool.baseGeo && tool.history && tool.history.length > 0 &&
+                (tool.active || graph.getSelectionCell() === tool.edge));
+        }
+
+        function canUndoLocalLine() {
+            return hasLocalLineSession() && tool.history.length > 1;
+        }
+
+        function consumeKey(evt) {
+            if (typeof evt.preventDefault === 'function') evt.preventDefault();
+            if (typeof evt.stopImmediatePropagation === 'function') evt.stopImmediatePropagation();
+            else if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
+        }
+
+        function handleLocalUndo(evt) {
+            if (!canUndoLocalLine()) return false;
+            if (evt) consumeKey(evt);
+            undoLastCommittedPoint(graph, tool);
+            if (tool.edge) syncLineAnchoredBranches(graph, tool.edge);
+            restoreUndoManagerState(realUi, tool.undoState);
+            return true;
         }
 
         function beginBranchPick(edgeCell) {
@@ -642,6 +700,7 @@
                 return tool.edge;
             } finally {
                 graph.getModel().endUpdate();
+                tool.undoState = cloneUndoManagerState(realUi);
             }
         }
 
@@ -764,6 +823,7 @@
                     }
                 } finally {
                     graph.getModel().endUpdate();
+                    if (tool.edge) tool.undoState = cloneUndoManagerState(realUi);
                 }
 
                 me.consume();
@@ -791,6 +851,7 @@
                     if (tool.edge && oldGeo) syncLineAnchoredBranches(graph, tool.edge, oldGeo);
                 } finally {
                     graph.getModel().endUpdate();
+                    if (tool.edge) tool.undoState = cloneUndoManagerState(realUi);
                 }
 
                 if (!tool.options || tool.options.autoFinishOnMouseUp !== false) {
@@ -820,27 +881,20 @@
                 var isInput = tag === 'input' || tag === 'textarea' || (target && target.isContentEditable);
                 if (isInput) return;
 
-                var canUndoLocal = !!(tool.edge && tool.baseGeo && tool.history && tool.history.length > 1 && (tool.active || graph.getSelectionCell() === tool.edge));
+                var canUndoLocal = canUndoLocalLine();
+                var ownsLocalUndo = hasLocalLineSession();
                 var canDeleteLocal = !!(tool.mode === 'branchPick' || tool.active || isFloorplanLineCell(graph, graph.getSelectionCell()));
-                var isUndoKey = canUndoLocal && (
-                    evt.key === 'Backspace' ||
-                    evt.key === 'Delete' ||
-                    (((evt.ctrlKey || evt.metaKey) && !evt.altKey) && (evt.key === 'z' || evt.key === 'Z'))
-                );
+                var isUndoKey = ownsLocalUndo &&
+                    (((evt.ctrlKey || evt.metaKey) && !evt.altKey) && (evt.key === 'z' || evt.key === 'Z'));
 
                 if (isUndoKey) {
-                    if (typeof evt.preventDefault === 'function') evt.preventDefault();
-                    if (typeof evt.stopImmediatePropagation === 'function') evt.stopImmediatePropagation();
-                    else if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
-                    undoLastCommittedPoint(graph, tool);
-                    if (tool.edge) syncLineAnchoredBranches(graph, tool.edge);
+                    consumeKey(evt);
+                    if (canUndoLocal) handleLocalUndo();
                     return false;
                 }
 
                 if (canDeleteLocal && (evt.key === 'Delete' || evt.key === 'Backspace')) {
-                    if (typeof evt.preventDefault === 'function') evt.preventDefault();
-                    if (typeof evt.stopImmediatePropagation === 'function') evt.stopImmediatePropagation();
-                    else if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
+                    consumeKey(evt);
 
                     if (tool.mode === 'branchPick') {
                         clearTool(graph, tool, true);
@@ -859,45 +913,33 @@
                 }
 
                 if ((tool.active || tool.mode === 'branchPick') && (evt.key === 'Escape' || evt.key === 'Enter')) {
-                    if (typeof evt.preventDefault === 'function') evt.preventDefault();
-                    if (typeof evt.stopImmediatePropagation === 'function') evt.stopImmediatePropagation();
-                    else if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
+                    consumeKey(evt);
                     clearTool(graph, tool, true);
                     return false;
                 }
 
                 if (evt.shiftKey && !evt.ctrlKey && !evt.altKey && (evt.key === 'L' || evt.key === 'l')) {
-                    if (typeof evt.preventDefault === 'function') evt.preventDefault();
-                    if (typeof evt.stopImmediatePropagation === 'function') evt.stopImmediatePropagation();
-                    else if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
+                    consumeKey(evt);
                     realUi.startFloorplanLine();
                     return false;
                 }
                 if (evt.shiftKey && !evt.ctrlKey && !evt.altKey && (evt.key === 'H' || evt.key === 'h')) {
-                    if (typeof evt.preventDefault === 'function') evt.preventDefault();
-                    if (typeof evt.stopImmediatePropagation === 'function') evt.stopImmediatePropagation();
-                    else if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
+                    consumeKey(evt);
                     realUi.continueFloorplanLineFromHead(graph.getSelectionCell());
                     return false;
                 }
                 if (evt.shiftKey && !evt.ctrlKey && !evt.altKey && (evt.key === 'T' || evt.key === 't')) {
-                    if (typeof evt.preventDefault === 'function') evt.preventDefault();
-                    if (typeof evt.stopImmediatePropagation === 'function') evt.stopImmediatePropagation();
-                    else if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
+                    consumeKey(evt);
                     realUi.continueFloorplanLineFromTail(graph.getSelectionCell());
                     return false;
                 }
                 if (evt.shiftKey && !evt.ctrlKey && !evt.altKey && (evt.key === 'B' || evt.key === 'b')) {
-                    if (typeof evt.preventDefault === 'function') evt.preventDefault();
-                    if (typeof evt.stopImmediatePropagation === 'function') evt.stopImmediatePropagation();
-                    else if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
+                    consumeKey(evt);
                     realUi.startFloorplanBranchPicker(graph.getSelectionCell());
                     return false;
                 }
                 if (evt.shiftKey && !evt.ctrlKey && !evt.altKey && (evt.key === 'O' || evt.key === 'o')) {
-                    if (typeof evt.preventDefault === 'function') evt.preventDefault();
-                    if (typeof evt.stopImmediatePropagation === 'function') evt.stopImmediatePropagation();
-                    else if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
+                    consumeKey(evt);
                     realUi.toggleFloorplanLineOrth();
                     return false;
                 }
@@ -912,6 +954,16 @@
             realUi.actions.addAction('startSelectedFloorplanLineBranch', function () {
                 realUi.startFloorplanBranchPicker(graph.getSelectionCell());
             }, null, null, 'Shift+B');
+        }
+
+        if (!realUi._dftsFloorplanLineUndoWrapped && typeof realUi.undo === 'function') {
+            realUi._dftsFloorplanLineUndoWrapped = true;
+            var oldUndo = realUi.undo;
+            realUi.undo = function () {
+                if (handleLocalUndo()) return false;
+                if (tool.active && hasLocalLineSession()) return false;
+                return oldUndo.apply(this, arguments);
+            };
         }
 
         if (realUi.menus && !realUi._dftsFloorplanLineMenusInstalled) {

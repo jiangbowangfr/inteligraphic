@@ -77,8 +77,13 @@
     var designInputs = Shared.getActivePageReady(ui) && Designs && typeof Designs.collectDesignInputs === 'function'
       ? Designs.collectDesignInputs(ui)
       : {};
-    var generatedDesignModules = Object.keys(designInputs || {});
     var design = Shared.getCurrentDesign(ui);
+    var generatedDesignModules = Object.keys(designInputs || {});
+    if (design && String(design.__kind || '').toLowerCase() === 'module-design' && design.name) {
+      generatedDesignModules = generatedDesignModules.filter(function (name) {
+        return String(name) !== String(design.name);
+      });
+    }
     var floorplan = Shared.getFloorplanContainer(ui);
     var activePage = Shared.getActivePageName(ui);
     var out = {};
@@ -94,8 +99,8 @@
       : (analysis.errorCount ? { state: 'error', text: analysis.issues.length + ' issue(s)' } : (analysis.warningCount ? { state: 'warning', text: analysis.issues.length + ' issue(s)' } : { state: 'success', text: 'Dataflow checked' }));
     out.generateInterface = !Shared.getActivePageReady(ui)
       ? { state: 'blocked', text: 'Open page first' }
-      : !Shared.isFloorplanPageOpen(ui)
-        ? { state: 'blocked', text: 'Open floorplan page first' }
+      : !Shared.isFlowDesignPageOpen(ui)
+        ? { state: 'blocked', text: 'Open dataflow page first' }
         : (analysis.interfaces.length
             ? { state: 'success', text: analysis.interfaces.length + ' existing marker(s)' }
             : (analysis.interfacePlan.markers.length
@@ -103,8 +108,8 @@
                 : { state: 'warning', text: 'No interface plan found' }));
     out.generateDesigns = !Shared.getActivePageReady(ui)
       ? { state: 'blocked', text: 'Open page first' }
-      : !Shared.isFloorplanPageOpen(ui)
-        ? { state: 'blocked', text: 'Open floorplan page first' }
+      : !Shared.isFlowDesignPageOpen(ui)
+        ? { state: 'blocked', text: 'Open dataflow page first' }
         : generatedDesignModules.length
           ? { state: 'ready', text: generatedDesignModules.length + ' module design(s)' }
           : { state: 'blocked', text: 'Generate interfaces first' };
@@ -140,7 +145,7 @@
 
   function runDeleteInterface(ui) {
     if (!Shared.getActivePageReady(ui)) throw new Error('Open a page before deleting interfaces.');
-    if (!Shared.isFloorplanPageOpen(ui)) throw new Error('Open a floorplan page before deleting interfaces.');
+    if (!Shared.isFlowDesignPageOpen(ui)) throw new Error('Open a dataflow page before deleting interfaces.');
     var analysis = Analysis.analyzeDataflow(ui);
     var result = Markers.deleteInterfaceMarkers(ui, analysis);
     Shared.ensureState(ui).lastInterfaceReport = result;
@@ -152,7 +157,7 @@
 
   function runGenerateInterface(ui) {
     if (!Shared.getActivePageReady(ui)) throw new Error('Open a page before generating interfaces.');
-    if (!Shared.isFloorplanPageOpen(ui)) throw new Error('Open a floorplan page before generating interfaces.');
+    if (!Shared.isFlowDesignPageOpen(ui)) throw new Error('Open a dataflow page before generating interfaces.');
     var analysis = Analysis.analyzeDataflow(ui);
     if (!analysis.pass) {
       var message = 'Dataflow check has errors. Run Check first and fix all errors before generating interfaces.';
@@ -168,10 +173,8 @@
     Shared.setJobs(ui, [{ name: 'generate_interface', status: 'success', detail: result.created.length + ' marker(s)', progress: 100 }]);
     var st = Shared.ensureState(ui);
     var exportChain = Promise.resolve(null);
-    var hasExporter = false;
 
     if (global.DFTFloorplanModuleYaml && typeof global.DFTFloorplanModuleYaml.generateFromCurrentPage === 'function') {
-      hasExporter = true;
       exportChain = exportChain.then(function () {
         return global.DFTFloorplanModuleYaml.generateFromCurrentPage(ui, analysis);
       }).then(function (yamlResult) {
@@ -186,7 +189,6 @@
     }
 
     if (global.DFTFloorplanInterfacePairYaml && typeof global.DFTFloorplanInterfacePairYaml.generateFromCurrentPage === 'function') {
-      hasExporter = true;
       exportChain = exportChain.then(function () {
         return global.DFTFloorplanInterfacePairYaml.generateFromCurrentPage(ui, analysis);
       }).then(function (pairYamlResult) {
@@ -200,8 +202,10 @@
       });
     }
 
-    if (!hasExporter) {
-      return result;
+    if (Designs && typeof Designs.syncCurrentModuleArch === 'function' && Shared.isModuleDataflowPageOpen(ui)) {
+      exportChain = exportChain.then(function () {
+        return Designs.syncCurrentModuleArch(ui, analysis, { reason: 'generate-interface' });
+      });
     }
 
     return exportChain.then(function () {
@@ -214,7 +218,7 @@
 
   async function runGenerateDesigns(ui) {
     if (!Shared.getActivePageReady(ui)) throw new Error('Open a page before generating module designs.');
-    if (!Shared.isFloorplanPageOpen(ui)) throw new Error('Open a floorplan page before generating module designs.');
+    if (!Shared.isFlowDesignPageOpen(ui)) throw new Error('Open a dataflow page before generating module designs.');
     var designInputs = Designs && typeof Designs.collectDesignInputs === 'function' ? Designs.collectDesignInputs(ui) : {};
     var moduleCount = Object.keys(designInputs || {}).length;
     if (!moduleCount) {
@@ -379,7 +383,6 @@
   }
 
   function notifyFloorplanModuleYamlGenerated(ui, targetAbs) {
-    var msg = 'Floorplan module YAML generated successfully.';
     try {
       if (ui && typeof ui.showTemporaryMessage === 'function') {
         ui.showTemporaryMessage('Floorplan YAML generated', 1800);
@@ -387,16 +390,13 @@
       }
     } catch (e) {}
     try {
-      if (typeof global.mxUtils !== 'undefined' && global.mxUtils && typeof global.mxUtils.alert === 'function') {
-        global.mxUtils.alert(msg + (targetAbs ? '\n' + targetAbs : ''));
-        return;
+      if (ui && ui.editor && typeof ui.editor.setStatus === 'function') {
+        ui.editor.setStatus('Floorplan YAML generated' + (targetAbs ? ': ' + targetAbs : ''));
       }
     } catch (e2) {}
-    try { alert(msg + (targetAbs ? '\n' + targetAbs : '')); } catch (e3) {}
   }
 
   function notifyFloorplanInterfacePairYamlGenerated(ui, targetAbs) {
-    var msg = 'Floorplan interface pair YAML generated successfully.';
     try {
       if (ui && typeof ui.showTemporaryMessage === 'function') {
         ui.showTemporaryMessage('Floorplan pair YAML generated', 1800);
@@ -404,28 +404,124 @@
       }
     } catch (e) {}
     try {
-      if (typeof global.mxUtils !== 'undefined' && global.mxUtils && typeof global.mxUtils.alert === 'function') {
-        global.mxUtils.alert(msg + (targetAbs ? '\n' + targetAbs : ''));
-        return;
+      if (ui && ui.editor && typeof ui.editor.setStatus === 'function') {
+        ui.editor.setStatus('Floorplan pair YAML generated' + (targetAbs ? ': ' + targetAbs : ''));
       }
     } catch (e2) {}
-    try { alert(msg + (targetAbs ? '\n' + targetAbs : '')); } catch (e3) {}
   }
 
-  async function saveDftspecToCurrentDesign(ui, text) {
+  function isModuleDesign(designRef) {
+    return !!(designRef && String(designRef.__kind || '').toLowerCase() === 'module-design');
+  }
+
+  function getProjectStorageRoot(ui) {
+    var dbRoot = ui && ui._projectDbDirPath ? String(ui._projectDbDirPath) : '';
+    if (dbRoot) return dbRoot.replace(/\\/g, '/').replace(/\/+$/, '');
+    var root = ui && (ui._projectRootPath || ui._projectYamlDir) ? String(ui._projectRootPath || ui._projectYamlDir) : '';
+    root = root.replace(/\\/g, '/').replace(/\/+$/, '');
+    return root ? joinPath(root, 'db') : '';
+  }
+
+  function getDesignBaseDir(ui, designRef, ctx) {
+    if (designRef && designRef._absDir) return String(designRef._absDir).replace(/\\/g, '/').replace(/\/+$/, '');
+    var root = getProjectStorageRoot(ui);
+    var segs = ctx && Array.isArray(ctx.segs) ? ctx.segs.slice() : (designRef && Array.isArray(designRef._dirRel) ? designRef._dirRel.slice() : []);
+    if (!root || !segs.length) return '';
+    return joinPath.apply(null, [root].concat(segs));
+  }
+
+  function joinTextSegments(segments) {
+    var out = '';
+    for (var i = 0; i < segments.length; i++) {
+      var segment = segments[i];
+      if (!segment) continue;
+      out += String(segment);
+      if (out && !/\n$/.test(out)) out += '\n';
+    }
+    return out;
+  }
+
+  function buildSourceCommand(fileName) {
+    var fileExpr = '[file join [file dirname [info script]] ' + JSON.stringify(String(fileName || '')) + ']';
+    return 'if {[file exists ' + fileExpr + ']} {\n  source ' + fileExpr + '\n}\n';
+  }
+
+  function buildSplitDftspecFiles(pageName, fullText, partMap) {
+    var baseName = sanitizeFileName(pageName || 'page-1');
+    var mainFileName = baseName + '.dofile';
+    if (!partMap || typeof partMap !== 'object') {
+      return { mainFileName: mainFileName, mainText: String(fullText || ''), sidecars: [] };
+    }
+
+    var header = String(partMap.header || '#dftspec DFT_SPEC\n');
+    var beforeSsn = [
+      { key: 'bisr', suffix: 'bisr' },
+      { key: 'tap', suffix: 'tap' },
+      { key: 'ist', suffix: 'ist' },
+      { key: 'lbist', suffix: 'lbist' },
+      { key: 'occ', suffix: 'occ' },
+      { key: 'scan', suffix: 'scan' }
+    ];
+    var afterSsn = [
+      { key: 'edt', suffix: 'edt' }
+    ];
+    var sidecars = [];
+    var beforeSource = [];
+    var afterSource = [];
+
+    function collect(group, target) {
+      for (var i = 0; i < group.length; i++) {
+        var item = group[i];
+        var body = partMap[item.key];
+        if (!body || !String(body).trim()) continue;
+        var fileName = baseName + '.' + item.suffix + '.dofile';
+        sidecars.push({
+          key: item.key,
+          fileName: fileName,
+          text: joinTextSegments([header, body])
+        });
+        target.push(buildSourceCommand(fileName));
+      }
+    }
+
+    collect(beforeSsn, beforeSource);
+    collect(afterSsn, afterSource);
+
+    var mainText = joinTextSegments([
+      header,
+      beforeSource.join(''),
+      partMap.ssn || '',
+      afterSource.join('')
+    ]);
+
+    return {
+      mainFileName: mainFileName,
+      mainText: mainText,
+      sidecars: sidecars
+    };
+  }
+
+  async function saveDftspecToCurrentDesign(ui, text, partMap) {
     if (typeof global.requestSync !== 'function') throw new Error('requestSync unavailable');
 
     var pageName = Shared.getActivePageName(ui) || 'page-1';
     var fileName = sanitizeFileName(pageName) + '.dofile';
     var ctx = ui && ui._activeProjectPageCtx ? ui._activeProjectPageCtx : null;
     var designRef = ctx && ctx.designRef ? ctx.designRef : null;
+    var designBase = getDesignBaseDir(ui, designRef, ctx);
     var pageAbs = '';
+    var targetAbs = '';
 
-    if (global.DFTPageSessionManager && typeof global.DFTPageSessionManager.resolvePageFileAbs === 'function' && designRef) {
+    if (isModuleDesign(designRef)) {
+      if (!designBase) throw new Error('Active design path is unavailable.');
+      targetAbs = joinPath(designBase, 'spec', fileName);
+    }
+
+    if (!targetAbs && global.DFTPageSessionManager && typeof global.DFTPageSessionManager.resolvePageFileAbs === 'function' && designRef) {
       pageAbs = await global.DFTPageSessionManager.resolvePageFileAbs(ui, designRef, pageName);
-    } else if (ctx && ctx.abs) {
+    } else if (!targetAbs && ctx && ctx.abs) {
       pageAbs = String(ctx.abs);
-    } else {
+    } else if (!targetAbs) {
       var root = (ui && (ui._projectRootPath || ui._projectYamlDir)) || '';
       var segs = (ctx && Array.isArray(ctx.segs) ? ctx.segs.slice() : []);
       if (!root || !segs.length) throw new Error('Active design path is unavailable.');
@@ -434,10 +530,18 @@
       pageAbs = joinPath(base, isFloorplan ? fileName : joinPath('page', fileName));
     }
 
-    var targetAbs = joinPath(dirnamePath(pageAbs), fileName);
+    if (!targetAbs) targetAbs = joinPath(dirnamePath(pageAbs), fileName);
+    var fileSet = buildSplitDftspecFiles(pageName, text, partMap);
     await global.requestSync({ action: 'ensureDirs', path: dirnamePath(targetAbs) });
-    await global.requestSync({ action: 'writeFile', path: targetAbs, data: String(text || ''), enc: 'utf-8' });
-    return targetAbs;
+    await global.requestSync({ action: 'writeFile', path: targetAbs, data: String(fileSet.mainText || ''), enc: 'utf-8' });
+    var written = [targetAbs];
+    for (var i = 0; i < fileSet.sidecars.length; i++) {
+      var sidecar = fileSet.sidecars[i];
+      var sidecarAbs = joinPath(dirnamePath(targetAbs), sidecar.fileName);
+      await global.requestSync({ action: 'writeFile', path: sidecarAbs, data: String(sidecar.text || ''), enc: 'utf-8' });
+      written.push(sidecarAbs);
+    }
+    return { main: targetAbs, files: written, sidecarCount: Math.max(0, written.length - 1) };
   }
 
   async function buildDftspecUsingConverters(ui) {
@@ -453,11 +557,17 @@
     if (yaml && typeof yaml.then === 'function') yaml = await yaml;
     if (!yaml || typeof yaml !== 'string' || yaml.trim() === '') throw new Error('YAML 数据为空或格式错误');
 
+    var parts = null;
+    if (typeof global.convertYamlToDftspecParts === 'function') {
+      parts = global.convertYamlToDftspecParts(yaml);
+      if (parts && typeof parts.then === 'function') parts = await parts;
+    }
+
     var dftspec = global.convertYamlToDftspec(yaml);
     if (dftspec && typeof dftspec.then === 'function') dftspec = await dftspec;
     if (!dftspec || typeof dftspec !== 'string' || dftspec.trim() === '') throw new Error('DFTSPEC 数据为空或格式错误');
 
-    return { yaml: yaml, dftspec: dftspec };
+    return { yaml: yaml, dftspec: dftspec, parts: parts };
   }
 
   async function runGenerateDftspecViaConverters(ui, saveAfterBuild, showPreview) {
@@ -476,10 +586,14 @@
   async function runGenerateDftspec(ui) {
     if (!Shared.isProjectReady(ui)) throw new Error('Create or open a project first.');
     if (!Shared.getActivePageReady(ui)) throw new Error('Open a page before generating dftspec.');
-    var text = await runGenerateDftspecViaConverters(ui, true, false);
-    var target = await saveDftspecToCurrentDesign(ui, text);
-    Shared.logDock(ui, 'Saved DFTSPEC: ' + target, 'success');
-    notifyGenerated(ui, target);
+    var built = await buildDftspecUsingConverters(ui);
+    var text = built.dftspec;
+    Shared.ensureState(ui).lastDftspec = text;
+    var target = await saveDftspecToCurrentDesign(ui, text, built.parts);
+    Shared.logDock(ui, 'Saved DFTSPEC: ' + target.main + (target.sidecarCount ? ' (+' + target.sidecarCount + ' split files)' : ''), 'success');
+    Shared.setReports(ui, [{ title: 'Generate DFTSPEC', items: { bytes: text.length, lines: text.split('\n').length, status: 'generated', sidecars: target.sidecarCount } }]);
+    Shared.setJobs(ui, [{ name: 'generate_dftspec', status: 'success', detail: target.sidecarCount ? ('Saved with ' + target.sidecarCount + ' split files') : 'Saved', progress: 100 }]);
+    notifyGenerated(ui, target.main);
     return true;
   }
 

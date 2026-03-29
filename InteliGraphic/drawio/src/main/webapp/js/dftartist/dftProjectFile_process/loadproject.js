@@ -14,27 +14,47 @@ function _joinPath() {
     return parts.join('/').replace(/\/+/g, '/');
 }
 function _sanitizeFileName(s) { return String(s || '').replace(/[\\/:*?"<>|]+/g, '_').trim() || 'design'; }
+const _ROOT_FLOORPLAN_DIR = 'top';
 
 // 从 env_file 推导出目录段；没有就用名字
 function _hydrateDesignDirsFromYaml(ui) {
     const model = ui.projectModel || {};
     const designs = model.designs || [];
 
+    function normalizeKind(d, segs) {
+        const kind = String((d && (d.__kind || d.kind)) || '').toLowerCase();
+        const dirRel = Array.isArray(segs) ? segs.join('/').toLowerCase() : '';
+        if (kind) {
+            d.__kind = kind;
+            return;
+        }
+        if (String(d && d.name || '').trim().toLowerCase() === 'ipconfig' || dirRel === 'ipconfig' || /(^|\/)ipconfig$/.test(dirRel)) {
+            d.__kind = 'ipconfig-container';
+            return;
+        }
+        if (String(d && d.name || '').trim().toLowerCase() === 'floorplan' || String(d && d.name || '').trim().toLowerCase() === _ROOT_FLOORPLAN_DIR || dirRel === 'floorplan' || dirRel === _ROOT_FLOORPLAN_DIR || /(^|\/)(floorplan|top)$/.test(dirRel)) {
+            d.__kind = 'floorplan-container';
+        }
+    }
+
     function walk(d, parentSegs) {
         let segs;
+        const explicitKind = String((d && (d.__kind || d.kind)) || '').toLowerCase();
         if (d && typeof d.env_file === 'string' && d.env_file.trim()) {
             // env_file 形如 "design/env.json" 或 "core/sub_core/env.json"
             const p = d.env_file.replace(/\\/g, '/');
             segs = p.split('/'); segs.pop(); // 去掉文件名
         } else {
             segs = (parentSegs || []).concat([_sanitizeFileName(d.name || 'design')]);
-            // 顺便把 env_file 填好，保持模型一致性
-            d.env_file = _joinPath(...segs, 'env.json');
+            if (explicitKind === 'module-design') d.env_file = '';
+            else d.env_file = _joinPath(...segs, 'env.json');
         }
         d._dirRel = segs;
 
         d.pages = Array.isArray(d.pages) ? d.pages : [];
         d.sub_designs = Array.isArray(d.sub_designs) ? d.sub_designs : [];
+        normalizeKind(d, segs);
+        if (String(d.__kind || '').toLowerCase() === 'module-design') d.env_file = '';
 
         d.sub_designs.forEach(child => walk(child, segs));
     }
@@ -135,6 +155,11 @@ function _parseProjectYaml(text) {
                 if (indent2 <= indent) break;
                 if (indent2 !== indent + 2) break;
 
+                if (s2.startsWith('kind:')) {
+                    design.__kind = _unq(s2.slice(5).trim());
+                    i++;
+                    continue;
+                }
                 if (s2.startsWith('env_file:')) {
                     design.env_file = _unq(s2.slice(9).trim());
                     i++;
@@ -274,7 +299,25 @@ function handleDftartProject(path, data) {
                 ui._projectRootPath = model.path;
                 ui._projectYamlFilePath = path;
                 ui._projectYamlDir = await requestSync({ action: 'dirname', path: path });
+                ui._projectDbDirPath = _joinPath(model.path, 'db');
                 _hydrateDesignDirsFromYaml(ui);  // ← 初始化每个 design 的目录段
+
+                if (window.DFTProjectExplorerPhase2 && typeof window.DFTProjectExplorerPhase2.loadExternalDesignTree === 'function') {
+                    const dbRoot = ui._projectDbDirPath;
+                    const topLevel = Array.isArray(model.designs) ? model.designs.slice() : [];
+                    const rebuilt = [];
+                    for (const item of topLevel) {
+                        const lower = String(item && item.name || '').trim().toLowerCase();
+                        if (lower === 'floorplan' || lower === _ROOT_FLOORPLAN_DIR || lower === 'ipconfig') {
+                            rebuilt.push(item);
+                            continue;
+                        }
+                        const absDir = _joinPath(dbRoot, _sanitizeFileName(item && item.name || 'design'));
+                        const loaded = await window.DFTProjectExplorerPhase2.loadExternalDesignTree(ui, absDir, { rootDir: dbRoot });
+                        rebuilt.push(loaded);
+                    }
+                    model.designs = rebuilt;
+                }
 
                 // 刷新 Project Explorer（Phase 2）/ 兼容旧面板
                 _refreshProjectExplorerUi(ui, 'loadProject');

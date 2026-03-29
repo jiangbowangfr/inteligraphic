@@ -1,11 +1,9 @@
 // src/shared/dfts/ui/SchemaForm.tsx
 import React, { useEffect, useMemo } from 'react';
 import {
-  Col,
   Form,
   Input,
   InputNumber,
-  Row,
   Select,
   Space,
   Switch,
@@ -33,12 +31,6 @@ function groupFields(fields: FieldDef[]): SectionGroup[] {
   return Array.from(map.entries()).map(([name, fs]) => ({ name, fields: fs }));
 }
 
-function fieldSpan(f: FieldDef) {
-  if (f.colSpan) return f.colSpan;
-  if ((f.kind ?? 'string') === 'textarea') return 24;
-  return 12;
-}
-
 function renderLabel(f: FieldDef) {
   return (
     <Space size={6} align="center">
@@ -52,32 +44,13 @@ function renderLabel(f: FieldDef) {
   );
 }
 
-function hasMeaningfulDefaultValue(value: any) {
-  return value !== undefined && value !== null && value !== '';
-}
-
-function formatDefaultValue(value: any) {
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
-}
-
 function renderFieldExtra(f: FieldDef) {
   const help = f.help?.trim() || '';
-  const showDefault = hasMeaningfulDefaultValue(f.defaultValue) && !/default\s*:/i.test(help);
-  const defaultText = showDefault ? `default: ${formatDefaultValue(f.defaultValue)}` : '';
-
-  if (!help && !defaultText) return undefined;
+  if (!help) return undefined;
 
   return (
     <span style={{ color: '#64748B', fontSize: 12, lineHeight: 1.45 }}>
-      {help ? <span>{help}</span> : null}
-      {help && defaultText ? <br /> : null}
-      {defaultText ? <span>{defaultText}</span> : null}
+      <span>{help}</span>
     </span>
   );
 }
@@ -173,7 +146,7 @@ export default function SchemaForm(props: {
           <div
             key={section.name}
             style={{
-              paddingBottom: 18,
+              paddingBottom: 12,
               marginBottom: index === sections.length - 1 ? 0 : 22,
               borderBottom: index === sections.length - 1 ? 'none' : '1px solid #EEF2F7',
             }}
@@ -191,13 +164,67 @@ export default function SchemaForm(props: {
               </Text>
             </div>
 
-            <Row gutter={[16, 0]}>
-              {fields.map((f) => (
-                <Col key={f.attr} span={fieldSpan(f)}>
-                  <Form.Item
-                    name={f.attr}
-                    label={
-                      <Space size={6} align="center">
+            <div
+              style={{
+                border: '1px solid #E2E8F0',
+                borderRadius: 12,
+                overflow: 'hidden',
+                background: '#FFFFFF',
+              }}
+            >
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'minmax(180px, 240px) minmax(0, 1fr)',
+                  background: '#F8FAFC',
+                  borderBottom: '1px solid #E2E8F0',
+                }}
+              >
+                <div
+                  style={{
+                    padding: '8px 12px',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: '#475569',
+                    borderRight: '1px solid #E2E8F0',
+                  }}
+                >
+                  名称
+                </div>
+                <div
+                  style={{
+                    padding: '8px 12px',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: '#475569',
+                  }}
+                >
+                  值
+                </div>
+              </div>
+
+              {fields.map((f, fieldIndex) => {
+                const extra = renderFieldExtra(f);
+
+                return (
+                  <div
+                    key={f.attr}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'minmax(180px, 240px) minmax(0, 1fr)',
+                      borderBottom: fieldIndex === fields.length - 1 ? 'none' : '1px solid #EEF2F7',
+                    }}
+                  >
+                    <div
+                      style={{
+                        padding: '10px 12px',
+                        borderRight: '1px solid #EEF2F7',
+                        background: '#FCFDFE',
+                        display: 'flex',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <Space size={6} align="center" wrap>
                         {renderLabel(f)}
                         {dirtyAttrs[f.attr] ? (
                           <Tag
@@ -208,16 +235,23 @@ export default function SchemaForm(props: {
                           </Tag>
                         ) : null}
                       </Space>
-                    }
-                    valuePropName={(f.kind ?? 'string') === 'switch' ? 'checked' : 'value'}
-                    rules={f.required ? [{ required: true, message: '必填项' }] : undefined}
-                    extra={renderFieldExtra(f)}
-                  >
-                    {renderField(f)}
-                  </Form.Item>
-                </Col>
-              ))}
-            </Row>
+                    </div>
+
+                    <div style={{ padding: '6px 12px' }}>
+                      <Form.Item
+                        name={f.attr}
+                        style={{ marginBottom: 0 }}
+                        valuePropName={(f.kind ?? 'string') === 'switch' ? 'checked' : 'value'}
+                        rules={f.required ? [{ required: true, message: '必填项' }] : undefined}
+                      >
+                        {renderField(f)}
+                      </Form.Item>
+                      {extra ? <div style={{ marginTop: 4 }}>{extra}</div> : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         );
       })}

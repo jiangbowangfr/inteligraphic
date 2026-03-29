@@ -134,13 +134,21 @@
     }
     return text(name).replace(/[\\/:*?"<>|]+/g, '_').trim() || 'page';
   }
+  var ROOT_FLOORPLAN_DIR = 'top';
 
   function isFloorplanRef(designRef) {
     if (!designRef) return false;
     if (designRef._isFloorplan) return true;
-    if (text(designRef.name).trim().toLowerCase() === 'floorplan') return true;
+    if (text(designRef.name).trim().toLowerCase() === 'floorplan' || text(designRef.name).trim().toLowerCase() === ROOT_FLOORPLAN_DIR) return true;
     var segs = Array.isArray(designRef._dirRel) ? designRef._dirRel.join('/').toLowerCase() : '';
-    return segs === 'floorplan' || /(^|\/)floorplan$/.test(segs);
+    return segs === 'floorplan' || segs === ROOT_FLOORPLAN_DIR || /(^|\/)(floorplan|top)$/.test(segs);
+  }
+
+  function shouldShowLayersForPage(ui, designRef) {
+    if (isFloorplanRef(designRef)) return true;
+    var ctx = getActiveContext(ui);
+    var pageName = text(ctx && ctx.name || '').trim().toLowerCase();
+    return pageName === 'arch' || pageName === 'dataflow' || /_arch$/.test(pageName) || /_dataflow$/.test(pageName);
   }
 
   function activateDrawingWorkspace(ui) {
@@ -182,9 +190,20 @@
     } catch (e) {}
   }
 
+  function ensureFlowNavInteractionHooks(ui) {
+    try {
+      var mod = global.DFTFlowNavMod;
+      var designs = mod && mod.Designs;
+      if (designs && typeof designs.ensureArchInteractionHooks === 'function') {
+        return designs.ensureArchInteractionHooks(ui);
+      }
+    } catch (e) {}
+    return false;
+  }
+
   function syncLayersDialogForPage(ui, designRef) {
     if (!ui) return;
-    if (!isFloorplanRef(designRef)) {
+    if (!shouldShowLayersForPage(ui, designRef)) {
       try {
         if (ui.actions && ui.actions.layersWindow && ui.actions.layersWindow.window && ui.actions.layersWindow.window.isVisible()) {
           ui.actions.layersWindow.window.setVisible(false);
@@ -754,7 +773,7 @@
     if (!root) throw new Error('Please save project first.');
 
     if (isFloorplanRef(designRef)) {
-      var floorplanDir = joinPath(root, 'floorplan');
+      var floorplanDir = joinPath(root, ROOT_FLOORPLAN_DIR);
       try { await request({ action: 'ensureDirs', path: floorplanDir }); } catch (e0) {}
       return joinPath(floorplanDir, sanitizeName(pageName) + '.dftart');
     }
@@ -874,6 +893,7 @@
 
     var abs = await resolvePageFileAbs(ui, designRef, pageName);
     var page = findPageByAbs(ui, abs);
+    var matchedByAbs = !!page;
 
     if (!page) {
       page = ensurePageTab(ui, pageName);
@@ -882,7 +902,8 @@
     }
 
     if (page) {
-      markPageSession(page, abs, page.__dftLoadedOnce === true);
+      var canReuseLoadedSession = matchedByAbs && page.__dftLoadedOnce === true;
+      markPageSession(page, abs, canReuseLoadedSession);
     }
 
     emitLog('info', 'Opening page.', {
@@ -894,7 +915,7 @@
     try { ui._activeEnvCtx = null; } catch (envErr) {}
     setActiveContext(ui, designRef, pageName, abs || null);
 
-    if (page && page.__dftLoadedOnce) {
+    if (page && matchedByAbs && page.__dftLoadedOnce) {
       emitLog('info', 'Reusing in-memory page session.', {
         pageName: pageName,
         absPath: abs
@@ -913,6 +934,7 @@
       activateDrawingWorkspace(ui);
       restoreViewState(ui, makeViewStateKey(designRef, pageName, abs || ''));
       syncLayersDialogForPage(ui, designRef);
+      ensureFlowNavInteractionHooks(ui);
 
       return {
         pageName: pageName,
@@ -972,6 +994,7 @@
     activateDrawingWorkspace(ui);
     restoreViewState(ui, makeViewStateKey(designRef, pageName, abs || ''));
     syncLayersDialogForPage(ui, designRef);
+    ensureFlowNavInteractionHooks(ui);
     resetUndoHistoryForCurrentPage(ui, exists ? 'open-page-loaded' : 'open-page-blank');
     
     return {
@@ -1007,8 +1030,8 @@
     }
 
     walk(model && model.designs);
-    if (!designRef && ctx.segs && ctx.segs.join('/') === 'floorplan') {
-      designRef = { name: 'floorplan', _dirRel: ['floorplan'], _isFloorplan: true };
+    if (!designRef && ctx.segs && (ctx.segs.join('/') === 'floorplan' || ctx.segs.join('/') === ROOT_FLOORPLAN_DIR)) {
+      designRef = { name: ROOT_FLOORPLAN_DIR, _dirRel: [ROOT_FLOORPLAN_DIR], _isFloorplan: true };
     }
     if (!designRef) throw new Error('Active design not found in project model');
 
