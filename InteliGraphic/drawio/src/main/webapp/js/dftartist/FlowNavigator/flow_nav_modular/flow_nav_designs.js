@@ -551,6 +551,100 @@
     return false;
   }
 
+  function mutateGeometryFields(targetGeo, sourceGeo) {
+    if (!targetGeo || !sourceGeo) return;
+    targetGeo.x = Number(sourceGeo.x || 0);
+    targetGeo.y = Number(sourceGeo.y || 0);
+    targetGeo.width = Number(sourceGeo.width || 0);
+    targetGeo.height = Number(sourceGeo.height || 0);
+  }
+
+  function captureCellGeometrySnapshot(model, cell) {
+    if (!model || !cell) return null;
+    var geo = model.getGeometry(cell);
+    if (!geo) return null;
+    var snapshot = {
+      cell: cell,
+      geo: cloneRectLike(geo),
+      children: []
+    };
+    var childCount = model.getChildCount(cell);
+    for (var i = 0; i < childCount; i++) {
+      var child = model.getChildAt(cell, i);
+      var childGeo = model.getGeometry(child);
+      if (!child || !childGeo) continue;
+      snapshot.children.push({
+        cell: child,
+        geo: cloneRectLike(childGeo)
+      });
+    }
+    return snapshot;
+  }
+
+  function applyCellGeometrySnapshot(snapshot) {
+    if (!snapshot || !snapshot.cell || !snapshot.geo) return;
+    var rootGeo = snapshot.cell.geometry || null;
+    if (rootGeo) mutateGeometryFields(rootGeo, snapshot.geo);
+    var children = Array.isArray(snapshot.children) ? snapshot.children : [];
+    for (var i = 0; i < children.length; i++) {
+      var childSnapshot = children[i];
+      if (!childSnapshot || !childSnapshot.cell || !childSnapshot.geo) continue;
+      var childGeo = childSnapshot.cell.geometry || null;
+      if (!childGeo) continue;
+      mutateGeometryFields(childGeo, childSnapshot.geo);
+    }
+  }
+
+  function applyScaledCellGeometrySnapshot(snapshot, fromRect, toRect) {
+    if (!snapshot || !snapshot.cell || !snapshot.geo || !fromRect || !toRect) return;
+    var rootGeo = snapshot.cell.geometry || null;
+    if (!rootGeo) return;
+    var nextRootGeo = transformGeometryBetweenRects(snapshot.geo, fromRect, toRect);
+    mutateGeometryFields(rootGeo, nextRootGeo);
+
+    var sx = Number(fromRect.width || 0) ? (Number(toRect.width || 0) / Number(fromRect.width || 1)) : 1;
+    var sy = Number(fromRect.height || 0) ? (Number(toRect.height || 0) / Number(fromRect.height || 1)) : 1;
+    sx = isFinite(Number(sx)) && Number(sx) > 0 ? Number(sx) : 1;
+    sy = isFinite(Number(sy)) && Number(sy) > 0 ? Number(sy) : 1;
+
+    var children = Array.isArray(snapshot.children) ? snapshot.children : [];
+    for (var i = 0; i < children.length; i++) {
+      var childSnapshot = children[i];
+      if (!childSnapshot || !childSnapshot.cell || !childSnapshot.geo) continue;
+      var childGeo = childSnapshot.cell.geometry || null;
+      if (!childGeo) continue;
+      childGeo.x = Math.round(Number(childSnapshot.geo.x || 0) * sx);
+      childGeo.y = Math.round(Number(childSnapshot.geo.y || 0) * sy);
+      childGeo.width = Math.max(1, Math.round(Number(childSnapshot.geo.width || 0) * sx));
+      childGeo.height = Math.max(1, Math.round(Number(childSnapshot.geo.height || 0) * sy));
+    }
+  }
+
+  function invalidateGeometryPreview(graph, cells) {
+    if (!graph || !cells || !cells.length || !graph.view || typeof graph.view.invalidate !== 'function') return;
+    for (var i = 0; i < cells.length; i++) {
+      if (!cells[i]) continue;
+      try {
+        graph.view.invalidate(cells[i], true, true);
+      } catch (e0) {
+        try {
+          graph.view.invalidate(cells[i]);
+        } catch (e1) {}
+      }
+    }
+    try {
+      graph.view.validate();
+    } catch (e2) {}
+  }
+
+  function rectEquals(a, b) {
+    if (!a || !b) return false;
+    return Number(a.x || 0) === Number(b.x || 0) &&
+      Number(a.y || 0) === Number(b.y || 0) &&
+      Number(a.width || 0) === Number(b.width || 0) &&
+      Number(a.height || 0) === Number(b.height || 0);
+  }
+
   function cloneRectLike(geo) {
     return geo && geo.clone ? geo.clone() : new mxGeometry(geo.x, geo.y, geo.width, geo.height);
   }
@@ -708,6 +802,59 @@
     };
   }
 
+  function captureLinkedModuleResizePreview(graph, shell) {
+    if (!graph || !shell || !graph.getModel) return null;
+    var model = graph.getModel();
+    var shellGeo = model.getGeometry(shell);
+    var moduleName = moduleNameForCell(shell);
+    if (!shellGeo || !moduleName) return null;
+    var targets = collectModuleInterfacesForTransform(graph, moduleName, [shell]);
+    if (!targets.length) return null;
+    var snapshots = [];
+    for (var i = 0; i < targets.length; i++) {
+      var snapshot = captureCellGeometrySnapshot(model, targets[i]);
+      if (snapshot) snapshots.push(snapshot);
+    }
+    if (!snapshots.length) return null;
+    return {
+      graph: graph,
+      shell: shell,
+      moduleName: moduleName,
+      fromRect: toAbsoluteRect(model, shell, shellGeo),
+      targets: snapshots,
+      active: false,
+      lastRect: null
+    };
+  }
+
+  function applyLinkedModuleResizePreview(session, toRect) {
+    if (!session || !session.graph || !session.targets || !session.targets.length || !session.fromRect || !toRect) return;
+    if (session.lastRect && rectEquals(session.lastRect, toRect)) return;
+    var changedCells = [];
+    for (var i = 0; i < session.targets.length; i++) {
+      var snapshot = session.targets[i];
+      applyScaledCellGeometrySnapshot(snapshot, session.fromRect, toRect);
+      if (snapshot && snapshot.cell) changedCells.push(snapshot.cell);
+    }
+    invalidateGeometryPreview(session.graph, changedCells);
+    session.active = true;
+    session.lastRect = cloneRectLike(toRect);
+  }
+
+  function restoreLinkedModuleResizePreview(session) {
+    if (!session || !session.graph || !session.targets || !session.targets.length) return;
+    if (!session.active) return;
+    var changedCells = [];
+    for (var i = 0; i < session.targets.length; i++) {
+      var snapshot = session.targets[i];
+      applyCellGeometrySnapshot(snapshot);
+      if (snapshot && snapshot.cell) changedCells.push(snapshot.cell);
+    }
+    invalidateGeometryPreview(session.graph, changedCells);
+    session.active = false;
+    session.lastRect = null;
+  }
+
   function installLinkedModuleMovePreviewBehavior(graph) {
     var handler = graph && graph.graphHandler ? graph.graphHandler : null;
     if (!handler || handler.__flowLinkedModuleMovePreviewInstalled) return;
@@ -727,10 +874,74 @@
     };
   }
 
+  function installLinkedModuleResizePreviewBehavior() {
+    if (!global.mxVertexHandler || global.__flowLinkedModuleResizePreviewInstalled) return;
+    global.__flowLinkedModuleResizePreviewInstalled = true;
+
+    var proto = global.mxVertexHandler.prototype;
+    var originalStart = proto.start;
+    var originalResizeVertex = proto.resizeVertex;
+    var originalMouseUp = proto.mouseUp;
+    var originalReset = proto.reset;
+    var originalDestroy = proto.destroy;
+
+    proto.start = function (x, y, index) {
+      var result = originalStart.apply(this, arguments);
+      this.__flowLinkedResizePreview = null;
+      var cell = this.state && this.state.cell ? this.state.cell : null;
+      var isResizeHandle = typeof index === 'number' && index >= 0;
+      if (cell && isResizeHandle && (isFlowModuleShell(cell) || isGeneratedModuleBody(cell))) {
+        this.__flowLinkedResizePreview = captureLinkedModuleResizePreview(this.graph, cell);
+        emitDesignLog('linked-resize-preview-start', {
+          shell: resizeCellDebugMeta(cell, this.graph && this.graph.getModel ? this.graph.getModel().getGeometry(cell) : null),
+          targetCount: this.__flowLinkedResizePreview && this.__flowLinkedResizePreview.targets ? this.__flowLinkedResizePreview.targets.length : 0
+        });
+      }
+      return result;
+    };
+
+    proto.resizeVertex = function (evt) {
+      var result = originalResizeVertex.apply(this, arguments);
+      var session = this.__flowLinkedResizePreview;
+      if (!session || !this.graph || !this.graph.getModel || !this.state || !this.state.cell || !this.unscaledBounds) return result;
+      var previewRect = toAbsoluteRect(this.graph.getModel(), this.state.cell, this.unscaledBounds);
+      applyLinkedModuleResizePreview(session, previewRect);
+      return result;
+    };
+
+    proto.mouseUp = function (sender, evt) {
+      var session = this.__flowLinkedResizePreview;
+      if (session) {
+        restoreLinkedModuleResizePreview(session);
+        this.__flowLinkedResizePreview = null;
+      }
+      return originalMouseUp.apply(this, arguments);
+    };
+
+    proto.reset = function () {
+      var session = this.__flowLinkedResizePreview;
+      if (session) {
+        restoreLinkedModuleResizePreview(session);
+        this.__flowLinkedResizePreview = null;
+      }
+      return originalReset.apply(this, arguments);
+    };
+
+    proto.destroy = function () {
+      var session = this.__flowLinkedResizePreview;
+      if (session) {
+        restoreLinkedModuleResizePreview(session);
+        this.__flowLinkedResizePreview = null;
+      }
+      return originalDestroy.apply(this, arguments);
+    };
+  }
+
   function installShellResizeBehavior(graph) {
     if (!graph || graph.__flowModuleShellResizeInstalled) return;
     graph.__flowModuleShellResizeInstalled = true;
     installLinkedModuleMovePreviewBehavior(graph);
+    installLinkedModuleResizePreviewBehavior();
     var originalCellsResized = graph.cellsResized;
     var originalCellsMoved = graph.cellsMoved;
     var originalResizeCell = graph.resizeCell;
