@@ -183,12 +183,12 @@
 
     function buildModuleRecord(graph, cell) {
         return {
-            dftsFloorplan_moduleName: getField(graph, cell, 'dftsFloorplan_moduleName'),
-            dftsFloorplan_instanceName: getField(graph, cell, 'dftsFloorplan_instanceName'),
-            dftsFloorplan_designLevel: getFieldWithDefault(graph, cell, 'dftsFloorplan_designLevel', 'physical_block'),
-            dftsFloorplan_logicOnly: getFieldWithDefault(graph, cell, 'dftsFloorplan_logicOnly', 'off'),
-            dftsFloorplan_designFilelist: getField(graph, cell, 'dftsFloorplan_designFilelist'),
-            dftsFloorplan_designType: getFieldWithDefault(graph, cell, 'dftsFloorplan_designType', 'hierarchical')
+            moduleName: getField(graph, cell, 'dftsFloorplan_moduleName'),
+            instanceName: getField(graph, cell, 'dftsFloorplan_instanceName'),
+            designLevel: getFieldWithDefault(graph, cell, 'dftsFloorplan_designLevel', 'physical_block'),
+            logicOnly: getFieldWithDefault(graph, cell, 'dftsFloorplan_logicOnly', 'off'),
+            designFilelist: getField(graph, cell, 'dftsFloorplan_designFilelist'),
+            designType: getFieldWithDefault(graph, cell, 'dftsFloorplan_designType', 'hierarchical')
         };
     }
 
@@ -211,8 +211,8 @@
 
         var payload = {
             floorplan: {
-                page: pageName,
-                modules: modules
+                // page: pageName,
+                designer_manager: modules
             }
         };
 
