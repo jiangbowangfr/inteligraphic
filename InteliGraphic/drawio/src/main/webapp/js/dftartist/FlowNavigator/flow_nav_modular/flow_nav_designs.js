@@ -2306,7 +2306,8 @@
       Array.prototype.push.apply(shellChildren, addedInterfaces);
       if (includeInterfaces && body && shellChildren.length > 1) lockChildrenStyles(graph, shellChildren);
       var shell = body ? buildShellGroup(graph, moduleName, shellChildren) : null;
-      if (shell) fitShellToPage(graph, shell, metrics);
+      var fitTarget = shell || body || null;
+      if (fitTarget) fitShellToPage(graph, fitTarget, metrics);
       emitDesignLog('shell-built', {
         moduleName: moduleName,
         pageName: ui && ui._activeProjectPageCtx ? ui._activeProjectPageCtx.name || '' : '',
@@ -2449,20 +2450,19 @@
         var design = ensured.design;
         var shellPageName = 'dataflow';
         var shellPageState = await ensurePage(ui, design, shellPageName);
-        if (shellPageState && shellPageState.created) {
-          await withOpenedPage(ui, design, shellPageName, (function (currentSourceModuleCell, currentLayerInputs, currentPageOrder, currentArchLayerOrder) {
-            return async function () {
-              await populateModuleDesignPage(ui, moduleName, currentSourceModuleCell, currentLayerInputs, currentPageOrder, currentArchLayerOrder);
-            };
-          })(sourceModuleCell, layerInputs, pageOrder, archLayerOrder));
-        }
+        await withOpenedPage(ui, design, shellPageName, (function (currentSourceModuleCell, currentLayerInputs, currentPageOrder, currentArchLayerOrder) {
+          return async function () {
+            await populateModuleDesignPage(ui, moduleName, currentSourceModuleCell, currentLayerInputs, currentPageOrder, currentArchLayerOrder);
+          };
+        })(sourceModuleCell, layerInputs, pageOrder, archLayerOrder));
         results.push({
           module: moduleName,
           design: design,
           createdDesign: ensured.created,
           page: shellPageName,
           markerCount: markerEntries.length,
-          updated: !!(shellPageState && shellPageState.created)
+          updated: true,
+          createdPage: !!(shellPageState && shellPageState.created)
         });
         await ensurePage(ui, design, archPageName);
         await withOpenedPage(ui, design, archPageName, (function (currentSourceModuleCell, currentLayerInputs) {
