@@ -1421,6 +1421,22 @@
     return style;
   }
 
+  function fitAspectSize(srcWidth, srcHeight, maxWidth, maxHeight) {
+    var naturalW = Number(srcWidth || 0);
+    var naturalH = Number(srcHeight || 0);
+    var boxW = Math.max(1, Number(maxWidth || naturalW || 1));
+    var boxH = Math.max(1, Number(maxHeight || naturalH || 1));
+    if (!(naturalW > 0) || !(naturalH > 0)) {
+      return { width: Math.round(boxW), height: Math.round(boxH) };
+    }
+    var scale = Math.min(boxW / naturalW, boxH / naturalH);
+    if (!isFinite(scale) || scale <= 0) scale = 1;
+    return {
+      width: Math.max(1, Math.round(naturalW * scale)),
+      height: Math.max(1, Math.round(naturalH * scale))
+    };
+  }
+
   function createFloorplanModuleCell(graph, moduleName, width, height, sourceModuleCell, opts) {
     opts = opts || {};
     try {
@@ -1439,7 +1455,8 @@
       cloned.style = makeModuleShellStyle(cloned.style || '', opts);
       cloned.style = mxUtils.setStyle(cloned.style || '', 'flowModule', moduleName || '');
       var srcGeo = sourceModuleCell.geometry || cloned.geometry || new mxGeometry(0, 0, width, height);
-      cloned.geometry = new mxGeometry(0, 0, Number(srcGeo.width || width), Number(srcGeo.height || height));
+      var fittedSize = fitAspectSize(srcGeo.width, srcGeo.height, width, height);
+      cloned.geometry = new mxGeometry(0, 0, fittedSize.width, fittedSize.height);
       if (srcGeo.points && srcGeo.points.length) {
         cloned.geometry.points = [];
         for (var pi = 0; pi < srcGeo.points.length; pi++) {
