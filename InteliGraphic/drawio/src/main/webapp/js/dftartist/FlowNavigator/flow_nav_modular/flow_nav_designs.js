@@ -394,6 +394,7 @@
       if (!out.layerName) out.layerName = trimString(Shared.styleValue(style, 'flowLayer', '') || '');
       if (!out.interfaceType) out.interfaceType = trimString(Shared.styleValue(style, 'flowInterfaceType', '') || '');
     }
+    if (!out.side && graph && cell) out.side = inferGeneratedInterfaceSide(graph, cell, out.moduleName);
     if (!out.moduleName || !out.layerName || !out.interfaceType) return null;
     return out;
   }
@@ -432,6 +433,69 @@
       cell.value ||
       ''
     ).trim();
+  }
+
+  function collectFloorplanModuleCells(graph) {
+    if (!graph || !graph.getModel) return [];
+    var model = graph.getModel();
+    var layers = getTopLevelLayersForGraph(graph);
+    var vertices = [];
+    for (var i = 0; i < layers.length; i++) collectVertices(layers[i], model, vertices);
+    var out = [];
+    for (var j = 0; j < vertices.length; j++) {
+      if (isFloorplanModuleCell(vertices[j])) out.push(vertices[j]);
+    }
+    return out;
+  }
+
+  function findModuleCellForMeta(graph, moduleName) {
+    moduleName = trimString(moduleName);
+    if (!graph || !moduleName) return null;
+    var candidates = collectFloorplanModuleCells(graph);
+    var best = null;
+    var bestArea = -1;
+    for (var i = 0; i < candidates.length; i++) {
+      var cell = candidates[i];
+      if (trimString(moduleNameForCell(cell)) !== moduleName) continue;
+      var rect = Shared.rectOfCell(cell);
+      var area = rect ? Number(rect.width || 0) * Number(rect.height || 0) : 0;
+      if (!best || area > bestArea) {
+        best = cell;
+        bestArea = area;
+      }
+    }
+    return best;
+  }
+
+  function inferSideFromRotation(styleText) {
+    var rotation = normalizeRotationDegrees(Shared.styleValue(styleText || '', 'rotation', '0'));
+    if (rotation === 90) return 'right';
+    if (rotation === 180) return 'bottom';
+    if (rotation === 270) return 'left';
+    return 'top';
+  }
+
+  function inferInterfaceSideFromGeometry(graph, cell, moduleCell) {
+    var interfaceRect = cell ? Shared.rectOfCell(cell) : null;
+    var moduleRect = moduleCell ? Shared.rectOfCell(moduleCell) : null;
+    if (!interfaceRect || !moduleRect) return '';
+    var distances = [
+      { side: 'left', value: Math.abs((Number(interfaceRect.x || 0) + Number(interfaceRect.width || 0)) - Number(moduleRect.x || 0)) },
+      { side: 'right', value: Math.abs(Number(interfaceRect.x || 0) - (Number(moduleRect.x || 0) + Number(moduleRect.width || 0))) },
+      { side: 'top', value: Math.abs((Number(interfaceRect.y || 0) + Number(interfaceRect.height || 0)) - Number(moduleRect.y || 0)) },
+      { side: 'bottom', value: Math.abs(Number(interfaceRect.y || 0) - (Number(moduleRect.y || 0) + Number(moduleRect.height || 0))) }
+    ];
+    distances.sort(function (a, b) { return a.value - b.value; });
+    if (!distances.length || !isFinite(distances[0].value)) return '';
+    return distances[0].side;
+  }
+
+  function inferGeneratedInterfaceSide(graph, cell, moduleName) {
+    if (!cell) return '';
+    var moduleCell = findModuleCellForMeta(graph, moduleName);
+    var inferred = inferInterfaceSideFromGeometry(graph, cell, moduleCell);
+    if (inferred) return inferred;
+    return inferSideFromRotation(cell && cell.style ? String(cell.style) : '');
   }
 
   function getTopLevelLayersForGraph(graph) {
