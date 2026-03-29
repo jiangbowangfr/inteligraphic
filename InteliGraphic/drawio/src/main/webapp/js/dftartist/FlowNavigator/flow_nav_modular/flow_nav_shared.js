@@ -110,13 +110,31 @@
     return ui && ui._activeProjectPageCtx && ui._activeProjectPageCtx.name ? String(ui._activeProjectPageCtx.name) : '';
   };
 
+  function isDataflowPageName(pageName) {
+    var normalized = trim(pageName).toLowerCase();
+    return normalized === 'dataflow' || /_dataflow$/.test(normalized);
+  }
+
   Shared.isFloorplanPageOpen = function isFloorplanPageOpen(ui) {
     var pageName = Shared.getActivePageName(ui);
     if (!pageName) return false;
     var ctx = ui && ui._activeProjectPageCtx;
-    if (ctx && ctx.designRef && ctx.designRef.__kind === 'floorplan-container') return true;
+    if (ctx && ctx.designRef) return ctx.designRef.__kind === 'floorplan-container';
     var floorplan = Shared.getFloorplanContainer(ui);
     return !!(floorplan && Array.isArray(floorplan.pages) && floorplan.pages.indexOf(pageName) >= 0);
+  };
+
+  Shared.isModuleDataflowPageOpen = function isModuleDataflowPageOpen(ui) {
+    var pageName = Shared.getActivePageName(ui);
+    if (!isDataflowPageName(pageName)) return false;
+    var ctx = ui && ui._activeProjectPageCtx;
+    return !!(ctx && ctx.designRef && String(ctx.designRef.__kind || '').toLowerCase() === 'module-design');
+  };
+
+  Shared.isFlowDesignPageOpen = function isFlowDesignPageOpen(ui) {
+    var pageName = Shared.getActivePageName(ui);
+    if (!isDataflowPageName(pageName)) return false;
+    return Shared.isFloorplanPageOpen(ui) || Shared.isModuleDataflowPageOpen(ui);
   };
 
   Shared.getActivePageReady = function getActivePageReady(ui) {

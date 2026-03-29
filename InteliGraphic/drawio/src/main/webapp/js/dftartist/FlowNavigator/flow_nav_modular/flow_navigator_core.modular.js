@@ -77,8 +77,13 @@
     var designInputs = Shared.getActivePageReady(ui) && Designs && typeof Designs.collectDesignInputs === 'function'
       ? Designs.collectDesignInputs(ui)
       : {};
-    var generatedDesignModules = Object.keys(designInputs || {});
     var design = Shared.getCurrentDesign(ui);
+    var generatedDesignModules = Object.keys(designInputs || {});
+    if (design && String(design.__kind || '').toLowerCase() === 'module-design' && design.name) {
+      generatedDesignModules = generatedDesignModules.filter(function (name) {
+        return String(name) !== String(design.name);
+      });
+    }
     var floorplan = Shared.getFloorplanContainer(ui);
     var activePage = Shared.getActivePageName(ui);
     var out = {};
@@ -94,8 +99,8 @@
       : (analysis.errorCount ? { state: 'error', text: analysis.issues.length + ' issue(s)' } : (analysis.warningCount ? { state: 'warning', text: analysis.issues.length + ' issue(s)' } : { state: 'success', text: 'Dataflow checked' }));
     out.generateInterface = !Shared.getActivePageReady(ui)
       ? { state: 'blocked', text: 'Open page first' }
-      : !Shared.isFloorplanPageOpen(ui)
-        ? { state: 'blocked', text: 'Open floorplan page first' }
+      : !Shared.isFlowDesignPageOpen(ui)
+        ? { state: 'blocked', text: 'Open dataflow page first' }
         : (analysis.interfaces.length
             ? { state: 'success', text: analysis.interfaces.length + ' existing marker(s)' }
             : (analysis.interfacePlan.markers.length
@@ -103,8 +108,8 @@
                 : { state: 'warning', text: 'No interface plan found' }));
     out.generateDesigns = !Shared.getActivePageReady(ui)
       ? { state: 'blocked', text: 'Open page first' }
-      : !Shared.isFloorplanPageOpen(ui)
-        ? { state: 'blocked', text: 'Open floorplan page first' }
+      : !Shared.isFlowDesignPageOpen(ui)
+        ? { state: 'blocked', text: 'Open dataflow page first' }
         : generatedDesignModules.length
           ? { state: 'ready', text: generatedDesignModules.length + ' module design(s)' }
           : { state: 'blocked', text: 'Generate interfaces first' };
@@ -140,7 +145,7 @@
 
   function runDeleteInterface(ui) {
     if (!Shared.getActivePageReady(ui)) throw new Error('Open a page before deleting interfaces.');
-    if (!Shared.isFloorplanPageOpen(ui)) throw new Error('Open a floorplan page before deleting interfaces.');
+    if (!Shared.isFlowDesignPageOpen(ui)) throw new Error('Open a dataflow page before deleting interfaces.');
     var analysis = Analysis.analyzeDataflow(ui);
     var result = Markers.deleteInterfaceMarkers(ui, analysis);
     Shared.ensureState(ui).lastInterfaceReport = result;
@@ -152,7 +157,7 @@
 
   function runGenerateInterface(ui) {
     if (!Shared.getActivePageReady(ui)) throw new Error('Open a page before generating interfaces.');
-    if (!Shared.isFloorplanPageOpen(ui)) throw new Error('Open a floorplan page before generating interfaces.');
+    if (!Shared.isFlowDesignPageOpen(ui)) throw new Error('Open a dataflow page before generating interfaces.');
     var analysis = Analysis.analyzeDataflow(ui);
     if (!analysis.pass) {
       var message = 'Dataflow check has errors. Run Check first and fix all errors before generating interfaces.';
@@ -168,10 +173,8 @@
     Shared.setJobs(ui, [{ name: 'generate_interface', status: 'success', detail: result.created.length + ' marker(s)', progress: 100 }]);
     var st = Shared.ensureState(ui);
     var exportChain = Promise.resolve(null);
-    var hasExporter = false;
 
     if (global.DFTFloorplanModuleYaml && typeof global.DFTFloorplanModuleYaml.generateFromCurrentPage === 'function') {
-      hasExporter = true;
       exportChain = exportChain.then(function () {
         return global.DFTFloorplanModuleYaml.generateFromCurrentPage(ui, analysis);
       }).then(function (yamlResult) {
@@ -186,7 +189,6 @@
     }
 
     if (global.DFTFloorplanInterfacePairYaml && typeof global.DFTFloorplanInterfacePairYaml.generateFromCurrentPage === 'function') {
-      hasExporter = true;
       exportChain = exportChain.then(function () {
         return global.DFTFloorplanInterfacePairYaml.generateFromCurrentPage(ui, analysis);
       }).then(function (pairYamlResult) {
@@ -200,8 +202,10 @@
       });
     }
 
-    if (!hasExporter) {
-      return result;
+    if (Designs && typeof Designs.syncCurrentModuleArch === 'function' && Shared.isModuleDataflowPageOpen(ui)) {
+      exportChain = exportChain.then(function () {
+        return Designs.syncCurrentModuleArch(ui, analysis, { reason: 'generate-interface' });
+      });
     }
 
     return exportChain.then(function () {
@@ -214,7 +218,7 @@
 
   async function runGenerateDesigns(ui) {
     if (!Shared.getActivePageReady(ui)) throw new Error('Open a page before generating module designs.');
-    if (!Shared.isFloorplanPageOpen(ui)) throw new Error('Open a floorplan page before generating module designs.');
+    if (!Shared.isFlowDesignPageOpen(ui)) throw new Error('Open a dataflow page before generating module designs.');
     var designInputs = Designs && typeof Designs.collectDesignInputs === 'function' ? Designs.collectDesignInputs(ui) : {};
     var moduleCount = Object.keys(designInputs || {}).length;
     if (!moduleCount) {

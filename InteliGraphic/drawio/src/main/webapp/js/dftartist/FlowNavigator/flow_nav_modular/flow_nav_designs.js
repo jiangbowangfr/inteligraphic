@@ -286,6 +286,11 @@
     }
   }
 
+  function isDataflowPageName(name) {
+    var normalized = String(name || '').trim().toLowerCase();
+    return normalized === 'dataflow' || /_dataflow$/.test(normalized);
+  }
+
   function clearCurrentGraph(ui) {
     var graph = Shared.graphOf(ui);
     var parent = Shared.getDefaultParent(ui);
@@ -2339,6 +2344,7 @@
 
   Designs.collectGeneratedMarkerMeta = collectGeneratedMarkerMeta;
   Designs.ensureArchInteractionHooks = ensureArchInteractionHooks;
+  Designs.syncCurrentModuleArch = syncCurrentModuleArch;
   Designs.collectDesignInputs = function collectDesignInputs(ui) {
     return groupMarkersByModule(collectGeneratedMarkerMeta(ui));
   };
@@ -2396,6 +2402,52 @@
     return out;
   }
 
+  async function syncCurrentModuleArch(ui, analysis, opts) {
+    opts = opts || {};
+    var owner = getGenerationOwner(ui);
+    var ownerKind = owner && owner.__kind ? String(owner.__kind).toLowerCase() : '';
+    if (ownerKind !== 'module-design' || !owner || !owner.name) {
+      return { synced: false, reason: 'owner-not-module-design' };
+    }
+
+    var currentPageName = ui && ui._activeProjectPageCtx ? String(ui._activeProjectPageCtx.name || '') : '';
+    if (currentPageName && !isDataflowPageName(currentPageName) && opts.allowFromAnyPage !== true) {
+      return { synced: false, reason: 'page-not-dataflow', page: currentPageName };
+    }
+
+    analysis = analysis || Analysis.analyzeDataflow(ui);
+    var designInputs = collectModuleDesignInputsFromAnalysis(ui, analysis) || Designs.collectDesignInputs(ui) || {};
+    var ownerEntries = Array.isArray(designInputs[owner.name]) ? designInputs[owner.name] : [];
+    var layerInputs = groupMarkersByLayer(ownerEntries);
+    var modulePlans = analysis && analysis.interfacePlan && analysis.interfacePlan.modulePlans ? analysis.interfacePlan.modulePlans : {};
+    var modulePlan = modulePlans[owner.name] || null;
+    var sourceModuleCell = modulePlan && modulePlan.moduleCell ? modulePlan.moduleCell : null;
+    var previousCtx = opts.restore === false ? null : captureCurrentPageCtx(ui);
+
+    await ensurePage(ui, owner, 'arch');
+    try {
+      await withOpenedPage(ui, owner, 'arch', function () {
+        return populateModuleDesignPage(
+          ui,
+          owner.name,
+          sourceModuleCell,
+          layerInputs,
+          MODULE_INTERFACE_LAYER_ORDER.slice(),
+          MODULE_LAYER_ORDER.slice()
+        );
+      });
+    } finally {
+      if (previousCtx) await restorePageCtx(ui, previousCtx);
+    }
+
+    return {
+      synced: true,
+      design: owner,
+      page: 'arch',
+      markerCount: ownerEntries.length
+    };
+  }
+
   async function populateModuleDesignPage(ui, moduleName, sourceModuleCell, layerInputs, pageOrder, layerOrder) {
     var pageLayers = Array.isArray(layerOrder) && layerOrder.length ? layerOrder : MODULE_LAYER_ORDER;
     var interfaceLayers = Array.isArray(pageOrder) && pageOrder.length ? pageOrder : MODULE_INTERFACE_LAYER_ORDER;
@@ -2428,16 +2480,34 @@
     opts = opts || {};
     analysis = analysis || Analysis.analyzeDataflow(ui);
     var designInputs = collectModuleDesignInputsFromAnalysis(ui, analysis) || Designs.collectDesignInputs(ui);
-    var sourceModuleNames = Object.keys(designInputs).sort();
     var parentDesign = getGenerationOwner(ui);
-    var moduleNames = await promptForUniqueModuleNames(ui, sourceModuleNames, parentDesign);
-    if (!moduleNames.length) throw new Error('No generated floorplan interfaces found. Generate interfaces first.');
+    var parentDesignKind = parentDesign && parentDesign.__kind ? String(parentDesign.__kind).toLowerCase() : '';
+    var ownerModuleName = parentDesignKind === 'module-design' && parentDesign && parentDesign.name ? String(parentDesign.name) : '';
+    var sourceModuleNames = Object.keys(designInputs).sort().filter(function (name) {
+      return !ownerModuleName || name !== ownerModuleName;
+    });
+    var moduleNames = sourceModuleNames.length ? await promptForUniqueModuleNames(ui, sourceModuleNames, parentDesign) : [];
     var pageOrder = MODULE_INTERFACE_LAYER_ORDER.slice();
     var archLayerOrder = MODULE_LAYER_ORDER.slice();
     var previousCtx = captureCurrentPageCtx(ui);
     var results = [];
     var modulePlans = analysis && analysis.interfacePlan && analysis.interfacePlan.modulePlans ? analysis.interfacePlan.modulePlans : {};
     try {
+      if (ownerModuleName) {
+        var ownerSync = await syncCurrentModuleArch(ui, analysis, { restore: false, allowFromAnyPage: true });
+        if (ownerSync && ownerSync.synced) {
+          results.push({
+            module: ownerModuleName,
+            design: ownerSync.design,
+            createdDesign: false,
+            page: ownerSync.page,
+            markerCount: ownerSync.markerCount,
+            updated: true,
+            ownerSync: true
+          });
+        }
+      }
+      if (!moduleNames.length) return { created: results, moduleCount: 0 };
       for (var i = 0; i < moduleNames.length; i++) {
         var moduleName = moduleNames[i];
         var sourceModuleName = sourceModuleNames[i];
