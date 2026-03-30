@@ -93,6 +93,14 @@
         return safeText((ui && (ui._projectRootPath || ui._projectYamlDir)) || (ui && ui.projectModel && ui.projectModel.path) || '').trim();
     }
 
+    function getProjectIpconfigRoot(ui) {
+        var dbRoot = safeText(ui && ui._projectDbDirPath).trim();
+        if (dbRoot) return joinPath(dbRoot, 'ipconfig');
+        var rootPath = getProjectRoot(ui);
+        if (!rootPath) return '';
+        return joinPath(rootPath, 'db', 'ipconfig');
+    }
+
     function ensureProjectDesigns(model) {
         if (!model) return [];
         if (!Array.isArray(model.designs) && Array.isArray(model.cores)) model.designs = model.cores;
@@ -170,6 +178,10 @@
         for (var i = 0; i < items.length; i++) {
             var item = items[i];
             if (!item || normalize(item.scope) !== 'project') continue;
+            if (normalize(item.generator) === 'dfx_wrapper_v1') {
+                traceWrapperSave('info', 'Skip auto page creation for generated wrapper "' + safeText(item.moduleName || item.key) + '".');
+                continue;
+            }
 
             var baseName = safeText(item.moduleName || item.sourceModuleName || item.dftsType || item.key).trim() || 'third_party_ip';
             var pageName = baseName;
@@ -287,6 +299,20 @@
                 ui.focusDockTab(level === 'warning' || level === 'error' ? 'messages' : 'output');
             }
         } catch (e3) { }
+    }
+
+    function traceWrapperSave(level, text) {
+        var currentUi = null;
+        try {
+            currentUi = (global.App && global.App.editorUi) || null;
+        } catch (e0) { }
+        dockInfo(currentUi, level || 'info', text, { source: 'third-party-wrapper' });
+        try {
+            var fn = level === 'error'
+                ? console.error
+                : (level === 'warning' ? console.warn : console.info);
+            fn('[ThirdPartyWrapper] ' + text);
+        } catch (e) { }
     }
 
     function countPins(def) {
@@ -729,9 +755,9 @@
         }
 
         function getProjectRegistryPath() {
-            var rootPath = getProjectRoot(ui);
-            if (!rootPath) return '';
-            return joinPath(rootPath, 'ip_config', PROJECT_REGISTRY_FILE);
+            var ipconfigRoot = getProjectIpconfigRoot(ui);
+            if (!ipconfigRoot) return '';
+            return joinPath(ipconfigRoot, PROJECT_REGISTRY_FILE);
         }
 
         async function readProjectItems() {
@@ -756,9 +782,10 @@
                 if ((items || []).length) throw new Error('Open or save a project before saving Project IP.');
                 return;
             }
-            var dirPath = joinPath(getProjectRoot(ui), 'ip_config');
+            var dirPath = getProjectIpconfigRoot(ui);
             await request({ action: 'ensureDirs', path: dirPath });
             await request({ action: 'writeFile', path: filePath, data: JSON.stringify({ version: 1, items: items || [] }, null, 2), enc: 'utf-8' });
+            traceWrapperSave('info', 'Updated project 3rd Party IP registry: ' + filePath);
         }
 
         function normalizeStoredItems(items, defaultScope) {
@@ -916,17 +943,17 @@
             var sourceItem = payload.sourceItem || null;
             var scope = normalize(payload.scope) === 'software' ? 'software' : 'project';
             var moduleName = safeText(payload.moduleName || (sourceItem && sourceItem.moduleName) || 'wrapper').trim() || 'wrapper';
-            var projectRoot = getProjectRoot(ui);
+            var projectIpconfigRoot = getProjectIpconfigRoot(ui);
             var outDir = '';
-            if (scope === 'project' && projectRoot) {
-                outDir = joinPath(projectRoot, 'ip_config', 'generated');
+            if (scope === 'project' && projectIpconfigRoot) {
+                outDir = joinPath(projectIpconfigRoot, 'generated');
             }
             if (!outDir) {
                 var srcDir = dirname(sourceItem && sourceItem.sourcePath);
                 if (srcDir) outDir = joinPath(srcDir, 'generated');
             }
-            if (!outDir && projectRoot) {
-                outDir = joinPath(projectRoot, 'ip_config', 'generated');
+            if (!outDir && projectIpconfigRoot) {
+                outDir = joinPath(projectIpconfigRoot, 'generated');
             }
             return {
                 vPath: outDir ? joinPath(outDir, moduleName + '.v') : '',
@@ -948,6 +975,7 @@
             if (!paths.vPath || !paths.iclPath) {
                 throw new Error('No writable output directory was resolved. Open/save a project or import HDL from a local file path first.');
             }
+            traceWrapperSave('info', 'Resolved wrapper output paths: v=' + paths.vPath + ', icl=' + paths.iclPath);
 
             var existing = (state.thirdParty.items || []).slice();
             var sameName = null;
@@ -961,11 +989,13 @@
             var explicitKey = '';
             var explicitType = '';
             if (sameName) {
+                traceWrapperSave('warning', 'Wrapper name collision detected for "' + moduleName + '" (scope=' + scope + ').');
                 var mode = resolveImportCollision({ moduleName: moduleName }, sameName);
                 if (mode === 'overwrite') {
                     explicitKey = sameName.key;
                     explicitType = sameName.dftsType;
                     existing = existing.filter(function (it) { return it.key !== sameName.key; });
+                    traceWrapperSave('info', 'Overwrite confirmed for wrapper "' + moduleName + '".');
                 } else {
                     var nameSet = {};
                     existing.forEach(function (item) {
@@ -973,12 +1003,16 @@
                     });
                     moduleName = uniqueName(moduleName, nameSet);
                     paths = estimateGeneratedPaths({ sourceItem: sourceItem, scope: scope, moduleName: moduleName });
+                    traceWrapperSave('warning', 'Keeping both wrappers. Renamed output to "' + moduleName + '". New paths: v=' + paths.vPath + ', icl=' + paths.iclPath);
                 }
             }
 
             await request({ action: 'ensureDirs', path: dirname(paths.vPath) });
+            traceWrapperSave('info', 'Ensured wrapper output directory: ' + dirname(paths.vPath));
             await request({ action: 'writeFile', path: paths.vPath, data: String(payload.verilogText), enc: 'utf-8' });
+            traceWrapperSave('info', 'Wrote wrapper Verilog: ' + paths.vPath);
             await request({ action: 'writeFile', path: paths.iclPath, data: String(payload.iclText), enc: 'utf-8' });
+            traceWrapperSave('info', 'Wrote wrapper ICL: ' + paths.iclPath);
 
             var nextItem = buildThirdPartyItem({
                 moduleName: moduleName,
@@ -1003,6 +1037,7 @@
             existing.push(nextItem);
             await saveThirdPartyItems(existing);
             renderList();
+            traceWrapperSave('success', 'Wrapper save completed for "' + moduleName + '".');
             return {
                 item: cloneJson(nextItem),
                 vPath: paths.vPath,

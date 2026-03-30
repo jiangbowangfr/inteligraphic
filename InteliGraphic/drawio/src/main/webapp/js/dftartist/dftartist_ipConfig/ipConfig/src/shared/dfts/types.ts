@@ -133,6 +133,7 @@ export type DftsSpecialApplyCtx = ExtraTabBaseCtx & {
 
 export type DftsExtraTabApplyResult = {
   handledSymbol?: boolean;
+  successMessage?: string;
 };
 
 export type DftsExtraTabComponent<TDraft = any> = ComponentType<DftsExtraTabRenderProps<TDraft>>;
@@ -142,6 +143,9 @@ export type DftsExtraTabDef<TDraft = any> = {
   label: string;
   initial: (ctx: ExtraTabBaseCtx) => TDraft;
   touchedCount?: (initial: TDraft, draft: TDraft) => number;
-  apply?: (ctx: DftsExtraTabApplyProps<TDraft>) => void | DftsExtraTabApplyResult;
+  applyAlwaysEnabled?: boolean;
+  apply?: (
+    ctx: DftsExtraTabApplyProps<TDraft>
+  ) => void | DftsExtraTabApplyResult | Promise<void | DftsExtraTabApplyResult>;
   component: DftsExtraTabComponent<TDraft>;
 };

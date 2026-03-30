@@ -1,6 +1,7 @@
 // src/shared/dfts/ui/DftsTypeShell.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  App as AntApp,
   Badge,
   Button,
   Card,
@@ -196,6 +197,25 @@ function toNumber(v: any) {
 function isEmptyInput(v: any) {
   return v === undefined || v === null || v === "";
 }
+
+function logDftsApply(level: "info" | "warning" | "error", text: string) {
+  try {
+    const ui = (window as any).App?.editorUi;
+    if (ui && typeof ui.logDockOutput === "function") {
+      ui.logDockOutput(text, level, { source: "dfts-config" });
+    }
+  } catch {}
+  try {
+    const fn =
+      level === "error"
+        ? console.error
+        : level === "warning"
+          ? console.warn
+          : console.info;
+    fn("[DftsConfig]", text);
+  } catch {}
+}
+
 function encodeModel(model: any) {
   try {
     return encodeURIComponent(JSON.stringify(model));
@@ -342,6 +362,7 @@ export default function DftsTypeShell(props: {
   onClose: () => void;
 }) {
   const { def, graph, cell, onClose } = props;
+  const { message } = AntApp.useApp();
   const category = inferCategory(def);
   const hostCategory = inferHostCategory(def);
   const nodes = def.nodes || {};
@@ -371,6 +392,8 @@ export default function DftsTypeShell(props: {
   const [dirtyOnly, setDirtyOnly] = useState(false);
   const [shadow, setShadow] = useState<Record<string, Record<string, any>>>({});
   const [refreshToken, setRefreshToken] = useState(0);
+  const [applying, setApplying] = useState(false);
+  const [hasAppliedOnce, setHasAppliedOnce] = useState(false);
   const initialRef = useRef<Record<string, Record<string, any>>>({});
   const initialBasics = useMemo<IpBasicsDraft>(
     () => {
@@ -657,6 +680,10 @@ export default function DftsTypeShell(props: {
   );
   const totalTouched =
     dftUnsavedCount + basicTouchedCount + specialTouchedCount + extraTouchedCount;
+  const applyAlwaysEnabled = useMemo(
+    () => extraTabs.some((tab) => !!tab.applyAlwaysEnabled),
+    [extraTabs],
+  );
   const resetAfterApply = () => {
     setShadow({});
     initialRef.current = {};
@@ -674,8 +701,21 @@ export default function DftsTypeShell(props: {
     extraInitialRef.current = clone(extraDrafts);
     setRefreshToken((v) => v + 1);
   };
-  const applyChanges = (closeAfter: boolean) => {
+  const applyChanges = async (closeAfter: boolean) => {
+    if (applying) return;
+    if (closeAfter && totalTouched === 0 && hasAppliedOnce) {
+      onClose();
+      return;
+    }
+    setApplying(true);
+    let successMessage = closeAfter ? "配置已保存。" : "配置已应用。";
+    try {
+    logDftsApply(
+      "info",
+      `Apply requested for type="${def.type}", closeAfter=${closeAfter ? "yes" : "no"}, totalTouched=${totalTouched}.`,
+    );
     const model = graph.getModel ? graph.getModel() : graph.model;
+    const asyncExtraTasks: Promise<any>[] = [];
     model.beginUpdate();
     try {
       if (hasDftTab) {
@@ -847,8 +887,14 @@ export default function DftsTypeShell(props: {
           basicDraft,
           layoutPins,
         });
+        if (res && typeof (res as any).then === "function") {
+          asyncExtraTasks.push(Promise.resolve(res));
+          continue;
+        }
         if (res && typeof res === "object" && res.handledSymbol)
           handledSymbol = true;
+        if (res && typeof res === "object" && res.successMessage)
+          successMessage = String(res.successMessage);
       }
       if (
         category !== "floorplan" &&
@@ -878,8 +924,30 @@ export default function DftsTypeShell(props: {
     } finally {
       model.endUpdate();
     }
+    if (asyncExtraTasks.length) {
+      const extraResults = await Promise.all(asyncExtraTasks);
+      extraResults.forEach((res) => {
+        if (res && typeof res === "object" && res.successMessage) {
+          successMessage = String(res.successMessage);
+        }
+      });
+    }
     resetAfterApply();
+    setHasAppliedOnce(true);
+    logDftsApply("info", successMessage);
+    message.success(successMessage);
     if (closeAfter) onClose();
+    } catch (err: any) {
+      const text =
+        err && err.message ? String(err.message) : "保存配置时发生错误。";
+      try {
+        console.error("[DftsTypeShell] apply failed:", err);
+      } catch {}
+      logDftsApply("error", text);
+      message.error(text);
+    } finally {
+      setApplying(false);
+    }
   };
   const renderTreeTitle = (node: TreeNode) => {
     const directDirty = directConfiguredCountByNode[String(node.key)] || 0;
@@ -1158,14 +1226,21 @@ export default function DftsTypeShell(props: {
         <Space size={10}>
           <Button
             onClick={() => applyChanges(false)}
-            disabled={totalTouched === 0}
+            disabled={
+              applying ||
+              (totalTouched === 0 && (!applyAlwaysEnabled || hasAppliedOnce))
+            }
           >
-            Apply
+            {applying ? "Applying..." : "Apply"}
           </Button>
-          <Button type="primary" onClick={() => applyChanges(true)}>
-            OK
+          <Button
+            type="primary"
+            onClick={() => applyChanges(true)}
+            disabled={applying}
+          >
+            {applying ? "Saving..." : "OK"}
           </Button>
-          <Button onClick={onClose}>Cancel</Button>
+          <Button onClick={onClose} disabled={applying}>Cancel</Button>
         </Space>
       </div>
     </div>
