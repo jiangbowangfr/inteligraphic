@@ -2534,7 +2534,8 @@
     var pages = Array.isArray(design.pages) ? design.pages : [];
     var moduleFloorplan = isModuleDesign(design) ? findDirectContainer(design, 'floorplan') : null;
     var moduleFloorplanPages = Array.isArray(moduleFloorplan && moduleFloorplan.pages) ? moduleFloorplan.pages : [];
-    var flattenPages = isModuleDesign(design) || isTopLevelFloorplanDesign(ui, design);
+    // Keep special container pages visible directly under the design row.
+    var flattenPages = isModuleDesign(design) || isTopLevelFloorplanDesign(ui, design) || isIpconfig;
 
     if (flattenPages) {
       var flatPages = [];
@@ -2553,10 +2554,6 @@
         var childDesigns = Array.isArray(design.sub_designs) ? design.sub_designs : [];
         for (var cd = 0; cd < childDesigns.length; cd++) renderDesignBranch(ui, panel, childDesigns[cd], depth + 1, query);
       }
-      return true;
-    }
-
-    if (isIpconfig) {
       return true;
     }
 
