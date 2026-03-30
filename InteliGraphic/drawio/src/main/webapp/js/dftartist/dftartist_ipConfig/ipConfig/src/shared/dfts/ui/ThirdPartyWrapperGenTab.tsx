@@ -87,7 +87,7 @@ function ensureDefaultDraft(
     sourceType,
     sourceItemKey: item.key,
     wrapperModuleName: draft.wrapperModuleName || `${item.moduleName || item.sourceModuleName || 'third_party'}_tdr`,
-    scope: draft.scope || ((item.scope as ScopeValue) || 'project'),
+    scope: 'project',
     selectedInputPins: uniq((draft.selectedInputPins || inputs.map((p) => p.name)).filter(Boolean)),
     selectedOutputPins: uniq((draft.selectedOutputPins || outputs.map((p) => p.name)).filter(Boolean)),
   };
