@@ -1664,7 +1664,39 @@
     return fallbackCell || null;
   }
 
-  function makeInterfaceStyle(style, markerMeta) {
+  function stripGeneratedInterfaceFloorplanStyle(style) {
+    style = style || '';
+    style = mxUtils.setStyle(style, 'floorplan', '0');
+    style = mxUtils.setStyle(style, 'perimeter', '');
+    style = mxUtils.setStyle(style, 'dftsFloorplanConnectable', '0');
+    style = mxUtils.setStyle(style, 'dftsFloorplanEndpointKind', '');
+    style = mxUtils.setStyle(style, 'dftsFloorplanLineStart', '0');
+    style = mxUtils.setStyle(style, 'dftsFloorplanLineTarget', '0');
+    style = mxUtils.setStyle(style, 'flowGeneratedInterfaceFloorplan', '0');
+    return style;
+  }
+
+  function applyGeneratedInterfaceFloorplanStyle(style, markerMeta, enableFloorplan) {
+    var type = String(markerMeta && markerMeta.interfaceType || '').toUpperCase();
+    var isStart = type === 'HI' || type === 'SI';
+    var isTarget = type === 'HO' || type === 'SO';
+    style = stripGeneratedInterfaceFloorplanStyle(style || '');
+    if (!enableFloorplan) return style;
+    style = mxUtils.setStyle(style, 'floorplan', '1');
+    style = mxUtils.setStyle(style, 'perimeter', 'floorplanAnyPoint');
+    style = mxUtils.setStyle(style, 'dftsFloorplanConnectable', '1');
+    style = mxUtils.setStyle(style, 'dftsFloorplanEndpointKind', 'generatedInterface');
+    style = mxUtils.setStyle(style, 'dftsFloorplanLineStart', isStart ? '1' : '0');
+    style = mxUtils.setStyle(style, 'dftsFloorplanLineTarget', isTarget ? '1' : '0');
+    style = mxUtils.setStyle(style, 'flowGeneratedInterfaceFloorplan', '1');
+    return style;
+  }
+
+  function makeInterfaceStyle(style, markerMeta, opts) {
+    opts = opts || {};
+    var enableFloorplan = opts.enableFloorplan == null
+      ? String(sourceStyleValue(style, 'flowGeneratedInterfaceFloorplan', '0')) === '1'
+      : !!opts.enableFloorplan;
     style = style || '';
     style = mxUtils.setStyle(style, 'movable', '0');
     style = mxUtils.setStyle(style, 'resizable', '0');
@@ -1679,6 +1711,7 @@
     style = mxUtils.setStyle(style, 'flowSide', markerMeta && markerMeta.side || '');
     style = mxUtils.setStyle(style, 'flowSideStackIndex', markerMeta && markerMeta.sideStackIndex == null ? '' : String(markerMeta.sideStackIndex));
     style = mxUtils.setStyle(style, 'flowMarkerId', markerMeta && markerMeta.id || '');
+    style = applyGeneratedInterfaceFloorplanStyle(style, markerMeta, enableFloorplan);
     return style;
   }
 
@@ -1686,18 +1719,22 @@
     return Shared.styleValue ? Shared.styleValue(styleText, key, fallback) : fallback;
   }
 
-  function persistGeneratedInterfaceMeta(graph, cell, markerMeta) {
+  function interfaceStyleOptsForPageName(pageName) {
+    return { enableFloorplan: isDataflowPageName(pageName) };
+  }
+
+  function persistGeneratedInterfaceMeta(graph, cell, markerMeta, opts) {
     if (!graph || !cell || !markerMeta) return;
     var normalized = normalizeGeneratedInterfaceMeta(markerMeta, graph, cell);
     if (!normalized) return;
     cell.__flowDesignMarkerMeta = Shared.cloneJson(normalized);
     var model = graph.getModel ? graph.getModel() : null;
-    var nextStyle = makeInterfaceStyle(String(cell.style || ''), normalized);
+    var nextStyle = makeInterfaceStyle(String(cell.style || ''), normalized, opts);
     if (model && typeof model.setStyle === 'function') model.setStyle(cell, nextStyle);
     else cell.style = nextStyle;
   }
 
-  function applyMarkerAppearanceToInterface(graph, cell, sourceCell, markerMeta) {
+  function applyMarkerAppearanceToInterface(graph, cell, sourceCell, markerMeta, opts) {
     if (!graph || !cell || !sourceCell) return;
     var sourceGeo = sourceCell.geometry || null;
     var sourceStyle = String(sourceCell.style || '');
@@ -1717,7 +1754,7 @@
     if (strokeColor) nextStyle = mxUtils.setStyle(nextStyle, 'strokeColor', strokeColor);
     if (rotation !== '') nextStyle = mxUtils.setStyle(nextStyle, 'rotation', rotation);
     if (fontSize !== '') nextStyle = mxUtils.setStyle(nextStyle, 'fontSize', fontSize);
-    nextStyle = makeInterfaceStyle(nextStyle, markerMeta);
+    nextStyle = makeInterfaceStyle(nextStyle, markerMeta, opts);
     model.setStyle(cell, nextStyle);
 
     if (global.DftsIP && global.DftsIP.Symbol) {
@@ -1740,7 +1777,7 @@
         });
       }
     }
-    persistGeneratedInterfaceMeta(graph, cell, markerMeta);
+    persistGeneratedInterfaceMeta(graph, cell, markerMeta, opts);
 
     emitDesignLog('interface-marker-appearance-applied', {
       moduleName: markerMeta && markerMeta.moduleName || '',
@@ -1764,7 +1801,7 @@
     });
   }
 
-  function cloneInterfaceCellFromSource(sourceCell, markerMeta) {
+  function cloneInterfaceCellFromSource(sourceCell, markerMeta, opts) {
     if (!sourceCell || typeof sourceCell.clone !== 'function') return null;
     var sourceStyle = String(sourceCell.style || '');
     if (sourceStyle.indexOf('flowMarker=1') >= 0) return null;
@@ -1786,7 +1823,7 @@
     });
     var cloned = cloneCellTree(sourceCell);
     resetCellTreeIds(cloned);
-    cloned.style = makeInterfaceStyle(cloned.style || '', markerMeta);
+    cloned.style = makeInterfaceStyle(cloned.style || '', markerMeta, opts);
     if (cloned.geometry) {
       cloned.geometry = new mxGeometry(
         Number(cloned.geometry.x || 0),
@@ -1813,11 +1850,11 @@
     return cloned;
   }
 
-  function createInterfaceCell(graph, markerEntry) {
+  function createInterfaceCell(graph, markerEntry, opts) {
     var markerMeta = markerEntry && markerEntry.meta ? markerEntry.meta : markerEntry;
     var sourceCell = markerEntry && markerEntry.cell ? markerEntry.cell : null;
     var sourceIsGeneratedInterface = !!extractGeneratedInterfaceMeta(graph, sourceCell);
-    var cloned = cloneInterfaceCellFromSource(sourceCell, markerMeta);
+    var cloned = cloneInterfaceCellFromSource(sourceCell, markerMeta, opts);
     if (cloned) {
       cloned.__flowPreserveSourceAppearance = sourceIsGeneratedInterface ? 1 : 0;
       emitDesignLog('create-interface-using-clone', {
@@ -1850,7 +1887,7 @@
     });
     var geo = cell.geometry || new mxGeometry(0, 0, 190, 40);
     cell.geometry = new mxGeometry(0, 0, Number(geo.width || 190), Number(geo.height || 40));
-    cell.style = makeInterfaceStyle(cell.style || '', markerMeta);
+    cell.style = makeInterfaceStyle(cell.style || '', markerMeta, opts);
     if (markerMeta.side === 'left') cell.style = mxUtils.setStyle(cell.style || '', 'rotation', '270');
     else if (markerMeta.side === 'right') cell.style = mxUtils.setStyle(cell.style || '', 'rotation', '90');
     else if (markerMeta.side === 'bottom') cell.style = mxUtils.setStyle(cell.style || '', 'rotation', '180');
@@ -1898,7 +1935,7 @@
     return added;
   }
 
-  function normalizeGeneratedInterfaceWithoutSource(graph, cell, markerMeta) {
+  function normalizeGeneratedInterfaceWithoutSource(graph, cell, markerMeta, opts) {
     if (!graph || !cell) return;
     var model = graph.getModel ? graph.getModel() : null;
     var currentGeo = graph.getCellGeometry ? graph.getCellGeometry(cell) : (cell.geometry || null);
@@ -1936,7 +1973,7 @@
       }
     }
 
-    persistGeneratedInterfaceMeta(graph, cell, markerMeta);
+    persistGeneratedInterfaceMeta(graph, cell, markerMeta, opts);
   }
 
   function resetCellTreeIds(cell) {
@@ -2339,12 +2376,14 @@
     var metrics = pageMetrics(graph);
     var includeInterfaces = opts.includeInterfaces !== false;
     var entries = Array.isArray(markerEntries) ? markerEntries : [];
+    var pageName = ui && ui._activeProjectPageCtx ? String(ui._activeProjectPageCtx.name || '') : '';
+    var interfaceStyleOpts = interfaceStyleOptsForPageName(pageName);
     var bySide = countBySide(entries);
     var interfacePrototypes = {};
     if (includeInterfaces) {
       for (var i = 0; i < entries.length; i++) {
         try {
-          interfacePrototypes[markerPrototypeKey(entries[i] && entries[i].meta ? entries[i].meta : null)] = createInterfaceCell(graph, entries[i]);
+          interfacePrototypes[markerPrototypeKey(entries[i] && entries[i].meta ? entries[i].meta : null)] = createInterfaceCell(graph, entries[i], interfaceStyleOpts);
         } catch (protoErr) {
           emitDesignLog('interface-prototype-error', {
             moduleName: moduleName,
@@ -2432,12 +2471,14 @@
             persistGeneratedInterfaceMeta(
               graph,
               addedInterface,
-              markerMeta
+              markerMeta,
+              interfaceStyleOpts
             );
           } else if (!sourceInterfaceCell) {
-            normalizeGeneratedInterfaceWithoutSource(graph, addedInterface, markerMeta);
+            normalizeGeneratedInterfaceWithoutSource(graph, addedInterface, markerMeta, interfaceStyleOpts);
           } else {
-            applyMarkerAppearanceToInterface(graph, addedInterface, sourceInterfaceCell, markerMeta);
+            applyMarkerAppearanceToInterface(graph, addedInterface, sourceInterfaceCell, markerMeta, interfaceStyleOpts);
+            persistGeneratedInterfaceMeta(graph, addedInterface, markerMeta, interfaceStyleOpts);
           }
           addedInterfaces.push(addedInterface);
         }
