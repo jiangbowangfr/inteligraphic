@@ -14,6 +14,30 @@
   var GENERATED_INTERFACE_DEFAULT_HEIGHT = 30;
   if (!Shared || !Analysis) throw new Error('flow_nav_shared.js and flow_nav_analysis.js must be loaded before flow_nav_designs.js');
 
+  function gridSize(graph) {
+    var size = Number(graph && graph.gridSize);
+    if (!isFinite(size) || size <= 0) size = 10;
+    return Math.max(1, Math.round(size));
+  }
+
+  function snapValueToGrid(graph, value) {
+    var n = Number(value);
+    if (!isFinite(n)) n = 0;
+    var grid = gridSize(graph);
+    return Math.round(n / grid) * grid;
+  }
+
+  function snapRectToGrid(graph, rect) {
+    if (!rect) return rect;
+    var grid = gridSize(graph);
+    return new mxRectangle(
+      snapValueToGrid(graph, rect.x),
+      snapValueToGrid(graph, rect.y),
+      Math.max(grid, snapValueToGrid(graph, rect.width)),
+      Math.max(grid, snapValueToGrid(graph, rect.height))
+    );
+  }
+
   function findTopLevelDesign(ui, name) {
     var pm = Shared.getProject(ui);
     var designs = pm && Array.isArray(pm.designs) ? pm.designs : [];
@@ -1565,9 +1589,10 @@
       cloned.style = mxUtils.setStyle(cloned.style || '', 'flowModule', moduleName || '');
       var srcGeo = sourceModuleCell.geometry || cloned.geometry || new mxGeometry(0, 0, width, height);
       var fittedSize = fitAspectSize(srcGeo.width, srcGeo.height, width, height);
+      var snappedFittedRect = snapRectToGrid(graph, new mxRectangle(0, 0, fittedSize.width, fittedSize.height));
       var sx = Number(srcGeo.width || 0) > 0 ? (fittedSize.width / Number(srcGeo.width || 1)) : 1;
       var sy = Number(srcGeo.height || 0) > 0 ? (fittedSize.height / Number(srcGeo.height || 1)) : 1;
-      cloned.geometry = new mxGeometry(0, 0, fittedSize.width, fittedSize.height);
+      cloned.geometry = new mxGeometry(0, 0, snappedFittedRect.width, snappedFittedRect.height);
       if (srcGeo.points && srcGeo.points.length) {
         cloned.geometry.points = [];
         for (var pi = 0; pi < srcGeo.points.length; pi++) {
@@ -1589,7 +1614,8 @@
       h: height,
       instanceName: ''
     });
-    cell.geometry = new mxGeometry(0, 0, width, height);
+    var snappedRect = snapRectToGrid(graph, new mxRectangle(0, 0, width, height));
+    cell.geometry = new mxGeometry(0, 0, snappedRect.width, snappedRect.height);
     cell.style = makeModuleShellStyle(cell.style || '', opts);
     cell.style = mxUtils.setStyle(cell.style || '', 'flowModule', moduleName || '');
     if (global.DftsFloorplan && typeof global.DftsFloorplan.syncFloorplanModuleCell === 'function') {
@@ -1929,8 +1955,8 @@
         geo.points.push(new mxPoint(Number(pt && pt.x || 0), Number(pt && pt.y || 0)));
       }
     }
-    geo.x = x;
-    geo.y = y;
+    geo.x = snapValueToGrid(graph, x);
+    geo.y = snapValueToGrid(graph, y);
     graph.getModel().setGeometry(added, geo);
     return added;
   }
@@ -2016,7 +2042,7 @@
       scale: scale,
       page: { width: metrics.width, height: metrics.height, margin: metrics.margin }
     });
-    graph.resizeCell(shell, new mxRectangle(nextX, nextY, nextW, nextH), false);
+    graph.resizeCell(shell, snapRectToGrid(graph, new mxRectangle(nextX, nextY, nextW, nextH)), false);
   }
 
   function normalizeRotationDegrees(rotation) {
