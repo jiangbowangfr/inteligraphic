@@ -1934,7 +1934,9 @@
     return cell;
   }
 
-  function addCellAt(graph, parent, cell, x, y) {
+  function addCellAt(graph, parent, cell, x, y, opts) {
+    opts = opts || {};
+    var snapToGrid = opts.snapToGrid !== false;
     resetCellTreeIds(cell);
     var added = graph.addCell(cell, parent);
     var geo0 = graph.getCellGeometry(added) || cell.geometry || new mxGeometry();
@@ -1955,8 +1957,8 @@
         geo.points.push(new mxPoint(Number(pt && pt.x || 0), Number(pt && pt.y || 0)));
       }
     }
-    geo.x = snapValueToGrid(graph, x);
-    geo.y = snapValueToGrid(graph, y);
+    geo.x = snapToGrid ? snapValueToGrid(graph, x) : Number(x || 0);
+    geo.y = snapToGrid ? snapValueToGrid(graph, y) : Number(y || 0);
     graph.getModel().setGeometry(added, geo);
     return added;
   }
@@ -2490,7 +2492,9 @@
           })
         });
         for (var p = 0; p < placements.length; p++) {
-          var addedInterface = addCellAt(graph, parent, placements[p].cell, placements[p].x, placements[p].y);
+          var addedInterface = addCellAt(graph, parent, placements[p].cell, placements[p].x, placements[p].y, {
+            snapToGrid: false
+          });
           var sourceInterfaceCell = placements[p].marker && placements[p].marker.cell ? placements[p].marker.cell : null;
           var markerMeta = placements[p].marker && placements[p].marker.meta ? placements[p].marker.meta : null;
           if (addedInterface && addedInterface.__flowPreserveSourceAppearance) {
