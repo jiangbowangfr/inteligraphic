@@ -10,8 +10,8 @@
   var MODULE_INTERFACE_LAYER_ORDER = ['ssn', 'bscan', 'ijtag', 'bisr', 'other'];
   var MODULE_INTERFACE_OUTER_GAP = 0;
   var MODULE_INTERFACE_EDGE_OVERLAP = 0;
-  var GENERATED_INTERFACE_DEFAULT_WIDTH = 44;
-  var GENERATED_INTERFACE_DEFAULT_HEIGHT = 30;
+  var GENERATED_INTERFACE_DEFAULT_WIDTH = 60;
+  var GENERATED_INTERFACE_DEFAULT_HEIGHT = 40;
   if (!Shared || !Analysis) throw new Error('flow_nav_shared.js and flow_nav_analysis.js must be loaded before flow_nav_designs.js');
 
   function gridSize(graph) {
@@ -1749,6 +1749,84 @@
     return { enableFloorplan: isDataflowPageName(pageName) };
   }
 
+  function normalizedGeneratedInterfaceSize(graph, markerMeta, width, height) {
+    var grid = gridSize(graph);
+    var side = String(markerMeta && markerMeta.side || '').toLowerCase();
+    var nextWidth = snapValueToGrid(graph, Number(width || GENERATED_INTERFACE_DEFAULT_WIDTH));
+    var nextHeight = snapValueToGrid(graph, Number(height || GENERATED_INTERFACE_DEFAULT_HEIGHT));
+    nextWidth = Math.max(grid, nextWidth);
+    nextHeight = Math.max(grid, nextHeight);
+
+    // Left/right interfaces are rotated, so (width - height) / 2 becomes the
+    // placement compensation. Keep that compensation on-grid to preserve both
+    // edge contact and grid alignment after the final snap.
+    if (side === 'left' || side === 'right') {
+      var step = grid * 2;
+      var diff = nextWidth - nextHeight;
+      var rem = ((diff % step) + step) % step;
+      if (rem !== 0) {
+        var downHeight = nextHeight - rem;
+        var upHeight = nextHeight + (step - rem);
+        var useUp = downHeight < grid || Math.abs(upHeight - nextHeight) <= Math.abs(nextHeight - downHeight);
+        nextHeight = useUp ? upHeight : downHeight;
+      }
+    }
+
+    return {
+      width: nextWidth,
+      height: nextHeight
+    };
+  }
+
+  function normalizedGeneratedInterfaceGeometry(graph, currentGeo, markerMeta) {
+    var geo = currentGeo && typeof currentGeo.clone === 'function'
+      ? currentGeo.clone()
+      : new mxGeometry(
+        Number(currentGeo && currentGeo.x || 0),
+        Number(currentGeo && currentGeo.y || 0),
+        Number(currentGeo && currentGeo.width || 0),
+        Number(currentGeo && currentGeo.height || 0)
+      );
+    var size = normalizedGeneratedInterfaceSize(graph, markerMeta, GENERATED_INTERFACE_DEFAULT_WIDTH, GENERATED_INTERFACE_DEFAULT_HEIGHT);
+    geo.width = size.width;
+    geo.height = size.height;
+    return geo;
+  }
+
+  function applyCompactGeneratedInterfaceSymbol(graph, cell, markerMeta) {
+    if (!graph || !cell || !global.DftsIP || !global.DftsIP.Symbol) return;
+    try {
+      var sym = global.DftsIP.Symbol;
+      var symModel = sym.getModel && sym.getModel(cell);
+      if (!symModel) return;
+      symModel = Shared.cloneJson(symModel);
+      if (!symModel.layout) symModel.layout = {};
+      if (!symModel.transform) symModel.transform = {};
+      symModel.transform.rotation = sideRotationDegrees(String(markerMeta && markerMeta.side || '').toLowerCase());
+      symModel.layout.fontSize = 12;
+      symModel.layout.titleFontSize = 12;
+      symModel.layout.instanceFontSize = 9;
+      symModel.layout.bodyPaddingX = 8;
+      symModel.layout.bodyPaddingY = 5;
+      symModel.layout.titlePadding = 5;
+      symModel.layout.pinRowPitch = 18;
+      symModel.layout.pinStub = 10;
+      symModel.layout.labelGap = 4;
+      symModel.layout.instanceGap = 4;
+      symModel.layout.minBodyWidth = 40;
+      symModel.layout.minBodyHeight = 20;
+      if (sym.setModel) sym.setModel(cell, symModel);
+      if (sym.relayout) sym.relayout(graph, cell);
+    } catch (e) {
+      emitDesignLog('compact-generated-interface-symbol-error', {
+        moduleName: markerMeta && markerMeta.moduleName || '',
+        layerName: markerMeta && markerMeta.layerName || '',
+        interfaceType: markerMeta && markerMeta.interfaceType || '',
+        error: e && e.message ? e.message : String(e)
+      });
+    }
+  }
+
   function persistGeneratedInterfaceMeta(graph, cell, markerMeta, opts) {
     if (!graph || !cell || !markerMeta) return;
     var normalized = normalizeGeneratedInterfaceMeta(markerMeta, graph, cell);
@@ -1765,12 +1843,7 @@
     var sourceGeo = sourceCell.geometry || null;
     var sourceStyle = String(sourceCell.style || '');
     var model = graph.getModel();
-    if (sourceGeo) {
-      var nextGeo = (cell.geometry && typeof cell.geometry.clone === 'function') ? cell.geometry.clone() : new mxGeometry();
-      nextGeo.width = Number(sourceGeo.width || nextGeo.width || 0);
-      nextGeo.height = Number(sourceGeo.height || nextGeo.height || 0);
-      model.setGeometry(cell, nextGeo);
-    }
+    model.setGeometry(cell, normalizedGeneratedInterfaceGeometry(graph, cell.geometry, markerMeta));
     var nextStyle = String(cell.style || '');
     var fillColor = sourceStyleValue(sourceStyle, 'fillColor', '');
     var strokeColor = sourceStyleValue(sourceStyle, 'strokeColor', '');
@@ -1792,7 +1865,6 @@
           if (!symModel.transform) symModel.transform = {};
           if (rotation !== '') symModel.transform.rotation = Number(rotation || 0);
           if (sym.setModel) sym.setModel(cell, symModel);
-          if (sym.relayout) sym.relayout(graph, cell);
         }
       } catch (e) {
         emitDesignLog('interface-marker-appearance-error', {
@@ -1803,6 +1875,7 @@
         });
       }
     }
+    applyCompactGeneratedInterfaceSymbol(graph, cell, markerMeta);
     persistGeneratedInterfaceMeta(graph, cell, markerMeta, opts);
 
     emitDesignLog('interface-marker-appearance-applied', {
@@ -1851,14 +1924,9 @@
     resetCellTreeIds(cloned);
     cloned.style = makeInterfaceStyle(cloned.style || '', markerMeta, opts);
     if (cloned.geometry) {
-      cloned.geometry = new mxGeometry(
-        Number(cloned.geometry.x || 0),
-        Number(cloned.geometry.y || 0),
-        Number(cloned.geometry.width || 190),
-        Number(cloned.geometry.height || 40)
-      );
+      cloned.geometry = normalizedGeneratedInterfaceGeometry(null, cloned.geometry, markerMeta);
     } else {
-      cloned.geometry = new mxGeometry(0, 0, 190, 40);
+      cloned.geometry = normalizedGeneratedInterfaceGeometry(null, null, markerMeta);
     }
     cloned.__flowDesignMarkerMeta = Shared.cloneJson(markerMeta);
     emitDesignLog('clone-interface-result', {
@@ -1911,8 +1979,7 @@
       pdg: markerMeta.layerName || '',
       busWidth: 4
     });
-    var geo = cell.geometry || new mxGeometry(0, 0, 190, 40);
-    cell.geometry = new mxGeometry(0, 0, Number(geo.width || 190), Number(geo.height || 40));
+    cell.geometry = normalizedGeneratedInterfaceGeometry(graph, cell.geometry || new mxGeometry(0, 0, 190, 40), markerMeta);
     cell.style = makeInterfaceStyle(cell.style || '', markerMeta, opts);
     if (markerMeta.side === 'left') cell.style = mxUtils.setStyle(cell.style || '', 'rotation', '270');
     else if (markerMeta.side === 'right') cell.style = mxUtils.setStyle(cell.style || '', 'rotation', '90');
@@ -1936,7 +2003,8 @@
 
   function addCellAt(graph, parent, cell, x, y, opts) {
     opts = opts || {};
-    var snapToGrid = opts.snapToGrid !== false;
+    var snapX = opts.snapToGrid !== false && opts.snapX !== false;
+    var snapY = opts.snapToGrid !== false && opts.snapY !== false;
     resetCellTreeIds(cell);
     var added = graph.addCell(cell, parent);
     var geo0 = graph.getCellGeometry(added) || cell.geometry || new mxGeometry();
@@ -1957,8 +2025,8 @@
         geo.points.push(new mxPoint(Number(pt && pt.x || 0), Number(pt && pt.y || 0)));
       }
     }
-    geo.x = snapToGrid ? snapValueToGrid(graph, x) : Number(x || 0);
-    geo.y = snapToGrid ? snapValueToGrid(graph, y) : Number(y || 0);
+    geo.x = snapX ? snapValueToGrid(graph, x) : Number(x || 0);
+    geo.y = snapY ? snapValueToGrid(graph, y) : Number(y || 0);
     graph.getModel().setGeometry(added, geo);
     return added;
   }
@@ -1967,16 +2035,7 @@
     if (!graph || !cell) return;
     var model = graph.getModel ? graph.getModel() : null;
     var currentGeo = graph.getCellGeometry ? graph.getCellGeometry(cell) : (cell.geometry || null);
-    var nextGeo = currentGeo && typeof currentGeo.clone === 'function'
-      ? currentGeo.clone()
-      : new mxGeometry(
-        Number(currentGeo && currentGeo.x || 0),
-        Number(currentGeo && currentGeo.y || 0),
-        Number(currentGeo && currentGeo.width || 0),
-        Number(currentGeo && currentGeo.height || 0)
-      );
-    nextGeo.width = GENERATED_INTERFACE_DEFAULT_WIDTH;
-    nextGeo.height = GENERATED_INTERFACE_DEFAULT_HEIGHT;
+    var nextGeo = normalizedGeneratedInterfaceGeometry(graph, currentGeo, markerMeta);
     if (model && typeof model.setGeometry === 'function') model.setGeometry(cell, nextGeo);
     else cell.geometry = nextGeo;
 
@@ -1990,7 +2049,6 @@
           symModel.transform.rotation = sideRotationDegrees(String(markerMeta && markerMeta.side || '').toLowerCase());
           if (sym.setModel) sym.setModel(cell, symModel);
         }
-        if (sym.relayout) sym.relayout(graph, cell);
       } catch (e) {
         emitDesignLog('normalize-generated-interface-without-source-error', {
           moduleName: markerMeta && markerMeta.moduleName || '',
@@ -2000,6 +2058,7 @@
         });
       }
     }
+    applyCompactGeneratedInterfaceSymbol(graph, cell, markerMeta);
 
     persistGeneratedInterfaceMeta(graph, cell, markerMeta, opts);
   }
@@ -2063,7 +2122,7 @@
   }
 
   function interfacePlacementMetrics(cell, side, sourceCell) {
-    var geo = sourceCell && sourceCell.geometry ? sourceCell.geometry : (cell && cell.geometry ? cell.geometry : null);
+    var geo = cell && cell.geometry ? cell.geometry : (sourceCell && sourceCell.geometry ? sourceCell.geometry : null);
     var w = Number(geo && geo.width || 190);
     var h = Number(geo && geo.height || 40);
     var styleText = String(sourceCell && sourceCell.style != null ? sourceCell.style : (cell && cell.style || ''));
@@ -2492,9 +2551,7 @@
           })
         });
         for (var p = 0; p < placements.length; p++) {
-          var addedInterface = addCellAt(graph, parent, placements[p].cell, placements[p].x, placements[p].y, {
-            snapToGrid: false
-          });
+          var addedInterface = addCellAt(graph, parent, placements[p].cell, placements[p].x, placements[p].y);
           var sourceInterfaceCell = placements[p].marker && placements[p].marker.cell ? placements[p].marker.cell : null;
           var markerMeta = placements[p].marker && placements[p].marker.meta ? placements[p].marker.meta : null;
           if (addedInterface && addedInterface.__flowPreserveSourceAppearance) {
