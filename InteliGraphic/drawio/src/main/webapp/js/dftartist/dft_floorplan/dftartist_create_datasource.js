@@ -1423,9 +1423,20 @@
 
             var ch = graph.connectionHandler;
             var oldMouseDown = ch.mouseDown;
+            var oldMouseMove = ch.mouseMove;
+            var oldMouseUp = ch.mouseUp;
             var oldStart = ch.start;
             var oldConnect = ch.connect;
             var oldInsertEdge = ch.insertEdge;
+
+            function getCurrentFloorplanConstraint() {
+                var cur = ch.constraintHandler ? ch.constraintHandler.currentConstraint : null;
+                return (cur && cur.point) ? cur : null;
+            }
+
+            function hasExplicitFloorplanBodyConstraint(body) {
+                return !!(body && getCurrentFloorplanConstraint());
+            }
 
             function tryStartFloorplanFromCell(me, cell) {
                 var body = resolveFloorplanEndpointBody(graph, cell);
@@ -1442,21 +1453,17 @@
                 }
 
                 if (body && isFloorplanStartBody(graph, body)) {
-                    var cur = ch.constraintHandler ? ch.constraintHandler.currentConstraint : null;
+                    var cur = getCurrentFloorplanConstraint();
                     var mousePt = getMouseGraphPoint(graph, me, body);
                     debugLog('currentConstraint', cur ? {
                         x: cur.point && cur.point.x,
                         y: cur.point && cur.point.y
                     } : null, mousePt ? { mouseX: mousePt.x, mouseY: mousePt.y } : null);
-                    if (!cur) {
-                        var nearest = findNearestBodyConnectionPoint(graph, body, mousePt);
-                        if (!nearest || !nearest.relPoint) return false;
-                        cur = { point: nearest.relPoint };
-                    }
+                    if (!cur) return false;
                     return startFloorplanLineFromConstraint(realUi, graph, body, cur, mousePt);
                 }
 
-                if (shouldBlockGeneratedInterfacePlainConnect(graph, body)) {
+                if (shouldBlockGeneratedInterfacePlainConnect(graph, body) && hasExplicitFloorplanBodyConstraint(body)) {
                     warnGeneratedInterfaceStartDirection(graph, body);
                     return true;
                 }
@@ -1468,24 +1475,70 @@
                 var evt = me && me.getEvent ? me.getEvent() : null;
                 var state = me && me.getState ? me.getState() : null;
                 var cell = state && state.cell ? state.cell : (me && me.getCell ? me.getCell() : null);
+                var body = resolveFloorplanEndpointBody(graph, cell);
                 debugLog('mouseDown', {
                     cell: cell && (cell.id || (cell.getId && cell.getId())),
+                    resolvedBody: body && (body.id || (body.getId && body.getId())),
                     graphX: me && me.getGraphX ? me.getGraphX() : null,
                     graphY: me && me.getGraphY ? me.getGraphY() : null,
                     hasState: !!state
                 });
 
-                if (evt && mxEvent.isLeftMouseButton(evt) && tryStartFloorplanFromCell(me, cell)) {
-                    this.__dftsSuppressNextInsertEdge = true;
-                    try {
-                        this.reset();
-                    } catch (e) { }
-                    if (me && typeof me.consume === 'function') me.consume();
-                    mxEvent.consume(evt);
-                    return;
+                var canStartFromPin = isFloorplanStartPin(graph, cell);
+                var canStartFromBody = body && isFloorplanStartBody(graph, body) && hasExplicitFloorplanBodyConstraint(body);
+                var shouldWarnBlockedBody = shouldBlockGeneratedInterfacePlainConnect(graph, body) && hasExplicitFloorplanBodyConstraint(body);
+                if (evt && mxEvent.isLeftMouseButton(evt) &&
+                    (canStartFromPin || canStartFromBody || shouldWarnBlockedBody)) {
+                    this.__dftsPendingFloorplanStart = {
+                        cell: cell,
+                        body: body,
+                        x: me && me.getGraphX ? Number(me.getGraphX()) : null,
+                        y: me && me.getGraphY ? Number(me.getGraphY()) : null
+                    };
+                } else {
+                    this.__dftsPendingFloorplanStart = null;
                 }
 
                 return oldMouseDown.apply(this, arguments);
+            };
+
+            ch.mouseMove = function (sender, me) {
+                var pending = this.__dftsPendingFloorplanStart || null;
+                if (pending && me) {
+                    var gx = me.getGraphX ? Number(me.getGraphX()) : null;
+                    var gy = me.getGraphY ? Number(me.getGraphY()) : null;
+                    if (gx != null && gy != null && pending.x != null && pending.y != null) {
+                        var dx = gx - pending.x;
+                        var dy = gy - pending.y;
+                        var tol = graph && typeof graph.tolerance === 'number' ? Math.max(2, Number(graph.tolerance)) : 4;
+                        var moved = Math.sqrt(dx * dx + dy * dy) > tol;
+                        if (moved) {
+                            var evt = me.getEvent ? me.getEvent() : null;
+                            if (tryStartFloorplanFromCell(me, pending.cell)) {
+                                this.__dftsPendingFloorplanStart = null;
+                                this.__dftsSuppressNextInsertEdge = true;
+                                try {
+                                    this.reset();
+                                } catch (e) { }
+                                if (graph.graphHandler && typeof graph.graphHandler.reset === 'function') {
+                                    try {
+                                        graph.graphHandler.reset();
+                                    } catch (e2) { }
+                                }
+                                if (me && typeof me.consume === 'function') me.consume();
+                                if (evt) mxEvent.consume(evt);
+                                return;
+                            }
+                            this.__dftsPendingFloorplanStart = null;
+                        }
+                    }
+                }
+                return oldMouseMove.apply(this, arguments);
+            };
+
+            ch.mouseUp = function () {
+                this.__dftsPendingFloorplanStart = null;
+                return oldMouseUp.apply(this, arguments);
             };
 
             ch.start = function (state, x, y, edgeState) {
@@ -1497,24 +1550,23 @@
                     x: x,
                     y: y
                 });
-                if (cell && (isFloorplanStartPin(graph, cell) || (body && isFloorplanStartBody(graph, body)) || shouldBlockGeneratedInterfacePlainConnect(graph, body))) {
+                var cur = getCurrentFloorplanConstraint();
+                var canStartFromPin = isFloorplanStartPin(graph, cell);
+                var canStartFromBody = body && isFloorplanStartBody(graph, body) && !!cur;
+                var shouldWarnBlockedBody = shouldBlockGeneratedInterfacePlainConnect(graph, body) && !!cur;
+                if (cell && (canStartFromPin || canStartFromBody || shouldWarnBlockedBody)) {
                     this.__dftsSuppressNextInsertEdge = true;
-                    if (shouldBlockGeneratedInterfacePlainConnect(graph, body) && !isFloorplanStartPin(graph, cell)) {
+                    if (shouldWarnBlockedBody && !canStartFromPin) {
                         warnGeneratedInterfaceStartDirection(graph, body);
                         try {
                             this.reset();
                         } catch (e) { }
                         return;
                     }
-                    if (isFloorplanStartPin(graph, cell)) {
+                    if (canStartFromPin) {
                         startFloorplanLineFromPin(realUi, graph, cell);
                     } else {
-                        var cur = this.constraintHandler ? this.constraintHandler.currentConstraint : null;
                         var mousePt = new mxPoint(Number(x || 0), Number(y || 0));
-                        if (!cur) {
-                            var nearest = findNearestBodyConnectionPoint(graph, body, mousePt);
-                            if (nearest && nearest.relPoint) cur = { point: nearest.relPoint };
-                        }
                         if (!startFloorplanLineFromConstraint(realUi, graph, body, cur, mousePt)) {
                             this.__dftsSuppressNextInsertEdge = false;
                             return oldStart.apply(this, arguments);
