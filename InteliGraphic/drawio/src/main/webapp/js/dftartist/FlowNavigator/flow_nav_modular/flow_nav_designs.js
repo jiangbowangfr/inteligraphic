@@ -9,6 +9,7 @@
   var MODULE_LAYER_ORDER = ['base', 'ssn', 'bscan', 'ijtag', 'bisr', 'other'];
   var MODULE_INTERFACE_LAYER_ORDER = ['ssn', 'bscan', 'ijtag', 'bisr', 'other'];
   var MODULE_INTERFACE_OUTER_GAP = 0;
+  var MODULE_INTERFACE_INNER_GAP = 0;
   var MODULE_INTERFACE_EDGE_OVERLAP = 0;
   var GENERATED_INTERFACE_DEFAULT_WIDTH = 60;
   var GENERATED_INTERFACE_DEFAULT_HEIGHT = 40;
@@ -2335,7 +2336,40 @@
     };
   }
 
-  function positionInterfacesAroundBody(bodyRect, bySide, prototypes, bodyCell, sourceModuleCell) {
+  function clampInterfaceInsideRect(rect, size, x, y) {
+    if (!rect || !size) return { x: Math.round(Number(x || 0)), y: Math.round(Number(y || 0)) };
+    var minX = Number(rect.x || 0);
+    var minY = Number(rect.y || 0);
+    var maxX = Math.max(minX, minX + Number(rect.width || 0) - Number(size.width || 0));
+    var maxY = Math.max(minY, minY + Number(rect.height || 0) - Number(size.height || 0));
+    return {
+      x: Math.round(clampNumber(Number(x || 0), minX, maxX)),
+      y: Math.round(clampNumber(Number(y || 0), minY, maxY))
+    };
+  }
+
+  function placeRelativeInsideBody(bodyRect, bodyCell, side, size, relative) {
+    var rect = effectiveBodyRect(bodyRect, bodyCell);
+    if (!rect || !size || !relative) return null;
+    var gap = MODULE_INTERFACE_INNER_GAP;
+    var x = Number(rect.x || 0);
+    var y = Number(rect.y || 0);
+    if (side === 'left' || side === 'right') {
+      x = side === 'left'
+        ? rect.x + gap
+        : rect.x + rect.width - size.width - gap;
+      y = rect.y + Number(relative.y || 0);
+    } else {
+      x = rect.x + Number(relative.x || 0);
+      y = side === 'top'
+        ? rect.y + gap
+        : rect.y + rect.height - size.height - gap;
+    }
+    return clampInterfaceInsideRect(rect, size, x, y);
+  }
+
+  function positionInterfacesAroundBody(bodyRect, bySide, prototypes, bodyCell, sourceModuleCell, placementMode) {
+    placementMode = placementMode === 'inside' ? 'inside' : 'outside';
     var placements = [];
     var sourceLookup = buildModuleCellLookup(sourceModuleCell);
     var targetLookup = buildModuleCellLookup(bodyCell);
@@ -2354,8 +2388,11 @@
         var relative = relativeInterfacePlacement(sourcePlacementModule || sourceModuleCell, entry, side, size);
         if (relative) {
           var mappedRelative = scaleRelativePlacementToTarget(relative, sourcePlacementModule || sourceModuleCell, targetRect);
-          var relativeOutside = placeRelativeOutsideBody(targetRect, targetModuleCell || bodyCell, side, size, mappedRelative);
-          var relativeGeo = placeInterfaceGeometry(metrics, relativeOutside.x, relativeOutside.y);
+          var relativePos = placementMode === 'inside'
+            ? placeRelativeInsideBody(targetRect, targetModuleCell || bodyCell, side, size, mappedRelative)
+            : placeRelativeOutsideBody(targetRect, targetModuleCell || bodyCell, side, size, mappedRelative);
+          if (!relativePos) continue;
+          var relativeGeo = placeInterfaceGeometry(metrics, relativePos.x, relativePos.y);
           placements.push({
             marker: entry,
             cell: cell,
@@ -2369,32 +2406,67 @@
         var x = targetRect.x;
         var y = targetRect.y;
         var anchor = targetModuleCell ? boundaryAnchorForSide(targetModuleCell, side, offset) : null;
-        if (anchor) {
-          if (side === 'left') {
-            x = Math.round(anchor.x - size.width - MODULE_INTERFACE_OUTER_GAP + MODULE_INTERFACE_EDGE_OVERLAP);
-            y = Math.round(anchor.y - size.height / 2);
-          } else if (side === 'right') {
-            x = Math.round(anchor.x + MODULE_INTERFACE_OUTER_GAP - MODULE_INTERFACE_EDGE_OVERLAP);
-            y = Math.round(anchor.y - size.height / 2);
-          } else if (side === 'top') {
-            x = Math.round(anchor.x - size.width / 2);
-            y = Math.round(anchor.y - size.height - MODULE_INTERFACE_OUTER_GAP + MODULE_INTERFACE_EDGE_OVERLAP);
+        if (placementMode === 'inside') {
+          if (anchor) {
+            if (side === 'left') {
+              x = anchor.x + MODULE_INTERFACE_INNER_GAP;
+              y = anchor.y - size.height / 2;
+            } else if (side === 'right') {
+              x = anchor.x - size.width - MODULE_INTERFACE_INNER_GAP;
+              y = anchor.y - size.height / 2;
+            } else if (side === 'top') {
+              x = anchor.x - size.width / 2;
+              y = anchor.y + MODULE_INTERFACE_INNER_GAP;
+            } else {
+              x = anchor.x - size.width / 2;
+              y = anchor.y - size.height - MODULE_INTERFACE_INNER_GAP;
+            }
           } else {
-            x = Math.round(anchor.x - size.width / 2);
-            y = Math.round(anchor.y + MODULE_INTERFACE_OUTER_GAP - MODULE_INTERFACE_EDGE_OVERLAP);
+            if (side === 'left') {
+              x = targetRect.x + MODULE_INTERFACE_INNER_GAP;
+              y = targetRect.y + Math.round(offset * targetRect.height - size.height / 2);
+            } else if (side === 'right') {
+              x = targetRect.x + targetRect.width - size.width - MODULE_INTERFACE_INNER_GAP;
+              y = targetRect.y + Math.round(offset * targetRect.height - size.height / 2);
+            } else if (side === 'top') {
+              x = targetRect.x + Math.round(offset * targetRect.width - size.width / 2);
+              y = targetRect.y + MODULE_INTERFACE_INNER_GAP;
+            } else {
+              x = targetRect.x + Math.round(offset * targetRect.width - size.width / 2);
+              y = targetRect.y + targetRect.height - size.height - MODULE_INTERFACE_INNER_GAP;
+            }
           }
-        } else if (side === 'left') {
-          x = targetRect.x - size.width - MODULE_INTERFACE_OUTER_GAP + MODULE_INTERFACE_EDGE_OVERLAP;
-          y = targetRect.y + Math.round(offset * targetRect.height - size.height / 2);
-        } else if (side === 'right') {
-          x = targetRect.x + targetRect.width + MODULE_INTERFACE_OUTER_GAP - MODULE_INTERFACE_EDGE_OVERLAP;
-          y = targetRect.y + Math.round(offset * targetRect.height - size.height / 2);
-        } else if (side === 'top') {
-          x = targetRect.x + Math.round(offset * targetRect.width - size.width / 2);
-          y = targetRect.y - size.height - MODULE_INTERFACE_OUTER_GAP + MODULE_INTERFACE_EDGE_OVERLAP;
+          var inside = clampInterfaceInsideRect(targetRect, size, x, y);
+          x = inside.x;
+          y = inside.y;
         } else {
-          x = targetRect.x + Math.round(offset * targetRect.width - size.width / 2);
-          y = targetRect.y + targetRect.height + MODULE_INTERFACE_OUTER_GAP - MODULE_INTERFACE_EDGE_OVERLAP;
+          if (anchor) {
+            if (side === 'left') {
+              x = Math.round(anchor.x - size.width - MODULE_INTERFACE_OUTER_GAP + MODULE_INTERFACE_EDGE_OVERLAP);
+              y = Math.round(anchor.y - size.height / 2);
+            } else if (side === 'right') {
+              x = Math.round(anchor.x + MODULE_INTERFACE_OUTER_GAP - MODULE_INTERFACE_EDGE_OVERLAP);
+              y = Math.round(anchor.y - size.height / 2);
+            } else if (side === 'top') {
+              x = Math.round(anchor.x - size.width / 2);
+              y = Math.round(anchor.y - size.height - MODULE_INTERFACE_OUTER_GAP + MODULE_INTERFACE_EDGE_OVERLAP);
+            } else {
+              x = Math.round(anchor.x - size.width / 2);
+              y = Math.round(anchor.y + MODULE_INTERFACE_OUTER_GAP - MODULE_INTERFACE_EDGE_OVERLAP);
+            }
+          } else if (side === 'left') {
+            x = targetRect.x - size.width - MODULE_INTERFACE_OUTER_GAP + MODULE_INTERFACE_EDGE_OVERLAP;
+            y = targetRect.y + Math.round(offset * targetRect.height - size.height / 2);
+          } else if (side === 'right') {
+            x = targetRect.x + targetRect.width + MODULE_INTERFACE_OUTER_GAP - MODULE_INTERFACE_EDGE_OVERLAP;
+            y = targetRect.y + Math.round(offset * targetRect.height - size.height / 2);
+          } else if (side === 'top') {
+            x = targetRect.x + Math.round(offset * targetRect.width - size.width / 2);
+            y = targetRect.y - size.height - MODULE_INTERFACE_OUTER_GAP + MODULE_INTERFACE_EDGE_OVERLAP;
+          } else {
+            x = targetRect.x + Math.round(offset * targetRect.width - size.width / 2);
+            y = targetRect.y + targetRect.height + MODULE_INTERFACE_OUTER_GAP - MODULE_INTERFACE_EDGE_OVERLAP;
+          }
         }
         var placedGeo = placeInterfaceGeometry(metrics, x, y);
         placements.push({ marker: entry, cell: cell, x: placedGeo.x, y: placedGeo.y });
@@ -2619,7 +2691,8 @@
     return groupMarkersByModule(collectGeneratedMarkerMeta(ui));
   };
 
-  function collectModuleDesignInputsFromAnalysis(ui, analysis) {
+  function collectModuleDesignInputsFromAnalysis(ui, analysis, opts) {
+    opts = opts || {};
     var owner = getGenerationOwner(ui);
     var ownerKind = owner && owner.__kind ? String(owner.__kind).toLowerCase() : '';
     if (ownerKind !== 'module-design' || !owner || !owner.name || !analysis || !analysis.interfacePlan || !Array.isArray(analysis.interfacePlan.markers) || !analysis.interfacePlan.markers.length) {
@@ -2656,24 +2729,190 @@
       }
       if (key) usedKeys[key] = true;
     });
-    for (i = 0; i < existingEntries.length; i++) {
-      var existingEntry = existingEntries[i];
-      var existingMeta = existingEntry && existingEntry.meta ? existingEntry.meta : null;
-      if (!existingMeta || String(existingMeta.moduleName || '') !== ownerName) continue;
-      var existingOwnerKey = makeMetaKey(existingMeta);
-      if (existingOwnerKey && usedKeys[existingOwnerKey]) continue;
-      if (existingOwnerKey) usedKeys[existingOwnerKey] = true;
-      out[ownerName].push({
-        meta: Shared.cloneJson(existingMeta),
-        cell: existingEntry && existingEntry.cell ? existingEntry.cell : null,
-        __fromExistingOwner: true
-      });
+    if (opts.includeExistingOwner !== false) {
+      for (i = 0; i < existingEntries.length; i++) {
+        var existingEntry = existingEntries[i];
+        var existingMeta = existingEntry && existingEntry.meta ? existingEntry.meta : null;
+        if (!existingMeta || String(existingMeta.moduleName || '') !== ownerName) continue;
+        var existingOwnerKey = makeMetaKey(existingMeta);
+        if (existingOwnerKey && usedKeys[existingOwnerKey]) continue;
+        if (existingOwnerKey) usedKeys[existingOwnerKey] = true;
+        out[ownerName].push({
+          meta: Shared.cloneJson(existingMeta),
+          cell: existingEntry && existingEntry.cell ? existingEntry.cell : null,
+          __fromExistingOwner: true
+        });
+      }
     }
     return out;
   }
 
+  function flattenLayerInputs(layerInputs) {
+    var out = [];
+    var names = Object.keys(layerInputs || {});
+    for (var i = 0; i < names.length; i++) {
+      var entries = Array.isArray(layerInputs[names[i]]) ? layerInputs[names[i]] : [];
+      for (var j = 0; j < entries.length; j++) out.push(entries[j]);
+    }
+    return out;
+  }
+
+  function mapEntriesByMetaKey(entries) {
+    var out = Object.create(null);
+    entries = Array.isArray(entries) ? entries : [];
+    for (var i = 0; i < entries.length; i++) {
+      var entry = entries[i];
+      var key = makeMetaKey(entry && entry.meta ? entry.meta : null);
+      if (key && !out[key]) out[key] = entry;
+    }
+    return out;
+  }
+
+  function uniqueCells(cells) {
+    var out = [];
+    var seen = Object.create(null);
+    cells = Array.isArray(cells) ? cells : [];
+    for (var i = 0; i < cells.length; i++) {
+      var cell = cells[i];
+      if (!cell) continue;
+      var key = cell.id != null ? String(cell.id) : ('idx:' + i);
+      if (seen[key]) continue;
+      seen[key] = true;
+      out.push(cell);
+    }
+    return out;
+  }
+
+  function addGeneratedInterfacesToPage(ui, moduleName, sourceModuleCell, layerInputs, bodyCell, placementMode) {
+    var graph = Shared.graphOf(ui);
+    var model = graph && graph.getModel ? graph.getModel() : null;
+    if (!graph || !model || !bodyCell) return { added: 0 };
+    var pageName = ui && ui._activeProjectPageCtx ? String(ui._activeProjectPageCtx.name || '') : '';
+    var interfaceStyleOpts = interfaceStyleOptsForPageName(pageName);
+    var layerParents = ensureNamedLayers(ui, MODULE_LAYER_ORDER);
+    var bodyRect = Shared.rectOfCell(bodyCell) || null;
+    var addedCount = 0;
+
+    model.beginUpdate();
+    try {
+      for (var i = 0; i < MODULE_INTERFACE_LAYER_ORDER.length; i++) {
+        var layerName = MODULE_INTERFACE_LAYER_ORDER[i];
+        var entries = Array.isArray(layerInputs && layerInputs[layerName]) ? layerInputs[layerName] : [];
+        if (!entries.length) continue;
+        var parent = layerParents[String(layerName || '').toLowerCase()] || Shared.getDefaultParent(ui);
+        var bySide = countBySide(entries);
+        var prototypes = {};
+        for (var j = 0; j < entries.length; j++) {
+          prototypes[markerPrototypeKey(entries[j] && entries[j].meta ? entries[j].meta : null)] =
+            createInterfaceCell(graph, entries[j], interfaceStyleOpts);
+        }
+        var placements = positionInterfacesAroundBody(bodyRect, bySide, prototypes, bodyCell, sourceModuleCell, placementMode);
+        for (var p = 0; p < placements.length; p++) {
+          var addedInterface = addCellAt(graph, parent, placements[p].cell, placements[p].x, placements[p].y);
+          var sourceInterfaceCell = placements[p].marker && placements[p].marker.cell ? placements[p].marker.cell : null;
+          var markerMeta = placements[p].marker && placements[p].marker.meta ? placements[p].marker.meta : null;
+          if (addedInterface && addedInterface.__flowPreserveSourceAppearance) {
+            persistGeneratedInterfaceMeta(graph, addedInterface, markerMeta, interfaceStyleOpts);
+          } else if (!sourceInterfaceCell) {
+            normalizeGeneratedInterfaceWithoutSource(graph, addedInterface, markerMeta, interfaceStyleOpts);
+          } else {
+            applyMarkerAppearanceToInterface(graph, addedInterface, sourceInterfaceCell, markerMeta, interfaceStyleOpts);
+            persistGeneratedInterfaceMeta(graph, addedInterface, markerMeta, interfaceStyleOpts);
+          }
+          addedCount += 1;
+        }
+      }
+    } finally {
+      model.endUpdate();
+    }
+
+    return { added: addedCount };
+  }
+
+  function syncModuleBodyFromSource(ui, moduleName, sourceModuleCell, bodyCell) {
+    var graph = Shared.graphOf(ui);
+    var model = graph && graph.getModel ? graph.getModel() : null;
+    if (!graph || !model || !sourceModuleCell || !bodyCell) return bodyCell;
+    var bodyRect = Shared.rectOfCell(bodyCell) || null;
+    var parent = model.getParent(bodyCell);
+    if (!bodyRect || !parent) return bodyCell;
+
+    var replacement = createFloorplanModuleCell(
+      graph,
+      moduleName,
+      Number(bodyRect.width || 0),
+      Number(bodyRect.height || 0),
+      sourceModuleCell,
+      { interactive: true }
+    );
+    if (!replacement) return bodyCell;
+
+    model.beginUpdate();
+    try {
+      graph.removeCells([bodyCell], false);
+      return addCellAt(graph, parent, replacement, Number(bodyRect.x || 0), Number(bodyRect.y || 0));
+    } finally {
+      model.endUpdate();
+    }
+  }
+
+  function mergeCurrentModuleArchPage(ui, ownerName, sourceModuleCell, layerInputs) {
+    var graph = Shared.graphOf(ui);
+    var model = graph && graph.getModel ? graph.getModel() : null;
+    if (!graph || !model) return { merged: false, reason: 'graph-not-ready' };
+
+    var bodyCell = findModuleCellForMeta(graph, ownerName);
+    if (!bodyCell) return { merged: false, reason: 'body-missing' };
+    bodyCell = syncModuleBodyFromSource(ui, ownerName, sourceModuleCell, bodyCell) || bodyCell;
+
+    var existingEntries = collectGeneratedMarkerMeta(ui);
+    var existingByKey = mapEntriesByMetaKey(existingEntries);
+    var targetEntries = flattenLayerInputs(layerInputs);
+    var targetByKey = mapEntriesByMetaKey(targetEntries);
+    var removeCells = [];
+    var addByLayer = Object.create(null);
+    var existingKeys = Object.keys(existingByKey);
+    var targetKeys = Object.keys(targetByKey);
+
+    for (var i = 0; i < existingKeys.length; i++) {
+      var existingKey = existingKeys[i];
+      if (targetByKey[existingKey]) continue;
+      var existingCell = existingByKey[existingKey] && existingByKey[existingKey].cell ? existingByKey[existingKey].cell : null;
+      if (existingCell) removeCells.push(existingCell);
+    }
+
+    for (i = 0; i < targetKeys.length; i++) {
+      var targetKey = targetKeys[i];
+      if (existingByKey[targetKey]) continue;
+      var targetEntry = targetByKey[targetKey];
+      var layerName = normalizeLayerName(targetEntry && targetEntry.meta && targetEntry.meta.layerName);
+      if (!layerName) continue;
+      if (!addByLayer[layerName]) addByLayer[layerName] = [];
+      addByLayer[layerName].push(targetEntry);
+    }
+
+    removeCells = uniqueCells(removeCells);
+    if (removeCells.length) {
+      model.beginUpdate();
+      try {
+        graph.removeCells(removeCells, false);
+      } finally {
+        model.endUpdate();
+      }
+    }
+
+    var addResult = addGeneratedInterfacesToPage(ui, ownerName, sourceModuleCell, addByLayer, bodyCell, 'inside');
+    return {
+      merged: true,
+      removed: removeCells.length,
+      added: addResult && addResult.added ? addResult.added : 0,
+      preserved: Math.max(0, targetKeys.length - (addResult && addResult.added ? addResult.added : 0))
+    };
+  }
+
   async function syncCurrentModuleArch(ui, analysis, opts) {
     opts = opts || {};
+    var syncMode = String(opts.syncMode || 'rebuild').toLowerCase();
     var owner = getGenerationOwner(ui);
     var ownerKind = owner && owner.__kind ? String(owner.__kind).toLowerCase() : '';
     if (ownerKind !== 'module-design' || !owner || !owner.name) {
@@ -2686,7 +2925,16 @@
     }
 
     analysis = analysis || Analysis.analyzeDataflow(ui);
-    var designInputs = collectModuleDesignInputsFromAnalysis(ui, analysis) || Designs.collectDesignInputs(ui) || {};
+    var designInputs = null;
+    if (syncMode === 'merge') {
+      designInputs = collectModuleDesignInputsFromAnalysis(ui, analysis, {
+        includeExistingOwner: false
+      }) || {};
+    } else {
+      designInputs = collectModuleDesignInputsFromAnalysis(ui, analysis, {
+        includeExistingOwner: true
+      }) || Designs.collectDesignInputs(ui) || {};
+    }
     var ownerEntries = Array.isArray(designInputs[owner.name]) ? designInputs[owner.name] : [];
     var layerInputs = groupMarkersByLayer(ownerEntries);
     var modulePlans = analysis && analysis.interfacePlan && analysis.interfacePlan.modulePlans ? analysis.interfacePlan.modulePlans : {};
@@ -2697,6 +2945,10 @@
     await ensurePage(ui, owner, 'arch');
     try {
       await withOpenedPage(ui, owner, 'arch', function () {
+        if (syncMode === 'merge') {
+          var mergeResult = mergeCurrentModuleArchPage(ui, owner.name, sourceModuleCell, layerInputs);
+          if (mergeResult && mergeResult.merged) return mergeResult;
+        }
         return populateModuleDesignPage(
           ui,
           owner.name,
@@ -2764,7 +3016,7 @@
     var modulePlans = analysis && analysis.interfacePlan && analysis.interfacePlan.modulePlans ? analysis.interfacePlan.modulePlans : {};
     try {
       if (ownerModuleName) {
-        var ownerSync = await syncCurrentModuleArch(ui, analysis, { restore: false, allowFromAnyPage: true });
+        var ownerSync = await syncCurrentModuleArch(ui, analysis, { restore: false, allowFromAnyPage: true, syncMode: 'rebuild' });
         if (ownerSync && ownerSync.synced) {
           results.push({
             module: ownerModuleName,
