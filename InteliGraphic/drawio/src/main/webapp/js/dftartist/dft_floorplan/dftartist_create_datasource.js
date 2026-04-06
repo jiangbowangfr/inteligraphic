@@ -500,6 +500,12 @@
         var style = graph.getCellStyle(pin);
         var side = mxUtils.getValue(style, 'dftsIP_pin_location', mxUtils.getValue(style, 'dftsIP_symbolSide', 'east'));
 
+        var constraintInfo = getPinConstraintInfo(graph, body, pin, side);
+        if (constraintInfo && constraintInfo.constraint) {
+            var connectionPoint = getAbsoluteConstraintPoint(graph, body, constraintInfo.constraint);
+            if (connectionPoint) return connectionPoint;
+        }
+
         var ox = (pg.offset && pg.offset.x) ? pg.offset.x : 0;
         var oy = (pg.offset && pg.offset.y) ? pg.offset.y : 0;
 
@@ -519,6 +525,133 @@
         if (side === 'east') return new mxPoint(x + pg.width, y + pg.height / 2);
         if (side === 'north') return new mxPoint(x + pg.width / 2, y);
         return new mxPoint(x + pg.width / 2, y + pg.height);
+    }
+
+    function buildConstraintMeta(relPoint, meta) {
+        if (!relPoint) return null;
+        var constraint = new mxConnectionConstraint(new mxPoint(relPoint.x, relPoint.y), false);
+        meta = meta || {};
+        if (meta.pinKey) constraint.dftsPinKey = String(meta.pinKey);
+        if (meta.side) constraint.dftsSide = String(meta.side);
+        if (meta.anchorKind) constraint.dftsAnchorKind = String(meta.anchorKind);
+        return constraint;
+    }
+
+    function getPinConstraintInfo(graph, body, pin, sideOverride) {
+        if (!graph || !body || !pin || !pin.geometry || !body.geometry) return null;
+        var pg = pin.geometry;
+        var bg = body.geometry;
+        var style = graph.getCellStyle(pin);
+        var side = String(sideOverride || mxUtils.getValue(style, 'dftsIP_pin_location', mxUtils.getValue(style, 'dftsIP_symbolSide', 'east')) || 'east').toLowerCase();
+        var relPoint = null;
+        if (side === 'west') relPoint = new mxPoint(0, (Number(pg.y || 0) + Number(pg.height || 0) / 2) / Math.max(1, Number(bg.height || 1)));
+        else if (side === 'east') relPoint = new mxPoint(1, (Number(pg.y || 0) + Number(pg.height || 0) / 2) / Math.max(1, Number(bg.height || 1)));
+        else if (side === 'north') relPoint = new mxPoint((Number(pg.x || 0) + Number(pg.width || 0) / 2) / Math.max(1, Number(bg.width || 1)), 0);
+        else relPoint = new mxPoint((Number(pg.x || 0) + Number(pg.width || 0) / 2) / Math.max(1, Number(bg.width || 1)), 1);
+        var pinKey = mxUtils.getValue(style, 'dftsIP_pinKey', String(pin.__dftsSymbolKey || ''));
+        return {
+            pin: pin,
+            pinKey: pinKey,
+            side: side,
+            relPoint: relPoint,
+            constraint: buildConstraintMeta(relPoint, {
+                pinKey: pinKey,
+                side: side,
+                anchorKind: 'pin'
+            })
+        };
+    }
+
+    function getAbsoluteConstraintPoint(graph, body, constraint) {
+        if (!graph || !body || !constraint || !constraint.point) return null;
+        try {
+            if (graph.view && typeof graph.view.getState === 'function' && typeof graph.getConnectionPoint === 'function') {
+                var state = graph.view.getState(body);
+                if (state) {
+                    var point = graph.getConnectionPoint(state, constraint, true);
+                    if (point) {
+                        var scale = Number(graph.view && graph.view.scale || 1) || 1;
+                        var tr = graph.view && graph.view.translate ? graph.view.translate : { x: 0, y: 0 };
+                        return new mxPoint(
+                            (Number(point.x || 0) / scale) - Number(tr.x || 0),
+                            (Number(point.y || 0) / scale) - Number(tr.y || 0)
+                        );
+                    }
+                }
+            }
+        } catch (e) { }
+        return getAbsolutePointOnBody(graph, body, constraint.point);
+    }
+
+    function collectGeneratedInterfaceAnchors(graph, body, mode) {
+        if (!graph || !body) return [];
+        var pins = [];
+        if (mode === 'start') pins = getFloorplanStartPinsForBody(graph, body);
+        else if (mode === 'target') pins = getFloorplanTargetPinsForBody(graph, body);
+        else {
+            var startPins = getFloorplanStartPinsForBody(graph, body);
+            var targetPins = getFloorplanTargetPinsForBody(graph, body);
+            var seenPins = {};
+            for (var s = 0; s < startPins.length; s++) {
+                var sid = startPins[s] && (startPins[s].id || mxObjectIdentity.get(startPins[s]));
+                if (!sid || seenPins[sid]) continue;
+                seenPins[sid] = true;
+                pins.push(startPins[s]);
+            }
+            for (var t = 0; t < targetPins.length; t++) {
+                var tid = targetPins[t] && (targetPins[t].id || mxObjectIdentity.get(targetPins[t]));
+                if (!tid || seenPins[tid]) continue;
+                seenPins[tid] = true;
+                pins.push(targetPins[t]);
+            }
+        }
+
+        if ((!pins || !pins.length) && isSymbolBody(body)) {
+            pins = getSymbolPorts(body);
+        }
+
+        var out = [];
+        for (var i = 0; i < pins.length; i++) {
+            var info = getPinConstraintInfo(graph, body, pins[i]);
+            if (!info || !info.constraint || !info.relPoint) continue;
+            var point = getAbsoluteConstraintPoint(graph, body, info.constraint);
+            if (!point) point = getPinExitPoint(graph, pins[i]);
+            if (!point) continue;
+            out.push({
+                pin: pins[i],
+                pinKey: info.pinKey,
+                side: info.side,
+                point: point,
+                relPoint: info.relPoint,
+                constraint: info.constraint,
+                kind: 'pin'
+            });
+        }
+        return out;
+    }
+
+    function collectBodyPointAnchors(graph, body) {
+        var relPoints = getBodyConnectionPoints();
+        var out = [];
+        for (var i = 0; i < relPoints.length; i++) {
+            var relPoint = relPoints[i];
+            out.push({
+                point: getAbsolutePointOnBody(graph, body, relPoint),
+                relPoint: relPoint,
+                constraint: buildConstraintMeta(relPoint, { anchorKind: 'body' }),
+                kind: 'body'
+            });
+        }
+        return out;
+    }
+
+    function getFloorplanAnchorsForBody(graph, body, mode) {
+        if (!graph || !body) return [];
+        if (isGeneratedInterfaceBody(graph, body)) {
+            var generated = collectGeneratedInterfaceAnchors(graph, body, mode || 'any');
+            if (generated.length) return generated;
+        }
+        return collectBodyPointAnchors(graph, body);
     }
 
     function attachFloorplanLineAnchor(graph, edge, pin, anchorSide) {
@@ -730,7 +863,12 @@
     }
 
     function getGeneratedInterfaceConnectionPoints(graph, body) {
-        return getBodyConnectionPoints();
+        var anchors = getFloorplanAnchorsForBody(graph, body, 'any');
+        var out = [];
+        for (var i = 0; i < anchors.length; i++) {
+            if (anchors[i] && anchors[i].relPoint) out.push(anchors[i].relPoint);
+        }
+        return out.length ? out : getBodyConnectionPoints();
     }
 
     function getFloorplanConnectionPointsForBody(graph, body) {
@@ -786,17 +924,25 @@
 
     function findNearestBodyConnectionPoint(graph, body, pt) {
         if (!graph || !body || !pt) return null;
-        var relPoints = getFloorplanConnectionPointsForBody(graph, body);
+        var anchors = getFloorplanAnchorsForBody(graph, body, isGeneratedInterfaceBody(graph, body) ? 'start' : 'any');
         var best = null;
         var bestDist = Infinity;
-        for (var i = 0; i < relPoints.length; i++) {
-            var absPt = getAbsolutePointOnBody(graph, body, relPoints[i]);
+        for (var i = 0; i < anchors.length; i++) {
+            var absPt = anchors[i] && anchors[i].point ? anchors[i].point : null;
             if (!absPt) continue;
             var dx = absPt.x - pt.x;
             var dy = absPt.y - pt.y;
             var dist = Math.sqrt(dx * dx + dy * dy);
             if (dist < bestDist) {
-                best = { point: absPt, relPoint: relPoints[i], distance: dist };
+                best = {
+                    point: absPt,
+                    relPoint: anchors[i].relPoint,
+                    constraint: anchors[i].constraint || null,
+                    pin: anchors[i].pin || null,
+                    pinKey: anchors[i].pinKey || '',
+                    kind: anchors[i].kind || 'body',
+                    distance: dist
+                };
                 bestDist = dist;
             }
         }
@@ -847,6 +993,37 @@
 
     function resolveGeneratedInterfaceStartPoint(graph, body, pt) {
         if (!graph || !body) return null;
+        var anchors = getFloorplanAnchorsForBody(graph, body, 'start');
+        if (anchors.length) {
+            var refPt = pt;
+            if (!refPt) {
+                var bounds = getBodyGraphBounds(graph, body);
+                if (bounds) refPt = new mxPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+            }
+            if (refPt) {
+                var best = null;
+                var bestDist = Infinity;
+                for (var i = 0; i < anchors.length; i++) {
+                    var dx = anchors[i].point.x - refPt.x;
+                    var dy = anchors[i].point.y - refPt.y;
+                    var dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist < bestDist) {
+                        best = anchors[i];
+                        bestDist = dist;
+                    }
+                }
+                if (best) {
+                    return {
+                        point: best.point,
+                        relPoint: best.relPoint,
+                        constraint: best.constraint || null,
+                        pin: best.pin || null,
+                        pinKey: best.pinKey || '',
+                        distance: bestDist
+                    };
+                }
+            }
+        }
         var refPt = pt;
         if (!refPt) {
             var bounds = getBodyGraphBounds(graph, body);
@@ -973,13 +1150,33 @@
             var body = bodies[i];
             if (!bodyHasLogicalFloorplanTarget(graph, body)) continue;
             if (isGeneratedInterfaceBody(graph, body)) {
-                var projected = projectPointToBodyPerimeter(graph, body, pt);
+                var generatedAnchors = getFloorplanAnchorsForBody(graph, body, 'target');
+                if (!generatedAnchors.length) continue;
+                var projected = null;
+                for (var ga = 0; ga < generatedAnchors.length; ga++) {
+                    var anchor = generatedAnchors[ga];
+                    if (!anchor || !anchor.point) continue;
+                    var gdx = anchor.point.x - pt.x;
+                    var gdy = anchor.point.y - pt.y;
+                    var gdist = Math.sqrt(gdx * gdx + gdy * gdy);
+                    if (!projected || gdist < projected.distance) {
+                        projected = {
+                            point: anchor.point,
+                            relPoint: anchor.relPoint,
+                            pin: anchor.pin || null,
+                            pinKey: anchor.pinKey || '',
+                            distance: gdist
+                        };
+                    }
+                }
                 if (!projected || !projected.point) continue;
                 if (isPointInsideBody(graph, body, pt, 0)) {
                     return {
                         body: body,
                         point: projected.point,
                         relPoint: projected.relPoint,
+                        pin: projected.pin || null,
+                        pinKey: projected.pinKey || '',
                         distance: 0
                     };
                 }
@@ -987,7 +1184,9 @@
                     best = {
                         body: body,
                         point: projected.point,
-                        relPoint: projected.relPoint
+                        relPoint: projected.relPoint,
+                        pin: projected.pin || null,
+                        pinKey: projected.pinKey || ''
                     };
                     bestDist = projected.distance;
                 }
@@ -1046,18 +1245,19 @@
         var canStart = bodyHasLogicalFloorplanStart(graph, body);
         var canTarget = bodyHasLogicalFloorplanTarget(graph, body);
         if (!canStart && !canTarget) return null;
-        var points = getFloorplanConnectionPointsForBody(graph, body);
+        var mode = canStart && canTarget ? 'any' : (canStart ? 'start' : 'target');
+        var anchors = getFloorplanAnchorsForBody(graph, body, mode);
         var out = [];
-        for (var i = 0; i < points.length; i++) {
-            var relPt = points[i];
-            var c = new mxConnectionConstraint(new mxPoint(relPt.x, relPt.y), false);
-            out.push(c);
+        for (var i = 0; i < anchors.length; i++) {
+            var c = anchors[i] && anchors[i].constraint ? anchors[i].constraint : null;
+            if (c && c.point) out.push(c);
         }
 
         debugLog('constraints', body.id || (body.getId && body.getId()), out.map(function (c) {
             return {
                 x: c.point && c.point.x,
-                y: c.point && c.point.y
+                y: c.point && c.point.y,
+                pinKey: c.dftsPinKey || ''
             };
         }));
         return out.length ? out : null;
@@ -1108,7 +1308,7 @@
         });
     }
 
-    function startFloorplanLineFromBody(realUi, graph, body, startPt) {
+    function startFloorplanLineFromBody(realUi, graph, body, startPt, opts) {
         var lineNS = getLineNS();
         if (!lineNS || typeof realUi.startFloorplanLineFromPoint !== 'function') {
             if (typeof mxUtils !== 'undefined' && mxUtils.alert) {
@@ -1117,6 +1317,7 @@
             return null;
         }
         if (!body || !startPt) return null;
+        opts = opts || {};
 
         var pt = startPt;
         if (!pt) return null;
@@ -1126,7 +1327,8 @@
             commitOnMouseUp: true,
             autoFinishOnMouseUp: true,
             decorateEdge: function (edge, g) {
-                attachFloorplanLineBodyPointAnchor(g, edge, body, pt, 'source');
+                if (opts.sourcePin) attachFloorplanLineAnchor(g, edge, opts.sourcePin, 'source');
+                else attachFloorplanLineBodyPointAnchor(g, edge, body, pt, 'source');
                 detachFloorplanLineAnchor(g, edge, 'target');
             },
             snapPoint: function (basePt, snapCtx) {
@@ -1144,6 +1346,7 @@
                     meta: {
                         kind: 'floorplanTargetBodyPoint',
                         body: hit.body,
+                        pin: hit.pin || null,
                         point: hit.point,
                         distance: hit.distance
                     }
@@ -1152,7 +1355,8 @@
             afterCommitPoint: function (ctx) {
                 var edge = ctx && ctx.tool ? ctx.tool.edge : null;
                 if (!edge) return;
-                if (ctx.snap && ctx.snap.body && ctx.snap.point) attachFloorplanLineBodyPointAnchor(graph, edge, ctx.snap.body, ctx.snap.point, 'target');
+                if (ctx.snap && ctx.snap.pin) attachFloorplanLineAnchor(graph, edge, ctx.snap.pin, 'target');
+                else if (ctx.snap && ctx.snap.body && ctx.snap.point) attachFloorplanLineBodyPointAnchor(graph, edge, ctx.snap.body, ctx.snap.point, 'target');
                 else detachFloorplanLineAnchor(graph, edge, 'target');
                 syncAnchoredFloorplanLine(graph, edge);
             }
@@ -1167,16 +1371,20 @@
         });
         if (!bodyHasLogicalFloorplanStart(graph, body)) return false;
         var pt = null;
+        var sourcePin = null;
         if (constraint && constraint.point) {
-            pt = getAbsolutePointOnBody(graph, body, constraint.point);
+            pt = getAbsoluteConstraintPoint(graph, body, constraint);
+            var constraintPinKey = constraint.dftsPinKey || constraint.pinKey || '';
+            if (constraintPinKey) sourcePin = findPinByKey(graph, body, constraintPinKey);
         } else if (isGeneratedInterfaceBody(graph, body)) {
             var projected = resolveGeneratedInterfaceStartPoint(graph, body, mousePt);
             pt = projected && projected.point ? projected.point : null;
+            sourcePin = projected && projected.pin ? projected.pin : null;
         } else {
             return false;
         }
         if (!pt) return false;
-        return !!startFloorplanLineFromBody(realUi, graph, body, pt);
+        return !!startFloorplanLineFromBody(realUi, graph, body, pt, { sourcePin: sourcePin });
     }
 
     function getMouseGraphPoint(graph, me, cell) {
