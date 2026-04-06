@@ -2877,7 +2877,10 @@
     for (var i = 0; i < existingKeys.length; i++) {
       var existingKey = existingKeys[i];
       if (targetByKey[existingKey]) continue;
-      var existingCell = existingByKey[existingKey] && existingByKey[existingKey].cell ? existingByKey[existingKey].cell : null;
+      var existingEntry = existingByKey[existingKey] || null;
+      var existingMeta = existingEntry && existingEntry.meta ? existingEntry.meta : null;
+      if (String(existingMeta && existingMeta.moduleName || '') === String(ownerName || '')) continue;
+      var existingCell = existingEntry && existingEntry.cell ? existingEntry.cell : null;
       if (existingCell) removeCells.push(existingCell);
     }
 
