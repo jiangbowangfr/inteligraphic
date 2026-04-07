@@ -202,6 +202,12 @@
       });
     }
 
+    if (Designs && typeof Designs.syncCurrentFloorplanArch === 'function' && Shared.isFloorplanPageOpen(ui)) {
+      exportChain = exportChain.then(function () {
+        return Designs.syncCurrentFloorplanArch(ui, analysis, { reason: 'generate-interface' });
+      });
+    }
+
     if (Designs && typeof Designs.syncCurrentModuleArch === 'function' && Shared.isModuleDataflowPageOpen(ui)) {
       exportChain = exportChain.then(function () {
         return Designs.syncCurrentModuleArch(ui, analysis, { reason: 'generate-interface', syncMode: 'merge' });

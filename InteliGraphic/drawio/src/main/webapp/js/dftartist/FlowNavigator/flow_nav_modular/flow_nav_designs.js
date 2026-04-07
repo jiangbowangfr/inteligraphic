@@ -155,6 +155,16 @@
     return null;
   }
 
+  function getActiveFloorplanContainer(ui) {
+    var ctx = ui && ui._activeProjectPageCtx ? ui._activeProjectPageCtx : null;
+    var designRef = ctx && ctx.designRef ? ctx.designRef : null;
+    if (designRef) {
+      designRef = resolveProjectDesignRef(ui, designRef) || designRef;
+      if (String(designRef.__kind || '').toLowerCase() === 'floorplan-container') return designRef;
+    }
+    return null;
+  }
+
   function normalizeModuleDesignShape(design) {
     if (!design) return design;
     design.__kind = 'module-design';
@@ -326,6 +336,13 @@
     for (var i = 0; i < childCount; i++) doomed.push(model.getChildAt(parent, i));
     if (!doomed.length) return;
     graph.removeCells(doomed, false);
+  }
+
+  function clearAllTopLevelLayerContents(ui) {
+    var graph = Shared.graphOf(ui);
+    var layers = Shared.getTopLevelLayers ? Shared.getTopLevelLayers(ui) : [];
+    if (!graph || !layers || !layers.length) return;
+    for (var i = 0; i < layers.length; i++) clearParentContents(graph, layers[i]);
   }
 
   function clearParentContents(graph, parent) {
@@ -1406,6 +1423,23 @@
       if (!name) continue;
       if (!out[name]) out[name] = [];
       out[name].push(entry);
+    }
+    return out;
+  }
+
+  function buildLargestModuleCellMap(cells) {
+    var out = Object.create(null);
+    cells = Array.isArray(cells) ? cells : [];
+    for (var i = 0; i < cells.length; i++) {
+      var cell = cells[i];
+      var moduleName = trimString(moduleNameForCell(cell));
+      if (!moduleName) continue;
+      var rect = Shared.rectOfCell(cell) || null;
+      var area = rect ? Number(rect.width || 0) * Number(rect.height || 0) : 0;
+      var existing = out[moduleName] || null;
+      var existingRect = existing ? (Shared.rectOfCell(existing) || null) : null;
+      var existingArea = existingRect ? Number(existingRect.width || 0) * Number(existingRect.height || 0) : -1;
+      if (!existing || area >= existingArea) out[moduleName] = cell;
     }
     return out;
   }
@@ -2913,6 +2947,99 @@
     };
   }
 
+  async function syncCurrentFloorplanArch(ui, analysis, opts) {
+    opts = opts || {};
+    var floorplan = getActiveFloorplanContainer(ui);
+    if (!floorplan) return { synced: false, reason: 'active-design-not-floorplan' };
+
+    var currentPageName = ui && ui._activeProjectPageCtx ? String(ui._activeProjectPageCtx.name || '') : '';
+    if (currentPageName && !isDataflowPageName(currentPageName) && opts.allowFromAnyPage !== true) {
+      return { synced: false, reason: 'page-not-dataflow', page: currentPageName };
+    }
+
+    var sourceGraph = Shared.graphOf(ui);
+    var sourceModules = buildLargestModuleCellMap(collectFloorplanModuleCells(sourceGraph));
+    var sourceModuleNames = Object.keys(sourceModules).sort();
+    var markerEntries = collectGeneratedMarkerMeta(ui);
+    var markersByModule = groupMarkersByModule(markerEntries);
+    var previousCtx = opts.restore === false ? null : captureCurrentPageCtx(ui);
+
+    await ensurePage(ui, floorplan, 'arch');
+    try {
+      await withOpenedPage(ui, floorplan, 'arch', async function () {
+        var graph = Shared.graphOf(ui);
+        var baseLayerParent = null;
+        var targetModules = Object.create(null);
+        var targetCount = 0;
+
+        clearAllTopLevelLayerContents(ui);
+        var layerParents = ensureNamedLayers(ui, MODULE_LAYER_ORDER);
+        baseLayerParent = layerParents.base || Shared.getDefaultParent(ui);
+
+        if (!graph || !baseLayerParent) throw new Error('Graph is not ready for floorplan arch sync.');
+
+        graph.getModel().beginUpdate();
+        try {
+          for (var i = 0; i < sourceModuleNames.length; i++) {
+            var moduleName = sourceModuleNames[i];
+            var sourceModuleCell = sourceModules[moduleName];
+            var rect = Shared.rectOfCell(sourceModuleCell) || sourceModuleCell.geometry || null;
+            if (!sourceModuleCell || !rect) continue;
+            var targetModuleCell = createFloorplanModuleCell(
+              graph,
+              moduleName,
+              Number(rect.width || 0),
+              Number(rect.height || 0),
+              sourceModuleCell,
+              { interactive: true }
+            );
+            targetModuleCell = addCellAt(graph, baseLayerParent, targetModuleCell, Number(rect.x || 0), Number(rect.y || 0), {
+              snapToGrid: false
+            });
+            targetModules[moduleName] = targetModuleCell;
+            targetCount += 1;
+          }
+        } finally {
+          graph.getModel().endUpdate();
+        }
+
+        var addedInterfaces = 0;
+        for (var j = 0; j < sourceModuleNames.length; j++) {
+          var currentModuleName = sourceModuleNames[j];
+          var bodyCell = targetModules[currentModuleName];
+          if (!bodyCell) continue;
+          var layerInputs = groupMarkersByLayer(markersByModule[currentModuleName] || []);
+          var addResult = addGeneratedInterfacesToPage(ui, currentModuleName, sourceModules[currentModuleName], layerInputs, bodyCell, 'outside');
+          addedInterfaces += addResult && addResult.added ? addResult.added : 0;
+        }
+
+        return {
+          synced: true,
+          design: floorplan,
+          page: 'arch',
+          moduleCount: targetCount,
+          markerCount: markerEntries.length,
+          interfaceCount: addedInterfaces
+        };
+      });
+    } finally {
+      if (previousCtx) await restorePageCtx(ui, previousCtx);
+      try {
+        if (global.DFTProjectExplorerPhase2 && typeof global.DFTProjectExplorerPhase2.notifyProjectChanged === 'function') {
+          global.DFTProjectExplorerPhase2.notifyProjectChanged(ui, 'sync-floorplan-arch');
+        }
+      } catch (e) {}
+    }
+
+    return {
+      synced: true,
+      design: floorplan,
+      page: 'arch',
+      moduleCount: sourceModuleNames.length,
+      markerCount: markerEntries.length
+    };
+  }
+
   async function syncCurrentModuleArch(ui, analysis, opts) {
     opts = opts || {};
     var syncMode = String(opts.syncMode || 'rebuild').toLowerCase();
@@ -2972,6 +3099,8 @@
       markerCount: ownerEntries.length
     };
   }
+
+  Designs.syncCurrentFloorplanArch = syncCurrentFloorplanArch;
 
   async function populateModuleDesignPage(ui, moduleName, sourceModuleCell, layerInputs, pageOrder, layerOrder) {
     var pageLayers = Array.isArray(layerOrder) && layerOrder.length ? layerOrder : MODULE_LAYER_ORDER;
