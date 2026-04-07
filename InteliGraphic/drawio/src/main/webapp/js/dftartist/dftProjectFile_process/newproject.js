@@ -140,7 +140,7 @@ function _getProjectStorageRoot(ui) {
     if (dbRoot) return dbRoot.replace(/\\/g, '/').replace(/\/+$/, '');
     const root = ui && (ui._projectRootPath || ui._projectYamlDir) ? String(ui._projectRootPath || ui._projectYamlDir) : '';
     const cleanRoot = root.replace(/\\/g, '/').replace(/\/+$/, '');
-    return cleanRoot ? _joinPath(cleanRoot, 'db') : '';
+    return cleanRoot ? _joinPath(cleanRoot, 'dft_studio_db') : '';
 }
 
 // 覆盖：路径版：确保 design 目录 / page 目录 / env.json

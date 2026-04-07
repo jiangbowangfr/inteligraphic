@@ -275,7 +275,7 @@
     if (dbRoot) return dbRoot.replace(/\\/g, '/').replace(/\/+/g, '/');
     var root = ui && (ui._projectRootPath || ui._projectYamlDir) ? String(ui._projectRootPath || ui._projectYamlDir) : '';
     root = root.replace(/\\/g, '/').replace(/\/+/g, '/');
-    return root ? joinPath(root, 'db') : '';
+    return root ? joinPath(root, 'dft_studio_db') : '';
   }
 
   function joinPath() {

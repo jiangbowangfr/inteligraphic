@@ -98,7 +98,7 @@
         if (dbRoot) return joinPath(dbRoot, 'ipconfig');
         var rootPath = getProjectRoot(ui);
         if (!rootPath) return '';
-        return joinPath(rootPath, 'db', 'ipconfig');
+        return joinPath(rootPath, 'dft_studio_db', 'ipconfig');
     }
 
     function ensureProjectDesigns(model) {

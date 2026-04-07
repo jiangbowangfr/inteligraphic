@@ -34,7 +34,7 @@
         if (dbRoot) return dbRoot.replace(/\\/g, '/').replace(/\/+$/, '');
         var root = ui && (ui._projectRootPath || ui._projectYamlDir) ? String(ui._projectRootPath || ui._projectYamlDir) : '';
         root = root.replace(/\\/g, '/').replace(/\/+$/, '');
-        return root ? joinPath(root, 'db') : '';
+        return root ? joinPath(root, 'dft_studio_db') : '';
     }
 
     function isModuleDesign(designRef) {

@@ -15,7 +15,7 @@ function _getProjectStorageRoot(ui) {
     if (dbRoot) return dbRoot.replace(/\\/g, '/').replace(/\/+$/, '');
     const root = ui && (ui._projectRootPath || ui._projectYamlDir) ? String(ui._projectRootPath || ui._projectYamlDir) : '';
     const cleanRoot = root.replace(/\\/g, '/').replace(/\/+$/, '');
-    return cleanRoot ? _joinPath(cleanRoot, 'db') : '';
+    return cleanRoot ? _joinPath(cleanRoot, 'dft_studio_db') : '';
 }
 
 // 解析 mx 文档，返回 {kind:'mxfile'|'mxGraphModel'|'unknown', doc, diagrams:[{name, node}]}
@@ -188,7 +188,7 @@ window.DftSaveProjectIndividually = async function (editorUi, opts) {
             defaultPath: docs, filters: [], properties: ['openDirectory', 'createDirectory']
         });
         if (!picked || !picked.length) return;
-        projectRoot = _joinPath(picked[0], 'db');
+        projectRoot = _joinPath(picked[0], 'dft_studio_db');
         ui._projectDbDirPath = projectRoot;
     }
 

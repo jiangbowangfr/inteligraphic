@@ -3,6 +3,7 @@
 
   var NS = global.DFTProjectExplorerPhase2 = global.DFTProjectExplorerPhase2 || {};
   var DESIGN_META_FILE = '.dftdesign.json';
+  var PROJECT_STORAGE_DIR = 'dft_studio_db';
   var STYLE_ID = 'dft-phase2-project-explorer-style';
 
   function ensureCss() {
@@ -351,7 +352,7 @@
     var dbRoot = normalizePath((ui && ui._projectDbDirPath) || '');
     if (dbRoot) return dbRoot;
     var root = getProjectRoot(ui);
-    return root ? joinPath(root, 'db') : '';
+    return root ? joinPath(root, PROJECT_STORAGE_DIR) : '';
   }
 
   function isProjectReady(ui) {
@@ -1711,10 +1712,10 @@
     var model = { name: projectName, path: rootPath, designs: [], ip_config_file: 'ip_config.json', flow_file: 'env.json', __placeholder: false, __createdByProjectExplorer: true };
     ui.projectModel = model;
     ui._projectRootPath = rootPath;
-    ui._projectYamlDir = joinPath(rootPath, 'db');
-    ui._projectYamlFilePath = joinPath(rootPath, 'db', sanitizeName(projectName) + '.dftart');
-    ui._projectDbDirPath = joinPath(rootPath, 'db');
-    ui._projectDbFilePath = joinPath(rootPath, 'db', 'project.db');
+    ui._projectYamlDir = joinPath(rootPath, PROJECT_STORAGE_DIR);
+    ui._projectYamlFilePath = joinPath(rootPath, PROJECT_STORAGE_DIR, sanitizeName(projectName) + '.dftart');
+    ui._projectDbDirPath = joinPath(rootPath, PROJECT_STORAGE_DIR);
+    ui._projectDbFilePath = joinPath(rootPath, PROJECT_STORAGE_DIR, 'project.db');
     ui._projectRootDirHandle = null;
     ui._projectDbDirHandle = null;
     ui._projectDbFileHandle = null;
@@ -1755,10 +1756,10 @@
       };
       ui.projectModel = model;
       ui._projectRootPath = designAbsPath;
-      ui._projectYamlDir = joinPath(designAbsPath, 'db');
-      ui._projectYamlFilePath = joinPath(designAbsPath, 'db', designDirName + '.dftart');
-      ui._projectDbDirPath = joinPath(designAbsPath, 'db');
-      ui._projectDbFilePath = joinPath(designAbsPath, 'db', 'project.db');
+      ui._projectYamlDir = joinPath(designAbsPath, PROJECT_STORAGE_DIR);
+      ui._projectYamlFilePath = joinPath(designAbsPath, PROJECT_STORAGE_DIR, designDirName + '.dftart');
+      ui._projectDbDirPath = joinPath(designAbsPath, PROJECT_STORAGE_DIR);
+      ui._projectDbFilePath = joinPath(designAbsPath, PROJECT_STORAGE_DIR, 'project.db');
       ui._projectRootDirHandle = null;
       ui._projectDbDirHandle = null;
       ui._projectDbFileHandle = null;
