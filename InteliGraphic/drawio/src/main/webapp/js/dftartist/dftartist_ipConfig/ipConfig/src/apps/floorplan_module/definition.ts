@@ -45,7 +45,7 @@ export const floorplanModuleDefinition: DftsTypeDef = {
       defaultValue: "hierarchical",
       options: [
         { label: "Hierarchical", value: "hierarchical" },
-        { label: "Tailing", value: "tailing" },
+        { label: "Tiling", value: "tiling" },
       ],
     },
     {
