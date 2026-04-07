@@ -448,6 +448,33 @@
         return getFloorplanModuleParent(graph, cell);
     }
 
+    function resolveChipBody(graph, cell) {
+        if (!graph || !cell) return null;
+        var ipNS = global.DftsIP || null;
+        if (ipNS && typeof ipNS.isChipBody === 'function' && ipNS.isChipBody(graph, cell)) return cell;
+        if (ipNS && typeof ipNS.findChipBodyForCell === 'function') return ipNS.findChipBodyForCell(graph, cell);
+        return null;
+    }
+
+    function isDataSourceBody(graph, cell) {
+        if (!graph || !cell) return false;
+        var body = resolveChipBody(graph, cell) || cell;
+        var style = '';
+        try {
+            style = body.style || (graph.getModel && graph.getModel().getStyle ? graph.getModel().getStyle(body) : '');
+        } catch (e) {
+            style = body.style || '';
+        }
+        var category = normalizeStyleToken(styleValue(style, 'dftsIP_category', ''));
+        var dftsType = normalizeStyleToken(styleValue(style, 'dftsIP_type', ''));
+        return category === 'data_source' ||
+            category === 'datasource' ||
+            dftsType === 'ssn_data_source' ||
+            dftsType === 'pattern_data_source' ||
+            dftsType === 'external_data_source' ||
+            /data_source/.test(dftsType);
+    }
+
     function installFloorplanDropTargetSupport(graph) {
         if (!graph || graph.__dftsFloorplanDropTargetInstalled) return;
         graph.__dftsFloorplanDropTargetInstalled = true;
@@ -459,8 +486,14 @@
                 var model = this.getModel ? this.getModel() : null;
                 var hasFloorplanRoot = false;
                 var invalid = false;
+                var hasDataSource = false;
 
                 for (var i = 0; i < list.length; i++) {
+                    if (isDataSourceBody(this, list[i])) {
+                        hasDataSource = true;
+                        invalid = true;
+                        break;
+                    }
                     var root = resolveFloorplanDragRoot(this, list[i]);
                     if (!root) continue;
                     hasFloorplanRoot = true;
@@ -474,6 +507,7 @@
                     }
                 }
 
+                if (hasDataSource) return false;
                 if (hasFloorplanRoot && !invalid) return true;
             }
             return baseIsValidDropTarget ? baseIsValidDropTarget.apply(this, arguments) : false;
