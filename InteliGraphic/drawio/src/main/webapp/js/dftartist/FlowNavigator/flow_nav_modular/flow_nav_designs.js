@@ -9,10 +9,35 @@
   var MODULE_LAYER_ORDER = ['base', 'ssn', 'bscan', 'ijtag', 'bisr', 'other'];
   var MODULE_INTERFACE_LAYER_ORDER = ['ssn', 'bscan', 'ijtag', 'bisr', 'other'];
   var MODULE_INTERFACE_OUTER_GAP = 0;
+  var MODULE_INTERFACE_INNER_GAP = 0;
   var MODULE_INTERFACE_EDGE_OVERLAP = 0;
-  var GENERATED_INTERFACE_DEFAULT_WIDTH = 44;
-  var GENERATED_INTERFACE_DEFAULT_HEIGHT = 30;
+  var GENERATED_INTERFACE_DEFAULT_WIDTH = 60;
+  var GENERATED_INTERFACE_DEFAULT_HEIGHT = 40;
   if (!Shared || !Analysis) throw new Error('flow_nav_shared.js and flow_nav_analysis.js must be loaded before flow_nav_designs.js');
+
+  function gridSize(graph) {
+    var size = Number(graph && graph.gridSize);
+    if (!isFinite(size) || size <= 0) size = 10;
+    return Math.max(1, Math.round(size));
+  }
+
+  function snapValueToGrid(graph, value) {
+    var n = Number(value);
+    if (!isFinite(n)) n = 0;
+    var grid = gridSize(graph);
+    return Math.round(n / grid) * grid;
+  }
+
+  function snapRectToGrid(graph, rect) {
+    if (!rect) return rect;
+    var grid = gridSize(graph);
+    return new mxRectangle(
+      snapValueToGrid(graph, rect.x),
+      snapValueToGrid(graph, rect.y),
+      Math.max(grid, snapValueToGrid(graph, rect.width)),
+      Math.max(grid, snapValueToGrid(graph, rect.height))
+    );
+  }
 
   function findTopLevelDesign(ui, name) {
     var pm = Shared.getProject(ui);
@@ -1565,9 +1590,10 @@
       cloned.style = mxUtils.setStyle(cloned.style || '', 'flowModule', moduleName || '');
       var srcGeo = sourceModuleCell.geometry || cloned.geometry || new mxGeometry(0, 0, width, height);
       var fittedSize = fitAspectSize(srcGeo.width, srcGeo.height, width, height);
+      var snappedFittedRect = snapRectToGrid(graph, new mxRectangle(0, 0, fittedSize.width, fittedSize.height));
       var sx = Number(srcGeo.width || 0) > 0 ? (fittedSize.width / Number(srcGeo.width || 1)) : 1;
       var sy = Number(srcGeo.height || 0) > 0 ? (fittedSize.height / Number(srcGeo.height || 1)) : 1;
-      cloned.geometry = new mxGeometry(0, 0, fittedSize.width, fittedSize.height);
+      cloned.geometry = new mxGeometry(0, 0, snappedFittedRect.width, snappedFittedRect.height);
       if (srcGeo.points && srcGeo.points.length) {
         cloned.geometry.points = [];
         for (var pi = 0; pi < srcGeo.points.length; pi++) {
@@ -1589,7 +1615,8 @@
       h: height,
       instanceName: ''
     });
-    cell.geometry = new mxGeometry(0, 0, width, height);
+    var snappedRect = snapRectToGrid(graph, new mxRectangle(0, 0, width, height));
+    cell.geometry = new mxGeometry(0, 0, snappedRect.width, snappedRect.height);
     cell.style = makeModuleShellStyle(cell.style || '', opts);
     cell.style = mxUtils.setStyle(cell.style || '', 'flowModule', moduleName || '');
     if (global.DftsFloorplan && typeof global.DftsFloorplan.syncFloorplanModuleCell === 'function') {
@@ -1664,7 +1691,39 @@
     return fallbackCell || null;
   }
 
-  function makeInterfaceStyle(style, markerMeta) {
+  function stripGeneratedInterfaceFloorplanStyle(style) {
+    style = style || '';
+    style = mxUtils.setStyle(style, 'floorplan', '0');
+    style = mxUtils.setStyle(style, 'perimeter', '');
+    style = mxUtils.setStyle(style, 'dftsFloorplanConnectable', '0');
+    style = mxUtils.setStyle(style, 'dftsFloorplanEndpointKind', '');
+    style = mxUtils.setStyle(style, 'dftsFloorplanLineStart', '0');
+    style = mxUtils.setStyle(style, 'dftsFloorplanLineTarget', '0');
+    style = mxUtils.setStyle(style, 'flowGeneratedInterfaceFloorplan', '0');
+    return style;
+  }
+
+  function applyGeneratedInterfaceFloorplanStyle(style, markerMeta, enableFloorplan) {
+    var type = String(markerMeta && markerMeta.interfaceType || '').toUpperCase();
+    var isStart = type === 'HI' || type === 'SI';
+    var isTarget = type === 'HO' || type === 'SO';
+    style = stripGeneratedInterfaceFloorplanStyle(style || '');
+    if (!enableFloorplan) return style;
+    style = mxUtils.setStyle(style, 'floorplan', '1');
+    style = mxUtils.setStyle(style, 'perimeter', 'floorplanAnyPoint');
+    style = mxUtils.setStyle(style, 'dftsFloorplanConnectable', '1');
+    style = mxUtils.setStyle(style, 'dftsFloorplanEndpointKind', 'generatedInterface');
+    style = mxUtils.setStyle(style, 'dftsFloorplanLineStart', isStart ? '1' : '0');
+    style = mxUtils.setStyle(style, 'dftsFloorplanLineTarget', isTarget ? '1' : '0');
+    style = mxUtils.setStyle(style, 'flowGeneratedInterfaceFloorplan', '1');
+    return style;
+  }
+
+  function makeInterfaceStyle(style, markerMeta, opts) {
+    opts = opts || {};
+    var enableFloorplan = opts.enableFloorplan == null
+      ? String(sourceStyleValue(style, 'flowGeneratedInterfaceFloorplan', '0')) === '1'
+      : !!opts.enableFloorplan;
     style = style || '';
     style = mxUtils.setStyle(style, 'movable', '0');
     style = mxUtils.setStyle(style, 'resizable', '0');
@@ -1679,6 +1738,7 @@
     style = mxUtils.setStyle(style, 'flowSide', markerMeta && markerMeta.side || '');
     style = mxUtils.setStyle(style, 'flowSideStackIndex', markerMeta && markerMeta.sideStackIndex == null ? '' : String(markerMeta.sideStackIndex));
     style = mxUtils.setStyle(style, 'flowMarkerId', markerMeta && markerMeta.id || '');
+    style = applyGeneratedInterfaceFloorplanStyle(style, markerMeta, enableFloorplan);
     return style;
   }
 
@@ -1686,28 +1746,105 @@
     return Shared.styleValue ? Shared.styleValue(styleText, key, fallback) : fallback;
   }
 
-  function persistGeneratedInterfaceMeta(graph, cell, markerMeta) {
+  function interfaceStyleOptsForPageName(pageName) {
+    return { enableFloorplan: isDataflowPageName(pageName) };
+  }
+
+  function normalizedGeneratedInterfaceSize(graph, markerMeta, width, height) {
+    var grid = gridSize(graph);
+    var side = String(markerMeta && markerMeta.side || '').toLowerCase();
+    var nextWidth = snapValueToGrid(graph, Number(width || GENERATED_INTERFACE_DEFAULT_WIDTH));
+    var nextHeight = snapValueToGrid(graph, Number(height || GENERATED_INTERFACE_DEFAULT_HEIGHT));
+    nextWidth = Math.max(grid, nextWidth);
+    nextHeight = Math.max(grid, nextHeight);
+
+    // Left/right interfaces are rotated, so (width - height) / 2 becomes the
+    // placement compensation. Keep that compensation on-grid to preserve both
+    // edge contact and grid alignment after the final snap.
+    if (side === 'left' || side === 'right') {
+      var step = grid * 2;
+      var diff = nextWidth - nextHeight;
+      var rem = ((diff % step) + step) % step;
+      if (rem !== 0) {
+        var downHeight = nextHeight - rem;
+        var upHeight = nextHeight + (step - rem);
+        var useUp = downHeight < grid || Math.abs(upHeight - nextHeight) <= Math.abs(nextHeight - downHeight);
+        nextHeight = useUp ? upHeight : downHeight;
+      }
+    }
+
+    return {
+      width: nextWidth,
+      height: nextHeight
+    };
+  }
+
+  function normalizedGeneratedInterfaceGeometry(graph, currentGeo, markerMeta) {
+    var geo = currentGeo && typeof currentGeo.clone === 'function'
+      ? currentGeo.clone()
+      : new mxGeometry(
+        Number(currentGeo && currentGeo.x || 0),
+        Number(currentGeo && currentGeo.y || 0),
+        Number(currentGeo && currentGeo.width || 0),
+        Number(currentGeo && currentGeo.height || 0)
+      );
+    var size = normalizedGeneratedInterfaceSize(graph, markerMeta, GENERATED_INTERFACE_DEFAULT_WIDTH, GENERATED_INTERFACE_DEFAULT_HEIGHT);
+    geo.width = size.width;
+    geo.height = size.height;
+    return geo;
+  }
+
+  function applyCompactGeneratedInterfaceSymbol(graph, cell, markerMeta) {
+    if (!graph || !cell || !global.DftsIP || !global.DftsIP.Symbol) return;
+    try {
+      var sym = global.DftsIP.Symbol;
+      var symModel = sym.getModel && sym.getModel(cell);
+      if (!symModel) return;
+      symModel = Shared.cloneJson(symModel);
+      if (!symModel.layout) symModel.layout = {};
+      if (!symModel.transform) symModel.transform = {};
+      symModel.transform.rotation = sideRotationDegrees(String(markerMeta && markerMeta.side || '').toLowerCase());
+      symModel.layout.fontSize = 12;
+      symModel.layout.titleFontSize = 12;
+      symModel.layout.instanceFontSize = 9;
+      symModel.layout.bodyPaddingX = 8;
+      symModel.layout.bodyPaddingY = 5;
+      symModel.layout.titlePadding = 5;
+      symModel.layout.pinRowPitch = 18;
+      symModel.layout.pinStub = 10;
+      symModel.layout.labelGap = 4;
+      symModel.layout.instanceGap = 4;
+      symModel.layout.minBodyWidth = 40;
+      symModel.layout.minBodyHeight = 20;
+      if (sym.setModel) sym.setModel(cell, symModel);
+      if (sym.relayout) sym.relayout(graph, cell);
+    } catch (e) {
+      emitDesignLog('compact-generated-interface-symbol-error', {
+        moduleName: markerMeta && markerMeta.moduleName || '',
+        layerName: markerMeta && markerMeta.layerName || '',
+        interfaceType: markerMeta && markerMeta.interfaceType || '',
+        error: e && e.message ? e.message : String(e)
+      });
+    }
+  }
+
+  function persistGeneratedInterfaceMeta(graph, cell, markerMeta, opts) {
     if (!graph || !cell || !markerMeta) return;
     var normalized = normalizeGeneratedInterfaceMeta(markerMeta, graph, cell);
     if (!normalized) return;
     cell.__flowDesignMarkerMeta = Shared.cloneJson(normalized);
     var model = graph.getModel ? graph.getModel() : null;
-    var nextStyle = makeInterfaceStyle(String(cell.style || ''), normalized);
+    var nextStyle = makeInterfaceStyle(String(cell.style || ''), normalized, opts);
     if (model && typeof model.setStyle === 'function') model.setStyle(cell, nextStyle);
     else cell.style = nextStyle;
   }
 
-  function applyMarkerAppearanceToInterface(graph, cell, sourceCell, markerMeta) {
+  function applyMarkerAppearanceToInterface(graph, cell, sourceCell, markerMeta, opts) {
     if (!graph || !cell || !sourceCell) return;
     var sourceGeo = sourceCell.geometry || null;
     var sourceStyle = String(sourceCell.style || '');
     var model = graph.getModel();
-    if (sourceGeo) {
-      var nextGeo = (cell.geometry && typeof cell.geometry.clone === 'function') ? cell.geometry.clone() : new mxGeometry();
-      nextGeo.width = Number(sourceGeo.width || nextGeo.width || 0);
-      nextGeo.height = Number(sourceGeo.height || nextGeo.height || 0);
-      model.setGeometry(cell, nextGeo);
-    }
+    model.setGeometry(cell, normalizedGeneratedInterfaceGeometry(graph, cell.geometry, markerMeta));
     var nextStyle = String(cell.style || '');
     var fillColor = sourceStyleValue(sourceStyle, 'fillColor', '');
     var strokeColor = sourceStyleValue(sourceStyle, 'strokeColor', '');
@@ -1717,7 +1854,7 @@
     if (strokeColor) nextStyle = mxUtils.setStyle(nextStyle, 'strokeColor', strokeColor);
     if (rotation !== '') nextStyle = mxUtils.setStyle(nextStyle, 'rotation', rotation);
     if (fontSize !== '') nextStyle = mxUtils.setStyle(nextStyle, 'fontSize', fontSize);
-    nextStyle = makeInterfaceStyle(nextStyle, markerMeta);
+    nextStyle = makeInterfaceStyle(nextStyle, markerMeta, opts);
     model.setStyle(cell, nextStyle);
 
     if (global.DftsIP && global.DftsIP.Symbol) {
@@ -1729,7 +1866,6 @@
           if (!symModel.transform) symModel.transform = {};
           if (rotation !== '') symModel.transform.rotation = Number(rotation || 0);
           if (sym.setModel) sym.setModel(cell, symModel);
-          if (sym.relayout) sym.relayout(graph, cell);
         }
       } catch (e) {
         emitDesignLog('interface-marker-appearance-error', {
@@ -1740,7 +1876,8 @@
         });
       }
     }
-    persistGeneratedInterfaceMeta(graph, cell, markerMeta);
+    applyCompactGeneratedInterfaceSymbol(graph, cell, markerMeta);
+    persistGeneratedInterfaceMeta(graph, cell, markerMeta, opts);
 
     emitDesignLog('interface-marker-appearance-applied', {
       moduleName: markerMeta && markerMeta.moduleName || '',
@@ -1764,7 +1901,7 @@
     });
   }
 
-  function cloneInterfaceCellFromSource(sourceCell, markerMeta) {
+  function cloneInterfaceCellFromSource(sourceCell, markerMeta, opts) {
     if (!sourceCell || typeof sourceCell.clone !== 'function') return null;
     var sourceStyle = String(sourceCell.style || '');
     if (sourceStyle.indexOf('flowMarker=1') >= 0) return null;
@@ -1786,16 +1923,11 @@
     });
     var cloned = cloneCellTree(sourceCell);
     resetCellTreeIds(cloned);
-    cloned.style = makeInterfaceStyle(cloned.style || '', markerMeta);
+    cloned.style = makeInterfaceStyle(cloned.style || '', markerMeta, opts);
     if (cloned.geometry) {
-      cloned.geometry = new mxGeometry(
-        Number(cloned.geometry.x || 0),
-        Number(cloned.geometry.y || 0),
-        Number(cloned.geometry.width || 190),
-        Number(cloned.geometry.height || 40)
-      );
+      cloned.geometry = normalizedGeneratedInterfaceGeometry(null, cloned.geometry, markerMeta);
     } else {
-      cloned.geometry = new mxGeometry(0, 0, 190, 40);
+      cloned.geometry = normalizedGeneratedInterfaceGeometry(null, null, markerMeta);
     }
     cloned.__flowDesignMarkerMeta = Shared.cloneJson(markerMeta);
     emitDesignLog('clone-interface-result', {
@@ -1813,11 +1945,11 @@
     return cloned;
   }
 
-  function createInterfaceCell(graph, markerEntry) {
+  function createInterfaceCell(graph, markerEntry, opts) {
     var markerMeta = markerEntry && markerEntry.meta ? markerEntry.meta : markerEntry;
     var sourceCell = markerEntry && markerEntry.cell ? markerEntry.cell : null;
     var sourceIsGeneratedInterface = !!extractGeneratedInterfaceMeta(graph, sourceCell);
-    var cloned = cloneInterfaceCellFromSource(sourceCell, markerMeta);
+    var cloned = cloneInterfaceCellFromSource(sourceCell, markerMeta, opts);
     if (cloned) {
       cloned.__flowPreserveSourceAppearance = sourceIsGeneratedInterface ? 1 : 0;
       emitDesignLog('create-interface-using-clone', {
@@ -1848,9 +1980,8 @@
       pdg: markerMeta.layerName || '',
       busWidth: 4
     });
-    var geo = cell.geometry || new mxGeometry(0, 0, 190, 40);
-    cell.geometry = new mxGeometry(0, 0, Number(geo.width || 190), Number(geo.height || 40));
-    cell.style = makeInterfaceStyle(cell.style || '', markerMeta);
+    cell.geometry = normalizedGeneratedInterfaceGeometry(graph, cell.geometry || new mxGeometry(0, 0, 190, 40), markerMeta);
+    cell.style = makeInterfaceStyle(cell.style || '', markerMeta, opts);
     if (markerMeta.side === 'left') cell.style = mxUtils.setStyle(cell.style || '', 'rotation', '270');
     else if (markerMeta.side === 'right') cell.style = mxUtils.setStyle(cell.style || '', 'rotation', '90');
     else if (markerMeta.side === 'bottom') cell.style = mxUtils.setStyle(cell.style || '', 'rotation', '180');
@@ -1871,7 +2002,10 @@
     return cell;
   }
 
-  function addCellAt(graph, parent, cell, x, y) {
+  function addCellAt(graph, parent, cell, x, y, opts) {
+    opts = opts || {};
+    var snapX = opts.snapToGrid !== false && opts.snapX !== false;
+    var snapY = opts.snapToGrid !== false && opts.snapY !== false;
     resetCellTreeIds(cell);
     var added = graph.addCell(cell, parent);
     var geo0 = graph.getCellGeometry(added) || cell.geometry || new mxGeometry();
@@ -1892,26 +2026,17 @@
         geo.points.push(new mxPoint(Number(pt && pt.x || 0), Number(pt && pt.y || 0)));
       }
     }
-    geo.x = x;
-    geo.y = y;
+    geo.x = snapX ? snapValueToGrid(graph, x) : Number(x || 0);
+    geo.y = snapY ? snapValueToGrid(graph, y) : Number(y || 0);
     graph.getModel().setGeometry(added, geo);
     return added;
   }
 
-  function normalizeGeneratedInterfaceWithoutSource(graph, cell, markerMeta) {
+  function normalizeGeneratedInterfaceWithoutSource(graph, cell, markerMeta, opts) {
     if (!graph || !cell) return;
     var model = graph.getModel ? graph.getModel() : null;
     var currentGeo = graph.getCellGeometry ? graph.getCellGeometry(cell) : (cell.geometry || null);
-    var nextGeo = currentGeo && typeof currentGeo.clone === 'function'
-      ? currentGeo.clone()
-      : new mxGeometry(
-        Number(currentGeo && currentGeo.x || 0),
-        Number(currentGeo && currentGeo.y || 0),
-        Number(currentGeo && currentGeo.width || 0),
-        Number(currentGeo && currentGeo.height || 0)
-      );
-    nextGeo.width = GENERATED_INTERFACE_DEFAULT_WIDTH;
-    nextGeo.height = GENERATED_INTERFACE_DEFAULT_HEIGHT;
+    var nextGeo = normalizedGeneratedInterfaceGeometry(graph, currentGeo, markerMeta);
     if (model && typeof model.setGeometry === 'function') model.setGeometry(cell, nextGeo);
     else cell.geometry = nextGeo;
 
@@ -1925,7 +2050,6 @@
           symModel.transform.rotation = sideRotationDegrees(String(markerMeta && markerMeta.side || '').toLowerCase());
           if (sym.setModel) sym.setModel(cell, symModel);
         }
-        if (sym.relayout) sym.relayout(graph, cell);
       } catch (e) {
         emitDesignLog('normalize-generated-interface-without-source-error', {
           moduleName: markerMeta && markerMeta.moduleName || '',
@@ -1935,8 +2059,9 @@
         });
       }
     }
+    applyCompactGeneratedInterfaceSymbol(graph, cell, markerMeta);
 
-    persistGeneratedInterfaceMeta(graph, cell, markerMeta);
+    persistGeneratedInterfaceMeta(graph, cell, markerMeta, opts);
   }
 
   function resetCellTreeIds(cell) {
@@ -1979,7 +2104,7 @@
       scale: scale,
       page: { width: metrics.width, height: metrics.height, margin: metrics.margin }
     });
-    graph.resizeCell(shell, new mxRectangle(nextX, nextY, nextW, nextH), false);
+    graph.resizeCell(shell, snapRectToGrid(graph, new mxRectangle(nextX, nextY, nextW, nextH)), false);
   }
 
   function normalizeRotationDegrees(rotation) {
@@ -1998,7 +2123,7 @@
   }
 
   function interfacePlacementMetrics(cell, side, sourceCell) {
-    var geo = sourceCell && sourceCell.geometry ? sourceCell.geometry : (cell && cell.geometry ? cell.geometry : null);
+    var geo = cell && cell.geometry ? cell.geometry : (sourceCell && sourceCell.geometry ? sourceCell.geometry : null);
     var w = Number(geo && geo.width || 190);
     var h = Number(geo && geo.height || 40);
     var styleText = String(sourceCell && sourceCell.style != null ? sourceCell.style : (cell && cell.style || ''));
@@ -2211,7 +2336,40 @@
     };
   }
 
-  function positionInterfacesAroundBody(bodyRect, bySide, prototypes, bodyCell, sourceModuleCell) {
+  function clampInterfaceInsideRect(rect, size, x, y) {
+    if (!rect || !size) return { x: Math.round(Number(x || 0)), y: Math.round(Number(y || 0)) };
+    var minX = Number(rect.x || 0);
+    var minY = Number(rect.y || 0);
+    var maxX = Math.max(minX, minX + Number(rect.width || 0) - Number(size.width || 0));
+    var maxY = Math.max(minY, minY + Number(rect.height || 0) - Number(size.height || 0));
+    return {
+      x: Math.round(clampNumber(Number(x || 0), minX, maxX)),
+      y: Math.round(clampNumber(Number(y || 0), minY, maxY))
+    };
+  }
+
+  function placeRelativeInsideBody(bodyRect, bodyCell, side, size, relative) {
+    var rect = effectiveBodyRect(bodyRect, bodyCell);
+    if (!rect || !size || !relative) return null;
+    var gap = MODULE_INTERFACE_INNER_GAP;
+    var x = Number(rect.x || 0);
+    var y = Number(rect.y || 0);
+    if (side === 'left' || side === 'right') {
+      x = side === 'left'
+        ? rect.x + gap
+        : rect.x + rect.width - size.width - gap;
+      y = rect.y + Number(relative.y || 0);
+    } else {
+      x = rect.x + Number(relative.x || 0);
+      y = side === 'top'
+        ? rect.y + gap
+        : rect.y + rect.height - size.height - gap;
+    }
+    return clampInterfaceInsideRect(rect, size, x, y);
+  }
+
+  function positionInterfacesAroundBody(bodyRect, bySide, prototypes, bodyCell, sourceModuleCell, placementMode) {
+    placementMode = placementMode === 'inside' ? 'inside' : 'outside';
     var placements = [];
     var sourceLookup = buildModuleCellLookup(sourceModuleCell);
     var targetLookup = buildModuleCellLookup(bodyCell);
@@ -2230,8 +2388,11 @@
         var relative = relativeInterfacePlacement(sourcePlacementModule || sourceModuleCell, entry, side, size);
         if (relative) {
           var mappedRelative = scaleRelativePlacementToTarget(relative, sourcePlacementModule || sourceModuleCell, targetRect);
-          var relativeOutside = placeRelativeOutsideBody(targetRect, targetModuleCell || bodyCell, side, size, mappedRelative);
-          var relativeGeo = placeInterfaceGeometry(metrics, relativeOutside.x, relativeOutside.y);
+          var relativePos = placementMode === 'inside'
+            ? placeRelativeInsideBody(targetRect, targetModuleCell || bodyCell, side, size, mappedRelative)
+            : placeRelativeOutsideBody(targetRect, targetModuleCell || bodyCell, side, size, mappedRelative);
+          if (!relativePos) continue;
+          var relativeGeo = placeInterfaceGeometry(metrics, relativePos.x, relativePos.y);
           placements.push({
             marker: entry,
             cell: cell,
@@ -2245,32 +2406,67 @@
         var x = targetRect.x;
         var y = targetRect.y;
         var anchor = targetModuleCell ? boundaryAnchorForSide(targetModuleCell, side, offset) : null;
-        if (anchor) {
-          if (side === 'left') {
-            x = Math.round(anchor.x - size.width - MODULE_INTERFACE_OUTER_GAP + MODULE_INTERFACE_EDGE_OVERLAP);
-            y = Math.round(anchor.y - size.height / 2);
-          } else if (side === 'right') {
-            x = Math.round(anchor.x + MODULE_INTERFACE_OUTER_GAP - MODULE_INTERFACE_EDGE_OVERLAP);
-            y = Math.round(anchor.y - size.height / 2);
-          } else if (side === 'top') {
-            x = Math.round(anchor.x - size.width / 2);
-            y = Math.round(anchor.y - size.height - MODULE_INTERFACE_OUTER_GAP + MODULE_INTERFACE_EDGE_OVERLAP);
+        if (placementMode === 'inside') {
+          if (anchor) {
+            if (side === 'left') {
+              x = anchor.x + MODULE_INTERFACE_INNER_GAP;
+              y = anchor.y - size.height / 2;
+            } else if (side === 'right') {
+              x = anchor.x - size.width - MODULE_INTERFACE_INNER_GAP;
+              y = anchor.y - size.height / 2;
+            } else if (side === 'top') {
+              x = anchor.x - size.width / 2;
+              y = anchor.y + MODULE_INTERFACE_INNER_GAP;
+            } else {
+              x = anchor.x - size.width / 2;
+              y = anchor.y - size.height - MODULE_INTERFACE_INNER_GAP;
+            }
           } else {
-            x = Math.round(anchor.x - size.width / 2);
-            y = Math.round(anchor.y + MODULE_INTERFACE_OUTER_GAP - MODULE_INTERFACE_EDGE_OVERLAP);
+            if (side === 'left') {
+              x = targetRect.x + MODULE_INTERFACE_INNER_GAP;
+              y = targetRect.y + Math.round(offset * targetRect.height - size.height / 2);
+            } else if (side === 'right') {
+              x = targetRect.x + targetRect.width - size.width - MODULE_INTERFACE_INNER_GAP;
+              y = targetRect.y + Math.round(offset * targetRect.height - size.height / 2);
+            } else if (side === 'top') {
+              x = targetRect.x + Math.round(offset * targetRect.width - size.width / 2);
+              y = targetRect.y + MODULE_INTERFACE_INNER_GAP;
+            } else {
+              x = targetRect.x + Math.round(offset * targetRect.width - size.width / 2);
+              y = targetRect.y + targetRect.height - size.height - MODULE_INTERFACE_INNER_GAP;
+            }
           }
-        } else if (side === 'left') {
-          x = targetRect.x - size.width - MODULE_INTERFACE_OUTER_GAP + MODULE_INTERFACE_EDGE_OVERLAP;
-          y = targetRect.y + Math.round(offset * targetRect.height - size.height / 2);
-        } else if (side === 'right') {
-          x = targetRect.x + targetRect.width + MODULE_INTERFACE_OUTER_GAP - MODULE_INTERFACE_EDGE_OVERLAP;
-          y = targetRect.y + Math.round(offset * targetRect.height - size.height / 2);
-        } else if (side === 'top') {
-          x = targetRect.x + Math.round(offset * targetRect.width - size.width / 2);
-          y = targetRect.y - size.height - MODULE_INTERFACE_OUTER_GAP + MODULE_INTERFACE_EDGE_OVERLAP;
+          var inside = clampInterfaceInsideRect(targetRect, size, x, y);
+          x = inside.x;
+          y = inside.y;
         } else {
-          x = targetRect.x + Math.round(offset * targetRect.width - size.width / 2);
-          y = targetRect.y + targetRect.height + MODULE_INTERFACE_OUTER_GAP - MODULE_INTERFACE_EDGE_OVERLAP;
+          if (anchor) {
+            if (side === 'left') {
+              x = Math.round(anchor.x - size.width - MODULE_INTERFACE_OUTER_GAP + MODULE_INTERFACE_EDGE_OVERLAP);
+              y = Math.round(anchor.y - size.height / 2);
+            } else if (side === 'right') {
+              x = Math.round(anchor.x + MODULE_INTERFACE_OUTER_GAP - MODULE_INTERFACE_EDGE_OVERLAP);
+              y = Math.round(anchor.y - size.height / 2);
+            } else if (side === 'top') {
+              x = Math.round(anchor.x - size.width / 2);
+              y = Math.round(anchor.y - size.height - MODULE_INTERFACE_OUTER_GAP + MODULE_INTERFACE_EDGE_OVERLAP);
+            } else {
+              x = Math.round(anchor.x - size.width / 2);
+              y = Math.round(anchor.y + MODULE_INTERFACE_OUTER_GAP - MODULE_INTERFACE_EDGE_OVERLAP);
+            }
+          } else if (side === 'left') {
+            x = targetRect.x - size.width - MODULE_INTERFACE_OUTER_GAP + MODULE_INTERFACE_EDGE_OVERLAP;
+            y = targetRect.y + Math.round(offset * targetRect.height - size.height / 2);
+          } else if (side === 'right') {
+            x = targetRect.x + targetRect.width + MODULE_INTERFACE_OUTER_GAP - MODULE_INTERFACE_EDGE_OVERLAP;
+            y = targetRect.y + Math.round(offset * targetRect.height - size.height / 2);
+          } else if (side === 'top') {
+            x = targetRect.x + Math.round(offset * targetRect.width - size.width / 2);
+            y = targetRect.y - size.height - MODULE_INTERFACE_OUTER_GAP + MODULE_INTERFACE_EDGE_OVERLAP;
+          } else {
+            x = targetRect.x + Math.round(offset * targetRect.width - size.width / 2);
+            y = targetRect.y + targetRect.height + MODULE_INTERFACE_OUTER_GAP - MODULE_INTERFACE_EDGE_OVERLAP;
+          }
         }
         var placedGeo = placeInterfaceGeometry(metrics, x, y);
         placements.push({ marker: entry, cell: cell, x: placedGeo.x, y: placedGeo.y });
@@ -2339,12 +2535,14 @@
     var metrics = pageMetrics(graph);
     var includeInterfaces = opts.includeInterfaces !== false;
     var entries = Array.isArray(markerEntries) ? markerEntries : [];
+    var pageName = ui && ui._activeProjectPageCtx ? String(ui._activeProjectPageCtx.name || '') : '';
+    var interfaceStyleOpts = interfaceStyleOptsForPageName(pageName);
     var bySide = countBySide(entries);
     var interfacePrototypes = {};
     if (includeInterfaces) {
       for (var i = 0; i < entries.length; i++) {
         try {
-          interfacePrototypes[markerPrototypeKey(entries[i] && entries[i].meta ? entries[i].meta : null)] = createInterfaceCell(graph, entries[i]);
+          interfacePrototypes[markerPrototypeKey(entries[i] && entries[i].meta ? entries[i].meta : null)] = createInterfaceCell(graph, entries[i], interfaceStyleOpts);
         } catch (protoErr) {
           emitDesignLog('interface-prototype-error', {
             moduleName: moduleName,
@@ -2432,12 +2630,14 @@
             persistGeneratedInterfaceMeta(
               graph,
               addedInterface,
-              markerMeta
+              markerMeta,
+              interfaceStyleOpts
             );
           } else if (!sourceInterfaceCell) {
-            normalizeGeneratedInterfaceWithoutSource(graph, addedInterface, markerMeta);
+            normalizeGeneratedInterfaceWithoutSource(graph, addedInterface, markerMeta, interfaceStyleOpts);
           } else {
-            applyMarkerAppearanceToInterface(graph, addedInterface, sourceInterfaceCell, markerMeta);
+            applyMarkerAppearanceToInterface(graph, addedInterface, sourceInterfaceCell, markerMeta, interfaceStyleOpts);
+            persistGeneratedInterfaceMeta(graph, addedInterface, markerMeta, interfaceStyleOpts);
           }
           addedInterfaces.push(addedInterface);
         }
@@ -2491,7 +2691,8 @@
     return groupMarkersByModule(collectGeneratedMarkerMeta(ui));
   };
 
-  function collectModuleDesignInputsFromAnalysis(ui, analysis) {
+  function collectModuleDesignInputsFromAnalysis(ui, analysis, opts) {
+    opts = opts || {};
     var owner = getGenerationOwner(ui);
     var ownerKind = owner && owner.__kind ? String(owner.__kind).toLowerCase() : '';
     if (ownerKind !== 'module-design' || !owner || !owner.name || !analysis || !analysis.interfacePlan || !Array.isArray(analysis.interfacePlan.markers) || !analysis.interfacePlan.markers.length) {
@@ -2528,24 +2729,193 @@
       }
       if (key) usedKeys[key] = true;
     });
-    for (i = 0; i < existingEntries.length; i++) {
-      var existingEntry = existingEntries[i];
-      var existingMeta = existingEntry && existingEntry.meta ? existingEntry.meta : null;
-      if (!existingMeta || String(existingMeta.moduleName || '') !== ownerName) continue;
-      var existingOwnerKey = makeMetaKey(existingMeta);
-      if (existingOwnerKey && usedKeys[existingOwnerKey]) continue;
-      if (existingOwnerKey) usedKeys[existingOwnerKey] = true;
-      out[ownerName].push({
-        meta: Shared.cloneJson(existingMeta),
-        cell: existingEntry && existingEntry.cell ? existingEntry.cell : null,
-        __fromExistingOwner: true
-      });
+    if (opts.includeExistingOwner !== false) {
+      for (i = 0; i < existingEntries.length; i++) {
+        var existingEntry = existingEntries[i];
+        var existingMeta = existingEntry && existingEntry.meta ? existingEntry.meta : null;
+        if (!existingMeta || String(existingMeta.moduleName || '') !== ownerName) continue;
+        var existingOwnerKey = makeMetaKey(existingMeta);
+        if (existingOwnerKey && usedKeys[existingOwnerKey]) continue;
+        if (existingOwnerKey) usedKeys[existingOwnerKey] = true;
+        out[ownerName].push({
+          meta: Shared.cloneJson(existingMeta),
+          cell: existingEntry && existingEntry.cell ? existingEntry.cell : null,
+          __fromExistingOwner: true
+        });
+      }
     }
     return out;
   }
 
+  function flattenLayerInputs(layerInputs) {
+    var out = [];
+    var names = Object.keys(layerInputs || {});
+    for (var i = 0; i < names.length; i++) {
+      var entries = Array.isArray(layerInputs[names[i]]) ? layerInputs[names[i]] : [];
+      for (var j = 0; j < entries.length; j++) out.push(entries[j]);
+    }
+    return out;
+  }
+
+  function mapEntriesByMetaKey(entries) {
+    var out = Object.create(null);
+    entries = Array.isArray(entries) ? entries : [];
+    for (var i = 0; i < entries.length; i++) {
+      var entry = entries[i];
+      var key = makeMetaKey(entry && entry.meta ? entry.meta : null);
+      if (key && !out[key]) out[key] = entry;
+    }
+    return out;
+  }
+
+  function uniqueCells(cells) {
+    var out = [];
+    var seen = Object.create(null);
+    cells = Array.isArray(cells) ? cells : [];
+    for (var i = 0; i < cells.length; i++) {
+      var cell = cells[i];
+      if (!cell) continue;
+      var key = cell.id != null ? String(cell.id) : ('idx:' + i);
+      if (seen[key]) continue;
+      seen[key] = true;
+      out.push(cell);
+    }
+    return out;
+  }
+
+  function addGeneratedInterfacesToPage(ui, moduleName, sourceModuleCell, layerInputs, bodyCell, placementMode) {
+    var graph = Shared.graphOf(ui);
+    var model = graph && graph.getModel ? graph.getModel() : null;
+    if (!graph || !model || !bodyCell) return { added: 0 };
+    var pageName = ui && ui._activeProjectPageCtx ? String(ui._activeProjectPageCtx.name || '') : '';
+    var interfaceStyleOpts = interfaceStyleOptsForPageName(pageName);
+    var layerParents = ensureNamedLayers(ui, MODULE_LAYER_ORDER);
+    var bodyRect = Shared.rectOfCell(bodyCell) || null;
+    var addedCount = 0;
+
+    model.beginUpdate();
+    try {
+      for (var i = 0; i < MODULE_INTERFACE_LAYER_ORDER.length; i++) {
+        var layerName = MODULE_INTERFACE_LAYER_ORDER[i];
+        var entries = Array.isArray(layerInputs && layerInputs[layerName]) ? layerInputs[layerName] : [];
+        if (!entries.length) continue;
+        var parent = layerParents[String(layerName || '').toLowerCase()] || Shared.getDefaultParent(ui);
+        var bySide = countBySide(entries);
+        var prototypes = {};
+        for (var j = 0; j < entries.length; j++) {
+          prototypes[markerPrototypeKey(entries[j] && entries[j].meta ? entries[j].meta : null)] =
+            createInterfaceCell(graph, entries[j], interfaceStyleOpts);
+        }
+        var placements = positionInterfacesAroundBody(bodyRect, bySide, prototypes, bodyCell, sourceModuleCell, placementMode);
+        for (var p = 0; p < placements.length; p++) {
+          var addedInterface = addCellAt(graph, parent, placements[p].cell, placements[p].x, placements[p].y);
+          var sourceInterfaceCell = placements[p].marker && placements[p].marker.cell ? placements[p].marker.cell : null;
+          var markerMeta = placements[p].marker && placements[p].marker.meta ? placements[p].marker.meta : null;
+          if (addedInterface && addedInterface.__flowPreserveSourceAppearance) {
+            persistGeneratedInterfaceMeta(graph, addedInterface, markerMeta, interfaceStyleOpts);
+          } else if (!sourceInterfaceCell) {
+            normalizeGeneratedInterfaceWithoutSource(graph, addedInterface, markerMeta, interfaceStyleOpts);
+          } else {
+            applyMarkerAppearanceToInterface(graph, addedInterface, sourceInterfaceCell, markerMeta, interfaceStyleOpts);
+            persistGeneratedInterfaceMeta(graph, addedInterface, markerMeta, interfaceStyleOpts);
+          }
+          addedCount += 1;
+        }
+      }
+    } finally {
+      model.endUpdate();
+    }
+
+    return { added: addedCount };
+  }
+
+  function syncModuleBodyFromSource(ui, moduleName, sourceModuleCell, bodyCell) {
+    var graph = Shared.graphOf(ui);
+    var model = graph && graph.getModel ? graph.getModel() : null;
+    if (!graph || !model || !sourceModuleCell || !bodyCell) return bodyCell;
+    var bodyRect = Shared.rectOfCell(bodyCell) || null;
+    var parent = model.getParent(bodyCell);
+    if (!bodyRect || !parent) return bodyCell;
+
+    var replacement = createFloorplanModuleCell(
+      graph,
+      moduleName,
+      Number(bodyRect.width || 0),
+      Number(bodyRect.height || 0),
+      sourceModuleCell,
+      { interactive: true }
+    );
+    if (!replacement) return bodyCell;
+
+    model.beginUpdate();
+    try {
+      graph.removeCells([bodyCell], false);
+      return addCellAt(graph, parent, replacement, Number(bodyRect.x || 0), Number(bodyRect.y || 0));
+    } finally {
+      model.endUpdate();
+    }
+  }
+
+  function mergeCurrentModuleArchPage(ui, ownerName, sourceModuleCell, layerInputs) {
+    var graph = Shared.graphOf(ui);
+    var model = graph && graph.getModel ? graph.getModel() : null;
+    if (!graph || !model) return { merged: false, reason: 'graph-not-ready' };
+
+    var bodyCell = findModuleCellForMeta(graph, ownerName);
+    if (!bodyCell) return { merged: false, reason: 'body-missing' };
+    bodyCell = syncModuleBodyFromSource(ui, ownerName, sourceModuleCell, bodyCell) || bodyCell;
+
+    var existingEntries = collectGeneratedMarkerMeta(ui);
+    var existingByKey = mapEntriesByMetaKey(existingEntries);
+    var targetEntries = flattenLayerInputs(layerInputs);
+    var targetByKey = mapEntriesByMetaKey(targetEntries);
+    var removeCells = [];
+    var addByLayer = Object.create(null);
+    var existingKeys = Object.keys(existingByKey);
+    var targetKeys = Object.keys(targetByKey);
+
+    for (var i = 0; i < existingKeys.length; i++) {
+      var existingKey = existingKeys[i];
+      if (targetByKey[existingKey]) continue;
+      var existingEntry = existingByKey[existingKey] || null;
+      var existingMeta = existingEntry && existingEntry.meta ? existingEntry.meta : null;
+      if (String(existingMeta && existingMeta.moduleName || '') === String(ownerName || '')) continue;
+      var existingCell = existingEntry && existingEntry.cell ? existingEntry.cell : null;
+      if (existingCell) removeCells.push(existingCell);
+    }
+
+    for (i = 0; i < targetKeys.length; i++) {
+      var targetKey = targetKeys[i];
+      if (existingByKey[targetKey]) continue;
+      var targetEntry = targetByKey[targetKey];
+      var layerName = normalizeLayerName(targetEntry && targetEntry.meta && targetEntry.meta.layerName);
+      if (!layerName) continue;
+      if (!addByLayer[layerName]) addByLayer[layerName] = [];
+      addByLayer[layerName].push(targetEntry);
+    }
+
+    removeCells = uniqueCells(removeCells);
+    if (removeCells.length) {
+      model.beginUpdate();
+      try {
+        graph.removeCells(removeCells, false);
+      } finally {
+        model.endUpdate();
+      }
+    }
+
+    var addResult = addGeneratedInterfacesToPage(ui, ownerName, sourceModuleCell, addByLayer, bodyCell, 'inside');
+    return {
+      merged: true,
+      removed: removeCells.length,
+      added: addResult && addResult.added ? addResult.added : 0,
+      preserved: Math.max(0, targetKeys.length - (addResult && addResult.added ? addResult.added : 0))
+    };
+  }
+
   async function syncCurrentModuleArch(ui, analysis, opts) {
     opts = opts || {};
+    var syncMode = String(opts.syncMode || 'rebuild').toLowerCase();
     var owner = getGenerationOwner(ui);
     var ownerKind = owner && owner.__kind ? String(owner.__kind).toLowerCase() : '';
     if (ownerKind !== 'module-design' || !owner || !owner.name) {
@@ -2558,7 +2928,16 @@
     }
 
     analysis = analysis || Analysis.analyzeDataflow(ui);
-    var designInputs = collectModuleDesignInputsFromAnalysis(ui, analysis) || Designs.collectDesignInputs(ui) || {};
+    var designInputs = null;
+    if (syncMode === 'merge') {
+      designInputs = collectModuleDesignInputsFromAnalysis(ui, analysis, {
+        includeExistingOwner: false
+      }) || {};
+    } else {
+      designInputs = collectModuleDesignInputsFromAnalysis(ui, analysis, {
+        includeExistingOwner: true
+      }) || Designs.collectDesignInputs(ui) || {};
+    }
     var ownerEntries = Array.isArray(designInputs[owner.name]) ? designInputs[owner.name] : [];
     var layerInputs = groupMarkersByLayer(ownerEntries);
     var modulePlans = analysis && analysis.interfacePlan && analysis.interfacePlan.modulePlans ? analysis.interfacePlan.modulePlans : {};
@@ -2569,6 +2948,10 @@
     await ensurePage(ui, owner, 'arch');
     try {
       await withOpenedPage(ui, owner, 'arch', function () {
+        if (syncMode === 'merge') {
+          var mergeResult = mergeCurrentModuleArchPage(ui, owner.name, sourceModuleCell, layerInputs);
+          if (mergeResult && mergeResult.merged) return mergeResult;
+        }
         return populateModuleDesignPage(
           ui,
           owner.name,
@@ -2636,7 +3019,7 @@
     var modulePlans = analysis && analysis.interfacePlan && analysis.interfacePlan.modulePlans ? analysis.interfacePlan.modulePlans : {};
     try {
       if (ownerModuleName) {
-        var ownerSync = await syncCurrentModuleArch(ui, analysis, { restore: false, allowFromAnyPage: true });
+        var ownerSync = await syncCurrentModuleArch(ui, analysis, { restore: false, allowFromAnyPage: true, syncMode: 'rebuild' });
         if (ownerSync && ownerSync.synced) {
           results.push({
             module: ownerModuleName,

@@ -75,6 +75,33 @@
     return 'unknown';
   }
 
+  function isGeneratedInterfaceBody(graph, cell) {
+    if (!cell || !Shared.isChipBody(graph, cell)) return false;
+    if (String(Shared.getCellStyleValue(graph, cell, 'flowGeneratedDesignInterface', '0')) === '1') return true;
+    return String(Shared.getCellStyleValue(graph, cell, 'flowGeneratedInterfaceFloorplan', '0')) === '1' &&
+      String(Shared.getCellStyleValue(graph, cell, 'dftsFloorplanEndpointKind', '')) === 'generatedInterface';
+  }
+
+  function readGeneratedInterfaceEndpointMeta(graph, cell) {
+    if (!cell) return null;
+    var interfaceType = Shared.trim(Shared.getCellStyleValue(graph, cell, 'flowInterfaceType', '')).toUpperCase();
+    var layerName = normalizeLayerName(Shared.getCellStyleValue(graph, cell, 'flowLayer', ''));
+    if (!interfaceType || !layerName) return null;
+    return {
+      cell: cell,
+      layerName: layerName,
+      interfaceType: interfaceType,
+      isStart: interfaceType === 'HI' || interfaceType === 'SI',
+      isTarget: interfaceType === 'HO' || interfaceType === 'SO',
+      chainId: Shared.trim(Shared.getCellStyleValue(graph, cell, 'flowChain', '')),
+      pairId: Shared.trim(Shared.getCellStyleValue(graph, cell, 'flowPair', '')),
+      bundleId: Shared.trim(Shared.getCellStyleValue(graph, cell, 'flowBundle', '')),
+      markerId: Shared.trim(Shared.getCellStyleValue(graph, cell, 'flowMarkerId', '')),
+      moduleName: Shared.trim(Shared.getCellStyleValue(graph, cell, 'flowModule', '')),
+      name: Shared.displayNameOfCell(graph, cell) || Shared.labelOf(cell) || ('INTERFACE_' + String(cell.id || ''))
+    };
+  }
+
   function isLikelyInterface(cell, graph) {
     var txt = Shared.displayNameOfCell(graph, cell).toLowerCase();
     if (/ssn\s*host|ssn\s*slave|host|slave/.test(txt)) return true;
@@ -211,18 +238,25 @@
     return Math.sqrt(dx * dx + dy * dy);
   }
 
-  function findDataSourceMatchByAnchor(dataSources, bodyId, graph) {
+  function findEndpointMatchByAnchor(endpoints, bodyId, graph) {
     if (!bodyId) return [];
     var out = [];
-    for (var i = 0; i < dataSources.length; i++) {
-      var ds = dataSources[i];
-      var body = ds && ds.cell;
+    for (var i = 0; i < endpoints.length; i++) {
+      var endpoint = endpoints[i];
+      var body = endpoint && endpoint.cell;
       if (!body || body.id == null) continue;
       if (String(body.id) !== String(bodyId)) continue;
       out.push({
         body: body,
         bodyName: Shared.displayNameOfCell(graph, body) || Shared.trim(Shared.labelOf(body)),
-        kind: ds.kind,
+        kind: endpoint.kind,
+        interfaceType: endpoint.interfaceType || '',
+        isStart: endpoint.isStart === true,
+        isTarget: endpoint.isTarget === true,
+        chainId: endpoint.chainId || '',
+        pairId: endpoint.pairId || '',
+        bundleId: endpoint.bundleId || '',
+        markerId: endpoint.markerId || '',
         distance: 0,
         anchored: true
       });
@@ -248,13 +282,13 @@
     return out;
   }
 
-  function matchPointToDataSources(point, dataSources, tolerance, graph) {
+  function matchPointToEndpoints(point, endpoints, tolerance, graph) {
     var out = [];
     if (!point) return out;
     tolerance = Math.max(0, Number(tolerance || 0));
-    for (var i = 0; i < dataSources.length; i++) {
-      var ds = dataSources[i] || {};
-      var body = ds.cell;
+    for (var i = 0; i < endpoints.length; i++) {
+      var endpoint = endpoints[i] || {};
+      var body = endpoint.cell;
       var rect = Shared.rectOfCell(body);
       if (!body || !rect) continue;
       var dist = pointDistanceToRect(point, rect);
@@ -262,12 +296,43 @@
       out.push({
         body: body,
         bodyName: Shared.displayNameOfCell(graph, body) || Shared.trim(Shared.labelOf(body)),
-        kind: ds.kind,
+        kind: endpoint.kind,
+        interfaceType: endpoint.interfaceType || '',
+        isStart: endpoint.isStart === true,
+        isTarget: endpoint.isTarget === true,
+        chainId: endpoint.chainId || '',
+        pairId: endpoint.pairId || '',
+        bundleId: endpoint.bundleId || '',
+        markerId: endpoint.markerId || '',
         distance: dist
       });
     }
     out.sort(function (a, b) { return Number(a.distance || 0) - Number(b.distance || 0); });
     return out;
+  }
+
+  function generatedInterfaceMatchCompatible(head, tail) {
+    if (!head || !tail) return false;
+    if (!head.isStart || !tail.isTarget) return false;
+    if (head.chainId && tail.chainId) return head.chainId === tail.chainId;
+    if (head.pairId && tail.pairId) return head.pairId === tail.pairId;
+    if (head.bundleId && tail.bundleId) return head.bundleId === tail.bundleId;
+    return true;
+  }
+
+  function pickGeneratedInterfacePair(headMatches, tailMatches) {
+    if (!headMatches.length || !tailMatches.length) return null;
+    for (var i = 0; i < headMatches.length; i++) {
+      for (var j = 0; j < tailMatches.length; j++) {
+        if (!generatedInterfaceMatchCompatible(headMatches[i], tailMatches[j])) continue;
+        return {
+          start: headMatches[i],
+          back: tailMatches[j],
+          sameBody: headMatches[i].body && tailMatches[j].body && String(headMatches[i].body.id) === String(tailMatches[j].body.id)
+        };
+      }
+    }
+    return null;
   }
 
   function pickBestEndpointPair(headMatches, tailMatches, layerRule) {
@@ -305,23 +370,48 @@
     var anchors = edgeAnchorMeta(edge);
     var layerName = normalizeLayerName(ctx.lineLayerNameByEdgeId[String(edge && edge.id || '')] || '');
     var layerRule = getLayerRule(ctx, layerName);
-    var layerDataSources = ctx.dataSourceByLayer[layerName] || [];
+    var endpointMode = ctx.endpointMode || 'datasource';
+    var layerEndpoints = endpointMode === 'generated-interface'
+      ? (ctx.generatedInterfaceByLayer[layerName] || [])
+      : (ctx.dataSourceByLayer[layerName] || []);
     var endpointMatches = {
-      head: mergeEndpointMatches(findDataSourceMatchByAnchor(layerDataSources, anchors.sourceBodyId, ctx.graph), matchPointToDataSources(head, layerDataSources, ctx.config.endpointTolerance, ctx.graph)),
-      tail: mergeEndpointMatches(findDataSourceMatchByAnchor(layerDataSources, anchors.sinkBodyId, ctx.graph), matchPointToDataSources(tail, layerDataSources, ctx.config.endpointTolerance, ctx.graph))
+      head: mergeEndpointMatches(findEndpointMatchByAnchor(layerEndpoints, anchors.sourceBodyId, ctx.graph), matchPointToEndpoints(head, layerEndpoints, ctx.config.endpointTolerance, ctx.graph)),
+      tail: mergeEndpointMatches(findEndpointMatchByAnchor(layerEndpoints, anchors.sinkBodyId, ctx.graph), matchPointToEndpoints(tail, layerEndpoints, ctx.config.endpointTolerance, ctx.graph))
     };
     var crossLayerAnchor = false;
-    if (anchors.sourceBodyId && ctx.dataSourceByBodyId[anchors.sourceBodyId] && ctx.dataSourceByBodyId[anchors.sourceBodyId].layerName !== layerName) crossLayerAnchor = true;
-    if (anchors.sinkBodyId && ctx.dataSourceByBodyId[anchors.sinkBodyId] && ctx.dataSourceByBodyId[anchors.sinkBodyId].layerName !== layerName) crossLayerAnchor = true;
-    var pairMatch = pickBestEndpointPair(endpointMatches.head, endpointMatches.tail, layerRule);
+    var endpointByBodyId = endpointMode === 'generated-interface' ? ctx.generatedInterfaceByBodyId : ctx.dataSourceByBodyId;
+    if (anchors.sourceBodyId && endpointByBodyId[anchors.sourceBodyId] && endpointByBodyId[anchors.sourceBodyId].layerName !== layerName) crossLayerAnchor = true;
+    if (anchors.sinkBodyId && endpointByBodyId[anchors.sinkBodyId] && endpointByBodyId[anchors.sinkBodyId].layerName !== layerName) crossLayerAnchor = true;
+    var pairMatch = endpointMode === 'generated-interface'
+      ? pickGeneratedInterfacePair(
+        endpointMatches.head.filter(function (item) { return item.isStart; }),
+        endpointMatches.tail.filter(function (item) { return item.isTarget; })
+      )
+      : pickBestEndpointPair(endpointMatches.head, endpointMatches.tail, layerRule);
     var validationErrors = [];
     if (!layerRule) validationErrors.push('Layer "' + (layerName || '?') + '" does not have a dataflow rule.');
-    if (crossLayerAnchor) validationErrors.push('Line references a datasource from a different layer.');
-    if (!endpointMatches.head.length || !endpointMatches.tail.length) validationErrors.push('Both endpoints must attach to datasource bodies in the same layer.');
-    if (layerRule && !pairMatch && endpointMatches.head.length && endpointMatches.tail.length) {
+    if (crossLayerAnchor) validationErrors.push(endpointMode === 'generated-interface'
+      ? 'Line references a generated interface from a different layer.'
+      : 'Line references a datasource from a different layer.');
+    if (!endpointMatches.head.length || !endpointMatches.tail.length) {
+      validationErrors.push(endpointMode === 'generated-interface'
+        ? 'Both endpoints must attach to generated interfaces in the same layer.'
+        : 'Both endpoints must attach to datasource bodies in the same layer.');
+    }
+    if (endpointMode === 'generated-interface') {
+      if (endpointMatches.head.length && !endpointMatches.head.some(function (item) { return item.isStart; })) {
+        validationErrors.push('Line must start from a HI/SI generated interface.');
+      }
+      if (endpointMatches.tail.length && !endpointMatches.tail.some(function (item) { return item.isTarget; })) {
+        validationErrors.push('Line must end on a HO/SO generated interface.');
+      }
+      if (!pairMatch && endpointMatches.head.length && endpointMatches.tail.length) {
+        validationErrors.push('Line endpoints do not belong to the same generated interface chain.');
+      }
+    } else if (layerRule && !pairMatch && endpointMatches.head.length && endpointMatches.tail.length) {
       validationErrors.push('Line endpoints do not satisfy the layer datasource rule.');
     }
-    if (pairMatch && layerRule && !pairMatch.sameBody && layerRule.requireSameSource) {
+    if (endpointMode !== 'generated-interface' && pairMatch && layerRule && !pairMatch.sameBody && layerRule.requireSameSource) {
       validationErrors.push('Line must start and end on the same datasource for this layer.');
     }
     var loopMatch = pairMatch ? {
@@ -927,6 +1017,7 @@
   function buildDataflowContext(ui) {
     var graph = Shared.graphOf(ui);
     var layers = Shared.getTopLevelLayers(ui);
+    var endpointMode = Shared.isModuleDataflowPageOpen && Shared.isModuleDataflowPageOpen(ui) ? 'generated-interface' : 'datasource';
     var vertices = [];
     var edges = [];
     var modules = [];
@@ -934,6 +1025,10 @@
     var dataSourceInfos = [];
     var dataSourceByBodyId = {};
     var dataSourceByLayer = {};
+    var generatedInterfaces = [];
+    var generatedInterfaceInfos = [];
+    var generatedInterfaceByBodyId = {};
+    var generatedInterfaceByLayer = {};
     var interfaces = [];
     var floorplanLines = [];
     var lineLayerNameByEdgeId = {};
@@ -951,6 +1046,7 @@
     var seenEdges = {};
     var seenModules = {};
     var seenSources = {};
+    var seenGeneratedInterfaces = {};
     var seenInterfaces = {};
 
     for (i = 0; i < layers.length; i++) {
@@ -969,6 +1065,18 @@
           if (!dataSourceByLayer[layerName]) dataSourceByLayer[layerName] = [];
           dataSourceByLayer[layerName].push(info);
           continue;
+        }
+        if (isGeneratedInterfaceBody(graph, cell)) {
+          var generatedInfo = readGeneratedInterfaceEndpointMeta(graph, cell);
+          if (generatedInfo) {
+            pushUnique(generatedInterfaces, cell, seenGeneratedInterfaces);
+            generatedInterfaceInfos.push(generatedInfo);
+            generatedInterfaceByBodyId[String(cell.id)] = generatedInfo;
+            if (!generatedInterfaceByLayer[layerName]) generatedInterfaceByLayer[layerName] = [];
+            generatedInterfaceByLayer[layerName].push(generatedInfo);
+            pushUnique(interfaces, cell, seenInterfaces);
+            continue;
+          }
         }
         if (isLikelyInterface(cell, graph)) {
           pushUnique(interfaces, cell, seenInterfaces);
@@ -992,12 +1100,17 @@
       var dsInfo = dataSourceInfos[i];
       if (!dataSourceByLayer[dsInfo.layerName]) dataSourceByLayer[dsInfo.layerName] = [];
     }
+    for (i = 0; i < generatedInterfaceInfos.length; i++) {
+      var giInfo = generatedInterfaceInfos[i];
+      if (!generatedInterfaceByLayer[giInfo.layerName]) generatedInterfaceByLayer[giInfo.layerName] = [];
+    }
 
     var config = getDataflowRuleConfig();
     var configRules = config.layerRules || {};
     for (var knownLayer in configRules) {
       if (!Object.prototype.hasOwnProperty.call(configRules, knownLayer)) continue;
       if (!dataSourceByLayer[knownLayer]) dataSourceByLayer[knownLayer] = [];
+      if (!generatedInterfaceByLayer[knownLayer]) generatedInterfaceByLayer[knownLayer] = [];
     }
 
     var dataSourcePins = [];
@@ -1010,6 +1123,7 @@
       ui: ui,
       graph: graph,
       layers: layers,
+      endpointMode: endpointMode,
       vertices: vertices,
       edges: edges,
       modules: modules,
@@ -1017,6 +1131,10 @@
       dataSourceInfos: dataSourceInfos,
       dataSourceByBodyId: dataSourceByBodyId,
       dataSourceByLayer: dataSourceByLayer,
+      generatedInterfaces: generatedInterfaces,
+      generatedInterfaceInfos: generatedInterfaceInfos,
+      generatedInterfaceByBodyId: generatedInterfaceByBodyId,
+      generatedInterfaceByLayer: generatedInterfaceByLayer,
       interfaces: interfaces,
       floorplanLines: floorplanLines,
       lineLayerNameByEdgeId: lineLayerNameByEdgeId,
@@ -1054,47 +1172,68 @@
 
   function runRules(ctx) {
     var issues = [];
+    var endpointMode = ctx.endpointMode || 'datasource';
     function issue(level, textValue, meta) {
       var item = { level: level || 'warning', text: textValue };
       if (meta) for (var k in meta) if (Object.prototype.hasOwnProperty.call(meta, k)) item[k] = meta[k];
       issues.push(item);
     }
     if (!ctx.modules.length) issue('warning', 'No floorplan modules detected on the current page.', { ruleKey: 'modules-present' });
-    if (!ctx.dataSources.length) issue('warning', 'No data source detected on the current floorplan page.', { ruleKey: 'datasource-present' });
+    if (endpointMode === 'generated-interface') {
+      if (!ctx.generatedInterfaces.length) issue('warning', 'No generated interface detected on the current module dataflow page.', { ruleKey: 'generated-interface-present' });
+    } else if (!ctx.dataSources.length) {
+      issue('warning', 'No data source detected on the current floorplan page.', { ruleKey: 'datasource-present' });
+    }
     if (!ctx.floorplanLines.length) issue('warning', 'No floorplan lines detected on the current page.', { ruleKey: 'floorplan-lines-present' });
     var layerRules = ctx.config.layerRules || {};
-    for (var layerName in layerRules) {
-      if (!Object.prototype.hasOwnProperty.call(layerRules, layerName)) continue;
-      var rule = layerRules[layerName];
-      var items = ctx.dataSourceByLayer[layerName] || [];
-      var allowedCount = 0;
-      for (var d = 0; d < items.length; d++) {
-        if (rule.allowedKinds.indexOf(items[d].kind) >= 0) {
-          allowedCount++;
-          continue;
+    if (endpointMode !== 'generated-interface') {
+      for (var layerName in layerRules) {
+        if (!Object.prototype.hasOwnProperty.call(layerRules, layerName)) continue;
+        var rule = layerRules[layerName];
+        var items = ctx.dataSourceByLayer[layerName] || [];
+        var allowedCount = 0;
+        for (var d = 0; d < items.length; d++) {
+          if (rule.allowedKinds.indexOf(items[d].kind) >= 0) {
+            allowedCount++;
+            continue;
+          }
+          issue('error',
+            'Layer "' + layerName + '" only allows ' + dataSourceKindLabel(rule.allowedKinds[0]) +
+            ', but found "' + (items[d].name || 'unknown') + '" (' + dataSourceKindLabel(items[d].kind) + ').',
+            { ruleKey: 'datasource-layer-type', datasourceId: items[d].cell && items[d].cell.id });
         }
-        issue('error',
-          'Layer "' + layerName + '" only allows ' + dataSourceKindLabel(rule.allowedKinds[0]) +
-          ', but found "' + (items[d].name || 'unknown') + '" (' + dataSourceKindLabel(items[d].kind) + ').',
-          { ruleKey: 'datasource-layer-type', datasourceId: items[d].cell && items[d].cell.id });
+        if (allowedCount < rule.minSources || allowedCount > rule.maxSources) {
+          var expected = rule.minSources === rule.maxSources
+            ? String(rule.minSources)
+            : String(rule.minSources) + '~' + String(rule.maxSources);
+          issue(allowedCount === 0 ? 'warning' : 'error',
+            'Layer "' + layerName + '" requires ' + expected + ' ' + dataSourceKindLabel(rule.allowedKinds[0]) +
+            ' datasource(s), but found ' + String(allowedCount) + '.',
+            { ruleKey: 'datasource-layer-count', layerName: layerName });
+        }
+        var layerLineCount = 0;
+        for (var ll = 0; ll < ctx.lineAnalyses.length; ll++) {
+          if (ctx.lineAnalyses[ll].layerName === layerName) layerLineCount++;
+        }
+        if (items.length > 0 && !layerLineCount) {
+          issue('warning',
+            'Layer "' + layerName + '" contains datasource(s) but no floorplan line.',
+            { ruleKey: 'datasource-layer-no-line', layerName: layerName });
+        }
       }
-      if (allowedCount < rule.minSources || allowedCount > rule.maxSources) {
-        var expected = rule.minSources === rule.maxSources
-          ? String(rule.minSources)
-          : String(rule.minSources) + '~' + String(rule.maxSources);
-        issue(allowedCount === 0 ? 'warning' : 'error',
-          'Layer "' + layerName + '" requires ' + expected + ' ' + dataSourceKindLabel(rule.allowedKinds[0]) +
-          ' datasource(s), but found ' + String(allowedCount) + '.',
-          { ruleKey: 'datasource-layer-count', layerName: layerName });
-      }
-      var layerLineCount = 0;
-      for (var ll = 0; ll < ctx.lineAnalyses.length; ll++) {
-        if (ctx.lineAnalyses[ll].layerName === layerName) layerLineCount++;
-      }
-      if (items.length > 0 && !layerLineCount) {
-        issue('warning',
-          'Layer "' + layerName + '" contains datasource(s) but no floorplan line.',
-          { ruleKey: 'datasource-layer-no-line', layerName: layerName });
+    } else {
+      for (var genLayerName in layerRules) {
+        if (!Object.prototype.hasOwnProperty.call(layerRules, genLayerName)) continue;
+        var generatedItems = ctx.generatedInterfaceByLayer[genLayerName] || [];
+        var generatedLineCount = 0;
+        for (var gl = 0; gl < ctx.lineAnalyses.length; gl++) {
+          if (ctx.lineAnalyses[gl].layerName === genLayerName) generatedLineCount++;
+        }
+        if (generatedItems.length > 0 && !generatedLineCount) {
+          issue('warning',
+            'Layer "' + genLayerName + '" contains generated interface endpoint(s) but no floorplan line.',
+            { ruleKey: 'generated-interface-layer-no-line', layerName: genLayerName });
+        }
       }
     }
     var validLoops = 0;

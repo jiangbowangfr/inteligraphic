@@ -204,7 +204,7 @@
 
     if (Designs && typeof Designs.syncCurrentModuleArch === 'function' && Shared.isModuleDataflowPageOpen(ui)) {
       exportChain = exportChain.then(function () {
-        return Designs.syncCurrentModuleArch(ui, analysis, { reason: 'generate-interface' });
+        return Designs.syncCurrentModuleArch(ui, analysis, { reason: 'generate-interface', syncMode: 'merge' });
       });
     }
 
