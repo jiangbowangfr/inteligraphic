@@ -199,7 +199,7 @@ function _pageDirPath(ui, designRef) {
     const root = _getProjectStorageRoot(ui);
     const segs = (designRef && designRef._dirRel) ||
         [_sanitizeFileName(designRef?.name || 'design')];
-    return _isFloorplanDesignRef(designRef) ? _joinPath(root, ...segs) : (_isModuleDesignRef(designRef) ? _joinPath(root, ...segs, 'arch') : _joinPath(root, ...segs, 'page'));
+    return (_isFloorplanDesignRef(designRef) || _isModuleDesignRef(designRef)) ? _joinPath(root, ...segs, 'arch') : _joinPath(root, ...segs, 'page');
 }
 
 function _setActivePageCtx(ui, designRef, name, absOpt) {

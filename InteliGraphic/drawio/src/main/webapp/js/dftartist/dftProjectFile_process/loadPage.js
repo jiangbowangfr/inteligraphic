@@ -35,7 +35,7 @@ async function _resolvePageFileAbs(ui, designRef, pageName) {
         baseDir = _joinPath(root, ...segs);
     }
 
-    const pageDir = isFloorplan ? baseDir : (isModuleDesign ? _joinPath(baseDir, 'arch') : _joinPath(baseDir, 'page'));
+    const pageDir = (isFloorplan || isModuleDesign) ? _joinPath(baseDir, 'arch') : _joinPath(baseDir, 'page');
 
     try { await requestSync({ action: 'ensureDirs', path: pageDir }); } catch (_) { }
 

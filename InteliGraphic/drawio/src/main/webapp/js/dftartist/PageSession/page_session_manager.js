@@ -772,16 +772,16 @@
     var root = getProjectStorageRoot(ui);
     if (!root) throw new Error('Please save project first.');
 
-    if (isFloorplanRef(designRef)) {
-      var floorplanDir = joinPath(root, ROOT_FLOORPLAN_DIR);
-      try { await request({ action: 'ensureDirs', path: floorplanDir }); } catch (e0) {}
-      return joinPath(floorplanDir, sanitizeName(pageName) + '.dftart');
-    }
-
     var segs = (designRef && Array.isArray(designRef._dirRel) && designRef._dirRel.slice()) ||
       (designRef && typeof designRef.env_file === 'string' && designRef.env_file
         ? designRef.env_file.replace(/\\/g, '/').split('/').slice(0, -1)
         : [sanitizeName(designRef && designRef.name || 'design')]);
+
+    if (isFloorplanRef(designRef)) {
+      var floorplanDir = joinPath.apply(null, [root].concat(segs).concat(['arch']));
+      try { await request({ action: 'ensureDirs', path: floorplanDir }); } catch (e0) {}
+      return joinPath(floorplanDir, sanitizeName(pageName) + '.dftart');
+    }
 
     var pageDir = joinPath.apply(null, [root].concat(segs).concat(['page']));
     try { await request({ action: 'ensureDirs', path: pageDir }); } catch (e) {}

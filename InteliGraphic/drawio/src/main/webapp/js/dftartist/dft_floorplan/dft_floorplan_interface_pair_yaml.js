@@ -41,12 +41,21 @@
         return !!(designRef && String(designRef.__kind || '').toLowerCase() === 'module-design');
     }
 
+    function isFloorplanDesign(designRef) {
+        if (!designRef) return false;
+        var kind = String(designRef.__kind || '').toLowerCase();
+        if (kind === 'floorplan-container') return true;
+        var name = String(designRef.name || '').trim().toLowerCase();
+        var dirRel = Array.isArray(designRef._dirRel) ? designRef._dirRel.join('/').toLowerCase() : '';
+        return name === 'floorplan' || name === 'top' || dirRel === 'floorplan' || dirRel === 'top' || /(^|\/)(floorplan|top)$/.test(dirRel);
+    }
+
     function getDesignBaseDir(ui, designRef, ctx, pageAbs) {
         if (designRef && designRef._absDir) return String(designRef._absDir).replace(/\\/g, '/').replace(/\/+$/, '');
         var root = projectStorageRoot(ui);
         var segs = ctx && Array.isArray(ctx.segs) ? ctx.segs.slice() : (designRef && Array.isArray(designRef._dirRel) ? designRef._dirRel.slice() : []);
         if (root && segs.length) return joinPath.apply(null, [root].concat(segs));
-        if (pageAbs && isModuleDesign(designRef)) return dirnamePath(dirnamePath(pageAbs));
+        if (pageAbs && (isFloorplanDesign(designRef) || isModuleDesign(designRef))) return dirnamePath(dirnamePath(pageAbs));
         return pageAbs ? dirnamePath(pageAbs) : '';
     }
 
@@ -99,10 +108,10 @@
     function getPageName(ui) {
         try {
             if (global.DFTFlowNavMod && global.DFTFlowNavMod.Shared && typeof global.DFTFlowNavMod.Shared.getActivePageName === 'function') {
-                return global.DFTFlowNavMod.Shared.getActivePageName(ui) || 'floorplan';
+                return global.DFTFlowNavMod.Shared.getActivePageName(ui) || 'dataflow';
             }
         } catch (e) {}
-        return 'floorplan';
+        return 'dataflow';
     }
 
     function normalizeLayerName(name) {
@@ -230,12 +239,12 @@
         } else {
             var root = (ui && (ui._projectRootPath || ui._projectYamlDir)) || '';
             if (!root) throw new Error('Active floorplan page path is unavailable.');
-            pageAbs = joinPath(root, 'floorplan', sanitizeFileName(pageName) + '.dftart');
+            pageAbs = joinPath(root, 'dft_studio_db', 'top', 'arch', sanitizeFileName(pageName) + '.dftart');
         }
 
         if (!pageAbs) throw new Error('Active floorplan page path is unavailable.');
         var targetDir = dirnamePath(pageAbs);
-        if (isModuleDesign(designRef)) {
+        if (isFloorplanDesign(designRef) || isModuleDesign(designRef)) {
             targetDir = joinPath(getDesignBaseDir(ui, designRef, ctx, pageAbs), 'yaml');
         }
         var targetAbs = joinPath(targetDir, sanitizeFileName(pageName) + '.interface-pairs.yaml');

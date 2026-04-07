@@ -246,7 +246,7 @@ window.DftSaveProjectIndividually = async function (editorUi, opts) {
         const designDir = _joinPath(projectRoot, ...segs);
         const isFloorplan = _isFloorplanDesign(ownerDesign);
         const isModuleDesign = _isModuleDesign(ownerDesign);
-        const pageDir = isFloorplan ? designDir : (isModuleDesign ? _joinPath(designDir, 'arch') : _joinPath(designDir, 'page'));
+        const pageDir = (isFloorplan || isModuleDesign) ? _joinPath(designDir, 'arch') : _joinPath(designDir, 'page');
         targetAbs = _joinPath(pageDir, _sanitizeFileName(curPage) + '.dftart');
     }
     await requestSync({ action: 'ensureDirs', path: _dirname(targetAbs) });

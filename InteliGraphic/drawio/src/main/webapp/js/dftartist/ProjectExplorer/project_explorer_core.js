@@ -178,11 +178,14 @@
     return !!(design && design.__kind === 'module-design');
   }
 
+  function usesArchStorage(design) {
+    return isFloorplanDesign(design) || usesProjectFlow(design);
+  }
+
   function getDesignPageDir(ui, designRef) {
     var base = getDesignAbsDir(ui, designRef);
     if (!base) return '';
-    if (isFloorplanDesign(designRef)) return base;
-    return usesProjectFlow(designRef) ? joinPath(base, 'arch') : joinPath(base, 'page');
+    return usesArchStorage(designRef) ? joinPath(base, 'arch') : joinPath(base, 'page');
   }
 
   function getDesignYamlDir(ui, designRef) {
@@ -1234,7 +1237,33 @@
   async function ensureFloorplanStorage(ui, parentDesign) {
     var fp = getFloorplanContainer(ui, true, parentDesign);
     var base = getDesignAbsDir(ui, fp);
-    if (base) await ensureDirs(base);
+    if (base) {
+      await ensureDirs(base);
+      await ensureDirs(getDesignPageDir(ui, fp));
+      await ensureDirs(getDesignYamlDir(ui, fp));
+      await ensureDirs(getDesignSpecDir(ui, fp));
+    }
+    fp.pages = Array.isArray(fp.pages) ? fp.pages : [];
+    fp.page_meta = fp.page_meta && typeof fp.page_meta === 'object' ? fp.page_meta : {};
+
+    if (fp.pages.indexOf('dataflow') < 0) {
+      fp.pages.unshift('dataflow');
+      await createPageFileSlot(ui, fp, 'dataflow');
+    } else {
+      await createPageFileSlot(ui, fp, 'dataflow');
+    }
+
+    if (fp.pages.indexOf('arch') < 0) {
+      var dataflowIndex = fp.pages.indexOf('dataflow');
+      if (dataflowIndex >= 0) fp.pages.splice(dataflowIndex + 1, 0, 'arch');
+      else fp.pages.push('arch');
+      await createPageFileSlot(ui, fp, 'arch');
+    } else {
+      await createPageFileSlot(ui, fp, 'arch');
+    }
+
+    if (!fp.page_meta.dataflow || typeof fp.page_meta.dataflow !== 'object') fp.page_meta.dataflow = { kind: 'floorplan' };
+    if (!fp.page_meta.arch || typeof fp.page_meta.arch !== 'object') fp.page_meta.arch = { kind: 'floorplan' };
     return fp;
   }
 
@@ -1572,11 +1601,11 @@
     var designAbs = getDesignAbsDir(ui, designRef);
     if (!designAbs) return;
     await ensureDirs(designAbs);
-    if (usesProjectFlow(designRef)) {
+    if (usesArchStorage(designRef)) {
       await ensureDirs(getDesignPageDir(ui, designRef));
       await ensureDirs(getDesignYamlDir(ui, designRef));
       await ensureDirs(getDesignSpecDir(ui, designRef));
-    } else if (!isFloorplanDesign(designRef)) {
+    } else if (!isIpconfigDesign(designRef)) {
       await ensureDirs(getDesignPageDir(ui, designRef));
     }
     if (isIpconfigDesign(designRef)) await ensureDirs(joinPath(designAbs, 'yaml'));
@@ -1993,7 +2022,7 @@
       created.push(pageName);
     }
     saveProjectYaml(ui, 'createFloorplanPages');
-    if (created.length && opts.openFirst !== false) await openPage(ui, fp, created[0]);
+    if (opts.openFirst !== false) await openPage(ui, fp, created.length ? created[0] : pageName);
     setStatus(ui, created.length ? ('Created floorplan page: ' + created[0]) : 'Floorplan page already exists.');
     NS.refresh(ui);
     return { design: fp, owner: pageOwner, created: created, skipped: skipped, selection: selection };

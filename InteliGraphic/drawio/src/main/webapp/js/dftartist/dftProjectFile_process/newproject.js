@@ -152,9 +152,15 @@ async function _ensureDesignScaffold(ui, design, parentSegs) {
     const designDir = _joinPath(root, ...segs);
     const kind = String((design && design.__kind) || '').toLowerCase();
     const isModuleDesign = kind === 'module-design';
-    const pageDir = isModuleDesign ? _joinPath(designDir, 'arch') : _joinPath(designDir, 'page');
-    const yamlDir = isModuleDesign ? _joinPath(designDir, 'yaml') : '';
-    const specDir = isModuleDesign ? _joinPath(designDir, 'spec') : '';
+    const isFloorplan =
+        !!(design && design._isFloorplan) ||
+        kind === 'floorplan-container' ||
+        String(design && design.name || '').trim().toLowerCase() === 'floorplan' ||
+        String(design && design.name || '').trim().toLowerCase() === 'top';
+    const usesArchLayout = isFloorplan || isModuleDesign;
+    const pageDir = usesArchLayout ? _joinPath(designDir, 'arch') : _joinPath(designDir, 'page');
+    const yamlDir = usesArchLayout ? _joinPath(designDir, 'yaml') : '';
+    const specDir = usesArchLayout ? _joinPath(designDir, 'spec') : '';
     const envAbs = _joinPath(designDir, 'env.json');
 
     try { await requestSync({ action: 'ensureDirs', path: pageDir }); } catch (_) { }
@@ -165,7 +171,7 @@ async function _ensureDesignScaffold(ui, design, parentSegs) {
         try { await requestSync({ action: 'ensureDirs', path: specDir }); } catch (_) { }
     }
 
-    if (!isModuleDesign) {
+    if (!usesArchLayout) {
         // env.json 不存在则写一个默认
         let needWriteEnv = false;
         try { await requestSync({ action: 'fileStat', file: envAbs }); }
@@ -195,7 +201,7 @@ async function _createPageFileSlot(ui, design, pageName) {
         String(design && design.name || '').trim().toLowerCase() === 'top';
     const segs = (design._dirRel && design._dirRel.slice()) ||
         [_sanitizeFileName(design.name || 'design')];
-    const pageDir = isFloorplan ? _joinPath(root, ...segs) : (isModuleDesign ? _joinPath(root, ...segs, 'arch') : _joinPath(root, ...segs, 'page'));
+    const pageDir = (isFloorplan || isModuleDesign) ? _joinPath(root, ...segs, 'arch') : _joinPath(root, ...segs, 'page');
     const abs = _joinPath(pageDir, _sanitizeFileName(pageName) + '.dftart');
 
     try { await requestSync({ action: 'ensureDirs', path: pageDir }); } catch (_) { }

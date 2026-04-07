@@ -299,17 +299,7 @@ function handleDftartProject(path, data) {
                 ui._projectRootPath = model.path;
                 ui._projectYamlFilePath = path;
                 ui._projectYamlDir = await requestSync({ action: 'dirname', path: path });
-                const primaryDbRoot = _joinPath(model.path, 'dft_studio_db');
-                let resolvedDbRoot = primaryDbRoot;
-                try {
-                    await requestSync({ action: 'fileStat', file: primaryDbRoot });
-                } catch (_) {
-                    const legacyDbRoot = _joinPath(model.path, 'db');
-                    try {
-                        await requestSync({ action: 'fileStat', file: legacyDbRoot });
-                        resolvedDbRoot = legacyDbRoot;
-                    } catch (_) { }
-                }
+                const resolvedDbRoot = _joinPath(model.path, 'dft_studio_db');
                 ui._projectDbDirPath = resolvedDbRoot;
                 _hydrateDesignDirsFromYaml(ui);  // ← 初始化每个 design 的目录段
 
