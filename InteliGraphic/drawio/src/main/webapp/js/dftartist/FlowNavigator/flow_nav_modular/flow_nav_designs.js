@@ -2308,6 +2308,103 @@
     return out;
   }
 
+  function sourceInterfaceVisibleRect(sourceCell, side) {
+    var rect = sourceCell ? Shared.rectOfCell(sourceCell) : null;
+    if (!rect) return null;
+    var metrics = interfacePlacementMetrics(sourceCell, side, sourceCell);
+    return {
+      x: Number(rect.x || 0) + Number(metrics.offsetX || 0),
+      y: Number(rect.y || 0) + Number(metrics.offsetY || 0),
+      width: Number(metrics.width || rect.width || 0),
+      height: Number(metrics.height || rect.height || 0)
+    };
+  }
+
+  function boundaryOffsetFromSourceInterface(sourceModuleCell, markerEntry, side) {
+    var srcModuleRect = sourceModuleCell ? Shared.rectOfCell(sourceModuleCell) : null;
+    if (!srcModuleRect) return null;
+
+    var srcCell = markerEntry && markerEntry.cell ? markerEntry.cell : null;
+    var visibleRect = sourceInterfaceVisibleRect(srcCell, side);
+    var anchorX = NaN;
+    var anchorY = NaN;
+
+    if (visibleRect) {
+      if (side === 'left') {
+        anchorX = Number(visibleRect.x || 0);
+        anchorY = Number(visibleRect.y || 0) + Number(visibleRect.height || 0) / 2;
+      } else if (side === 'right') {
+        anchorX = Number(visibleRect.x || 0) + Number(visibleRect.width || 0);
+        anchorY = Number(visibleRect.y || 0) + Number(visibleRect.height || 0) / 2;
+      } else if (side === 'top') {
+        anchorX = Number(visibleRect.x || 0) + Number(visibleRect.width || 0) / 2;
+        anchorY = Number(visibleRect.y || 0);
+      } else {
+        anchorX = Number(visibleRect.x || 0) + Number(visibleRect.width || 0) / 2;
+        anchorY = Number(visibleRect.y || 0) + Number(visibleRect.height || 0);
+      }
+    } else if (markerEntry && markerEntry.meta) {
+      anchorX = Number(markerEntry.meta.anchorX);
+      anchorY = Number(markerEntry.meta.anchorY);
+    }
+
+    if ((side === 'left' || side === 'right') && isFinite(anchorY) && Number(srcModuleRect.height || 0) > 0) {
+      return clampNumber(
+        (anchorY - Number(srcModuleRect.y || 0)) / Number(srcModuleRect.height || 1),
+        0,
+        1
+      );
+    }
+    if ((side === 'top' || side === 'bottom') && isFinite(anchorX) && Number(srcModuleRect.width || 0) > 0) {
+      return clampNumber(
+        (anchorX - Number(srcModuleRect.x || 0)) / Number(srcModuleRect.width || 1),
+        0,
+        1
+      );
+    }
+    return null;
+  }
+
+  function placeFromBoundaryOffset(bodyRect, bodyCell, side, size, offset, placementMode) {
+    if (!isFinite(offset)) return null;
+    var anchor = bodyCell ? boundaryAnchorForSide(bodyCell, side, offset) : null;
+    if (!anchor) return null;
+    if (placementMode === 'inside') {
+      if (side === 'left') {
+        return { x: anchor.x + MODULE_INTERFACE_INNER_GAP, y: anchor.y - size.height / 2 };
+      }
+      if (side === 'right') {
+        return { x: anchor.x - size.width - MODULE_INTERFACE_INNER_GAP, y: anchor.y - size.height / 2 };
+      }
+      if (side === 'top') {
+        return { x: anchor.x - size.width / 2, y: anchor.y + MODULE_INTERFACE_INNER_GAP };
+      }
+      return { x: anchor.x - size.width / 2, y: anchor.y - size.height - MODULE_INTERFACE_INNER_GAP };
+    }
+    if (side === 'left') {
+      return {
+        x: Math.round(anchor.x - size.width - MODULE_INTERFACE_OUTER_GAP + MODULE_INTERFACE_EDGE_OVERLAP),
+        y: Math.round(anchor.y - size.height / 2)
+      };
+    }
+    if (side === 'right') {
+      return {
+        x: Math.round(anchor.x + MODULE_INTERFACE_OUTER_GAP - MODULE_INTERFACE_EDGE_OVERLAP),
+        y: Math.round(anchor.y - size.height / 2)
+      };
+    }
+    if (side === 'top') {
+      return {
+        x: Math.round(anchor.x - size.width / 2),
+        y: Math.round(anchor.y - size.height - MODULE_INTERFACE_OUTER_GAP + MODULE_INTERFACE_EDGE_OVERLAP)
+      };
+    }
+    return {
+      x: Math.round(anchor.x - size.width / 2),
+      y: Math.round(anchor.y + MODULE_INTERFACE_OUTER_GAP - MODULE_INTERFACE_EDGE_OVERLAP)
+    };
+  }
+
   function clampNumber(value, min, max) {
     if (!isFinite(value)) return min;
     if (value < min) return min;
@@ -2420,11 +2517,15 @@
         var metrics = interfacePlacementMetrics(cell, side, entry && entry.cell ? entry.cell : null);
         var size = { width: metrics.width, height: metrics.height };
         var relative = relativeInterfacePlacement(sourcePlacementModule || sourceModuleCell, entry, side, size);
+        var boundaryOffset = boundaryOffsetFromSourceInterface(sourcePlacementModule || sourceModuleCell, entry, side);
         if (relative) {
-          var mappedRelative = scaleRelativePlacementToTarget(relative, sourcePlacementModule || sourceModuleCell, targetRect);
-          var relativePos = placementMode === 'inside'
-            ? placeRelativeInsideBody(targetRect, targetModuleCell || bodyCell, side, size, mappedRelative)
-            : placeRelativeOutsideBody(targetRect, targetModuleCell || bodyCell, side, size, mappedRelative);
+          var relativePos = placeFromBoundaryOffset(targetRect, targetModuleCell || bodyCell, side, size, boundaryOffset, placementMode);
+          if (!relativePos) {
+            var mappedRelative = scaleRelativePlacementToTarget(relative, sourcePlacementModule || sourceModuleCell, targetRect);
+            relativePos = placementMode === 'inside'
+              ? placeRelativeInsideBody(targetRect, targetModuleCell || bodyCell, side, size, mappedRelative)
+              : placeRelativeOutsideBody(targetRect, targetModuleCell || bodyCell, side, size, mappedRelative);
+          }
           if (!relativePos) continue;
           var relativeGeo = placeInterfaceGeometry(metrics, relativePos.x, relativePos.y);
           placements.push({
