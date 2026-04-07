@@ -3009,7 +3009,7 @@
           var bodyCell = targetModules[currentModuleName];
           if (!bodyCell) continue;
           var layerInputs = groupMarkersByLayer(markersByModule[currentModuleName] || []);
-          var addResult = addGeneratedInterfacesToPage(ui, currentModuleName, sourceModules[currentModuleName], layerInputs, bodyCell, 'outside');
+          var addResult = addGeneratedInterfacesToPage(ui, currentModuleName, sourceModules[currentModuleName], layerInputs, bodyCell, 'inside');
           addedInterfaces += addResult && addResult.added ? addResult.added : 0;
         }
 
