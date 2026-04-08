@@ -487,9 +487,38 @@
     return 'south';
   }
 
-  function sideForPolygonEdge(rect, edgeA, edgeB) {
+  function polygonSignedArea(points) {
+    if (!points || points.length < 3) return 0;
+    var sum = 0;
+    for (var i = 0; i < points.length; i++) {
+      var a = points[i];
+      var b = points[(i + 1) % points.length];
+      sum += Number(a.x || 0) * Number(b.y || 0) - Number(b.x || 0) * Number(a.y || 0);
+    }
+    return sum / 2;
+  }
+
+  function sideForPolygonEdge(rect, edgeA, edgeB, winding) {
     var dx = Number(edgeB.x || 0) - Number(edgeA.x || 0);
     var dy = Number(edgeB.y || 0) - Number(edgeA.y || 0);
+    var outX = 0;
+    var outY = 0;
+
+    // Use polygon winding to compute a stable outward normal per edge.
+    // In screen-space coordinates: positive signed area means clockwise.
+    if (Math.abs(Number(winding || 0)) > 1e-9) {
+      if (winding > 0) {
+        outX = dy;
+        outY = -dx;
+      } else {
+        outX = -dy;
+        outY = dx;
+      }
+      if (Math.abs(outX) >= Math.abs(outY)) return outX < 0 ? 'left' : 'right';
+      return outY < 0 ? 'top' : 'bottom';
+    }
+
+    // Fallback for degenerate polygons.
     var mid = midpoint(edgeA, edgeB);
     var cx = rect ? rect.x + rect.width / 2 : 0;
     var cy = rect ? rect.y + rect.height / 2 : 0;
@@ -499,6 +528,7 @@
 
   function intersectSegmentWithOutline(a, b, outline, rect) {
     var out = [];
+    var winding = polygonSignedArea(outline);
     function add(side, t, segmentIndex, segmentT, x, y) {
       if (!isFinite(t) || t < 0 || t > 1) return;
       for (var i = 0; i < out.length; i++) {
@@ -534,7 +564,7 @@
       var t = (apx * sdy - apy * sdx) / denom;
       var u = (apx * rdy - apy * rdx) / denom;
       if (t < -1e-6 || t > 1 + 1e-6 || u < -1e-6 || u > 1 + 1e-6) continue;
-      add(sideForPolygonEdge(rect, p, q), t, i, u, Number(a.x || 0) + rdx * t, Number(a.y || 0) + rdy * t);
+      add(sideForPolygonEdge(rect, p, q, winding), t, i, u, Number(a.x || 0) + rdx * t, Number(a.y || 0) + rdy * t);
     }
     out.sort(function (x, y) { return x.t - y.t; });
     return out;
