@@ -113,8 +113,30 @@
 
   function isFloorplanModule(graph, cell) {
     if (!cell) return false;
-    return String(Shared.getCellStyleValue(graph, cell, 'floorplan', '0')) === '1' &&
-      String(Shared.getCellStyleValue(graph, cell, 'dftsFloorplanRect', '0')) === '1';
+    var isFloorplan = String(Shared.getCellStyleValue(graph, cell, 'floorplan', '0')) === '1';
+    if (!isFloorplan) return false;
+    if (String(Shared.getCellStyleValue(graph, cell, 'dftsFloorplanRect', '0')) === '1') return true;
+
+    // Polygon modules may not carry dftsFloorplanRect=1, but still have module type metadata.
+    var floorplanType = Shared.trim(Shared.getCellStyleValue(graph, cell, 'dftsFloorplan_type', '')).toLowerCase();
+    if (floorplanType === 'module') return true;
+
+    var dftsIpType = Shared.trim(Shared.getCellStyleValue(graph, cell, 'dftsIP_type', '')).toLowerCase();
+    if (dftsIpType === 'floorplan_module') return true;
+
+    var shape = Shared.trim(Shared.getCellStyleValue(graph, cell, 'shape', '')).toLowerCase();
+    var polyPoints = Shared.trim(Shared.getCellStyleValue(graph, cell, 'polyPoints', ''));
+    if ((shape === 'polygon' || shape.indexOf('polygon') >= 0 || !!polyPoints) && !Shared.isChipBody(graph, cell)) return true;
+
+    return false;
+  }
+
+  function isPolygonLikeModuleCell(cell) {
+    if (!cell) return false;
+    var styleText = cell && cell.style ? String(cell.style) : '';
+    var shape = Shared.trim(Shared.styleValue(styleText, 'shape', '')).toLowerCase();
+    var polyPoints = Shared.trim(Shared.styleValue(styleText, 'polyPoints', ''));
+    return shape.indexOf('polygon') >= 0 || !!polyPoints;
   }
 
   function isDataSourceBody(graph, cell) {
@@ -518,7 +540,14 @@
     return out;
   }
 
-  function collectBoundaryEvents(points, modules, config) {
+  function collectBoundaryEvents(points, modules, config, debugInfo) {
+    debugInfo = debugInfo || null;
+    function debugPush(kind, payload) {
+      if (!debugInfo) return;
+      if (!debugInfo.samples) debugInfo.samples = [];
+      if (debugInfo.samples.length >= 24) return;
+      debugInfo.samples.push({ kind: kind, payload: payload || {} });
+    }
     function rectContainsRect(outer, inner, tol) {
       tol = Number(tol || 0);
       if (!outer || !inner) return false;
@@ -527,11 +556,11 @@
         inner.top >= outer.top - tol &&
         inner.bottom <= outer.bottom + tol;
     }
-    function pointInOrOnModule(pt, info, tol) {
+    function pointInModuleInterior(pt, info, tol) {
       tol = Number(tol || 0);
       if (!pt || !info) return false;
       if (!Shared.pointInRect(pt, info.rect, tol)) return false;
-      return Shared.pointInCellOutline(pt, info.cell, Math.max(1e-6, tol));
+      return Shared.pointInCellOutlineInterior(pt, info.cell, Math.max(1e-6, tol));
     }
     var moduleInfo = [];
     for (var mi = 0; mi < modules.length; mi++) {
@@ -552,6 +581,14 @@
 
     var events = [];
     var pathCursor = 0;
+    if (debugInfo) {
+      debugInfo.moduleCount = moduleInfo.length;
+      debugInfo.segmentCount = Math.max(0, points.length - 1);
+      debugInfo.totalHits = 0;
+      debugInfo.filteredByChild = 0;
+      debugInfo.filteredNoCross = 0;
+      debugInfo.accepted = 0;
+    }
     for (var i = 0; i < points.length - 1; i++) {
       var a = points[i], b = points[i + 1];
       var segLen = Shared.pointDistance(a, b);
@@ -560,21 +597,58 @@
         var info = moduleInfo[m];
         var moduleCell = info.cell;
         var rect = info.rect;
+        var skipChildFilter = isPolygonLikeModuleCell(moduleCell);
         var hits = intersectSegmentWithOutline(a, b, info.outline, rect);
         for (var h = 0; h < hits.length; h++) {
           var hit = hits[h];
+          if (debugInfo) debugInfo.totalHits++;
           var coveredByChild = false;
-          for (var c = 0; c < info.children.length; c++) {
-            var childInfo = info.children[c];
-            if (pointInOrOnModule(hit.point, childInfo, 1.2)) { coveredByChild = true; break; }
+          if (!skipChildFilter) {
+            for (var c = 0; c < info.children.length; c++) {
+              var childInfo = info.children[c];
+              // Only suppress parent boundary hits when the hit is truly inside a child module.
+              // If the hit lies exactly on a shared boundary, keep it for parent marker generation.
+              if (pointInModuleInterior(hit.point, childInfo, 1.2)) { coveredByChild = true; break; }
+            }
           }
-          if (coveredByChild) continue;
+          if (coveredByChild) {
+            if (debugInfo) debugInfo.filteredByChild++;
+            debugPush('filtered_by_child', {
+              lineSegmentIndex: i,
+              moduleName: Shared.displayNameOfCell(null, moduleCell) || Shared.labelOf(moduleCell) || ('MODULE_' + (m + 1)),
+              hitX: Number(hit.point && hit.point.x || 0),
+              hitY: Number(hit.point && hit.point.y || 0),
+              side: hit.side
+            });
+            continue;
+          }
           var stepT = Math.max(0.002, Math.min(0.05, (Math.max(1, Number(config.interiorEpsilon || 0)) + 1) / segLen));
           var before = pointAtT(a, b, Math.max(0, hit.t - stepT));
           var after = pointAtT(a, b, Math.min(1, hit.t + stepT));
           var insideBefore = Shared.pointInCellOutlineInterior(before, moduleCell, config.interiorEpsilon);
           var insideAfter = Shared.pointInCellOutlineInterior(after, moduleCell, config.interiorEpsilon);
-          if (insideBefore === insideAfter) continue;
+          if (insideBefore === insideAfter) {
+            if (debugInfo) debugInfo.filteredNoCross++;
+            debugPush('filtered_no_cross', {
+              lineSegmentIndex: i,
+              moduleName: Shared.displayNameOfCell(null, moduleCell) || Shared.labelOf(moduleCell) || ('MODULE_' + (m + 1)),
+              hitX: Number(hit.point && hit.point.x || 0),
+              hitY: Number(hit.point && hit.point.y || 0),
+              side: hit.side,
+              insideBefore: !!insideBefore,
+              insideAfter: !!insideAfter
+            });
+            continue;
+          }
+          if (debugInfo) debugInfo.accepted++;
+          debugPush('accepted', {
+            lineSegmentIndex: i,
+            moduleName: Shared.displayNameOfCell(null, moduleCell) || Shared.labelOf(moduleCell) || ('MODULE_' + (m + 1)),
+            hitX: Number(hit.point && hit.point.x || 0),
+            hitY: Number(hit.point && hit.point.y || 0),
+            side: hit.side,
+            role: insideBefore && !insideAfter ? 'slave' : 'host'
+          });
           events.push({
             moduleCell: moduleCell,
             moduleName: Shared.displayNameOfCell(null, moduleCell) || Shared.labelOf(moduleCell) || ('MODULE_' + (m + 1)),
@@ -630,7 +704,9 @@
     }
     var out = [];
     for (i = 0; i < info.length; i++) {
-      if (!info[i].hasChild) out.push(info[i].cell);
+      // Keep polygon-like modules even when they contain children, so
+      // custom floorplan boundaries can still generate interface markers.
+      if (!info[i].hasChild || isPolygonLikeModuleCell(info[i].cell)) out.push(info[i].cell);
     }
     return out.length ? out : modules.slice();
   }
@@ -898,7 +974,17 @@
     var orientedPoints = orderedPointsForLine(line);
     var sourceBody = line.loopMatch ? line.loopMatch.start.body : null;
     var sourceModule = sourceBody ? findContainingModule(sourceBody, targetModules) : null;
-    var events = collectBoundaryEvents(orientedPoints, targetModules, ctx.config);
+    var debugInfo = {
+      chainIndex: chainIndex,
+      layerName: line.layerName || '',
+      lineIndex: line.index,
+      reversed: false
+    };
+    debugInfo.targetModules = [];
+    for (var tm = 0; tm < targetModules.length; tm++) {
+      debugInfo.targetModules.push(Shared.displayNameOfCell(ctx.graph, targetModules[tm]) || Shared.labelOf(targetModules[tm]) || ('MODULE_' + (tm + 1)));
+    }
+    var events = collectBoundaryEvents(orientedPoints, targetModules, ctx.config, debugInfo);
     if (sourceModule && events.length) {
       var firstSourceEvent = null;
       for (var e = 0; e < events.length; e++) {
@@ -910,7 +996,9 @@
       // Keep chain direction consistent with datasource outbound behavior.
       if (firstSourceEvent && firstSourceEvent.role !== 'slave') {
         orientedPoints = orientedPoints.slice().reverse();
-        events = collectBoundaryEvents(orientedPoints, targetModules, ctx.config);
+        debugInfo.reversed = true;
+        debugInfo.reversedFromRole = firstSourceEvent.role;
+        events = collectBoundaryEvents(orientedPoints, targetModules, ctx.config, debugInfo);
       }
     }
     var sourceModuleName = sourceModule ? Shared.displayNameOfCell(ctx.graph, sourceModule) : '';
@@ -974,7 +1062,8 @@
       bundles: bundles,
       pairs: pairs,
       issues: issues,
-      length: pathLength(orientedPoints)
+      length: pathLength(orientedPoints),
+      debug: debugInfo
     };
   }
 

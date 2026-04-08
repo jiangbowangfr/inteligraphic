@@ -155,10 +155,54 @@
     return result;
   }
 
+  function logInterfaceDebug(ui, analysis) {
+    if (!ui || !analysis || !analysis.interfacePlan || !analysis.interfacePlan.chains) return;
+    var chains = analysis.interfacePlan.chains;
+    Shared.logDock(ui, '[IFGEN-DEBUG] chains=' + chains.length + ', modules=' + (analysis.modules ? analysis.modules.length : 0) + ', floorplanLines=' + (analysis.floorplanLines ? analysis.floorplanLines.length : 0), 'info');
+    for (var i = 0; i < chains.length; i++) {
+      var chain = chains[i] || {};
+      var dbg = chain.debug || {};
+      Shared.logDock(
+        ui,
+        '[IFGEN-DEBUG] chain#' + (i + 1) +
+          ' layer=' + String(chain.layerName || '') +
+          ' lineIndex=' + String(chain.lineIndex == null ? '' : chain.lineIndex) +
+          ' reversed=' + (dbg.reversed ? 'yes' : 'no') +
+          ' hits(total=' + Number(dbg.totalHits || 0) +
+          ', byChild=' + Number(dbg.filteredByChild || 0) +
+          ', noCross=' + Number(dbg.filteredNoCross || 0) +
+          ', kept=' + Number(dbg.accepted || 0) + ')' +
+          ' events=' + (Array.isArray(chain.events) ? chain.events.length : 0) +
+          ' markers=' + (Array.isArray(chain.markers) ? chain.markers.length : 0) +
+          ' issues=' + (Array.isArray(chain.issues) ? chain.issues.length : 0),
+        'info'
+      );
+      if (Array.isArray(dbg.targetModules) && dbg.targetModules.length) {
+        Shared.logDock(ui, '[IFGEN-DEBUG]  targetModules=' + dbg.targetModules.join(', '), 'info');
+      }
+      var samples = Array.isArray(dbg.samples) ? dbg.samples : [];
+      for (var s = 0; s < samples.length && s < 12; s++) {
+        var sample = samples[s] || {};
+        var payload = sample.payload || {};
+        Shared.logDock(
+          ui,
+          '[IFGEN-DEBUG]  - ' + String(sample.kind || 'event') +
+            ' module=' + String(payload.moduleName || '') +
+            ' side=' + String(payload.side || '') +
+            ' point=(' + Number(payload.hitX || 0).toFixed(2) + ',' + Number(payload.hitY || 0).toFixed(2) + ')' +
+            (payload.insideBefore == null ? '' : (' before=' + (payload.insideBefore ? 'in' : 'out'))) +
+            (payload.insideAfter == null ? '' : (' after=' + (payload.insideAfter ? 'in' : 'out'))),
+          'info'
+        );
+      }
+    }
+  }
+
   function runGenerateInterface(ui) {
     if (!Shared.getActivePageReady(ui)) throw new Error('Open a page before generating interfaces.');
     if (!Shared.isFlowDesignPageOpen(ui)) throw new Error('Open a dataflow page before generating interfaces.');
     var analysis = Analysis.analyzeDataflow(ui);
+    logInterfaceDebug(ui, analysis);
     if (!analysis.pass) {
       var message = 'Dataflow check has errors. Run Check first and fix all errors before generating interfaces.';
       Shared.logDock(ui, message, 'error');
