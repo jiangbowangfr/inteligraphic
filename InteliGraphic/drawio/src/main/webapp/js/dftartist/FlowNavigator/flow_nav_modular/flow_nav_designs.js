@@ -1715,6 +1715,40 @@
     return !!(cell && cell.vertex && isDataSourceStyle(cell.style || ''));
   }
 
+  function rectArea(rect) {
+    if (!rect) return 0;
+    return Math.max(0, Number(rect.width || 0)) * Math.max(0, Number(rect.height || 0));
+  }
+
+  function rectContainsPoint(rect, x, y) {
+    if (!rect) return false;
+    return x >= Number(rect.x || 0) &&
+      x <= Number(rect.x || 0) + Number(rect.width || 0) &&
+      y >= Number(rect.y || 0) &&
+      y <= Number(rect.y || 0) + Number(rect.height || 0);
+  }
+
+  function findOwningModuleForCell(graph, cell, moduleCells) {
+    var rect = cell ? Shared.rectOfCell(cell) : null;
+    if (!rect) return null;
+    var centerX = Number(rect.x || 0) + Number(rect.width || 0) / 2;
+    var centerY = Number(rect.y || 0) + Number(rect.height || 0) / 2;
+    var best = null;
+    var bestArea = Infinity;
+    moduleCells = Array.isArray(moduleCells) ? moduleCells : [];
+    for (var i = 0; i < moduleCells.length; i++) {
+      var moduleCell = moduleCells[i];
+      var moduleRect = moduleCell ? Shared.rectOfCell(moduleCell) : null;
+      if (!rectContainsPoint(moduleRect, centerX, centerY)) continue;
+      var area = rectArea(moduleRect);
+      if (!best || area < bestArea) {
+        best = moduleCell;
+        bestArea = area;
+      }
+    }
+    return best;
+  }
+
   function collectDataSourceEntriesByLayer(ui) {
     var graph = Shared.graphOf(ui);
     var model = graph && graph.getModel ? graph.getModel() : null;
@@ -1731,6 +1765,38 @@
         if (!isDataSourceCell(child)) continue;
         if (!out[layerName]) out[layerName] = [];
         out[layerName].push({ layerName: layerName, cell: child });
+      }
+    }
+    return out;
+  }
+
+  function collectDataSourceEntriesByModule(ui) {
+    var graph = Shared.graphOf(ui);
+    var model = graph && graph.getModel ? graph.getModel() : null;
+    var layers = Shared.getTopLevelLayers ? Shared.getTopLevelLayers(ui) : [];
+    var modules = collectFloorplanModuleCells(graph);
+    var out = Object.create(null);
+    if (!graph || !model || !layers || !layers.length) return out;
+    for (var i = 0; i < layers.length; i++) {
+      var layer = layers[i];
+      var layerName = String(Shared.getLayerName ? Shared.getLayerName(layer) : '' || '').trim().toLowerCase();
+      if (!layerName) continue;
+      var vertices = [];
+      collectVertices(layer, model, vertices);
+      for (var j = 0; j < vertices.length; j++) {
+        var cell = vertices[j];
+        if (!isDataSourceCell(cell)) continue;
+        var ownerModule = findOwningModuleForCell(graph, cell, modules);
+        var moduleName = trimString(moduleNameForCell(ownerModule));
+        if (!moduleName) continue;
+        if (!out[moduleName]) out[moduleName] = Object.create(null);
+        if (!out[moduleName][layerName]) out[moduleName][layerName] = [];
+        out[moduleName][layerName].push({
+          layerName: layerName,
+          moduleName: moduleName,
+          cell: cell,
+          ownerCell: ownerModule
+        });
       }
     }
     return out;
@@ -1787,6 +1853,76 @@
     }
 
     return { removed: removed, added: added };
+  }
+
+  function scaleDataSourceRectToTarget(sourceRect, sourceModuleRect, targetRect) {
+    if (!sourceRect || !sourceModuleRect || !targetRect) return null;
+    var sourceW = Math.max(1, Number(sourceModuleRect.width || 1));
+    var sourceH = Math.max(1, Number(sourceModuleRect.height || 1));
+    var targetW = Math.max(1, Number(targetRect.width || 1));
+    var targetH = Math.max(1, Number(targetRect.height || 1));
+    var relX = (Number(sourceRect.x || 0) - Number(sourceModuleRect.x || 0)) / sourceW;
+    var relY = (Number(sourceRect.y || 0) - Number(sourceModuleRect.y || 0)) / sourceH;
+    var relW = Number(sourceRect.width || 0) / sourceW;
+    var relH = Number(sourceRect.height || 0) / sourceH;
+    return {
+      x: Number(targetRect.x || 0) + relX * targetW,
+      y: Number(targetRect.y || 0) + relY * targetH,
+      width: Math.max(gridSize(null), relW * targetW),
+      height: Math.max(gridSize(null), relH * targetH)
+    };
+  }
+
+  function cloneDataSourceCellForTarget(graph, sourceCell, targetRect) {
+    if (!sourceCell || !targetRect) return null;
+    var sourceRect = Shared.rectOfCell(sourceCell) || sourceCell.geometry || null;
+    if (!sourceRect) return null;
+    var cloned = cloneCellTree(sourceCell);
+    if (!cloned) return null;
+    resetCellTreeIds(cloned);
+    var sx = Number(sourceRect.width || 0) > 0 ? (Number(targetRect.width || 0) / Number(sourceRect.width || 1)) : 1;
+    var sy = Number(sourceRect.height || 0) > 0 ? (Number(targetRect.height || 0) / Number(sourceRect.height || 1)) : 1;
+    cloned.geometry = new mxGeometry(0, 0, Math.round(Number(targetRect.width || 0)), Math.round(Number(targetRect.height || 0)));
+    scaleCellTreeGeometry(cloned, sx, sy);
+    return cloned;
+  }
+
+  function addModuleDataSourcesToPage(ui, sourceModuleCell, targetBodyCell, dataSourceLayerInputs) {
+    var graph = Shared.graphOf(ui);
+    var model = graph && graph.getModel ? graph.getModel() : null;
+    if (!graph || !model || !sourceModuleCell || !targetBodyCell) return { added: 0 };
+    var sourceModuleRect = Shared.rectOfCell(sourceModuleCell) || sourceModuleCell.geometry || null;
+    var targetBodyRect = Shared.rectOfCell(targetBodyCell) || targetBodyCell.geometry || null;
+    if (!sourceModuleRect || !targetBodyRect) return { added: 0 };
+    var layerParents = ensureNamedLayers(ui, MODULE_LAYER_ORDER);
+    var added = 0;
+    var layerNames = Object.keys(dataSourceLayerInputs || {});
+
+    model.beginUpdate();
+    try {
+      for (var i = 0; i < layerNames.length; i++) {
+        var layerName = layerNames[i];
+        var entries = Array.isArray(dataSourceLayerInputs[layerName]) ? dataSourceLayerInputs[layerName] : [];
+        if (!entries.length) continue;
+        var parent = layerParents[String(layerName || '').toLowerCase()] || Shared.getDefaultParent(ui);
+        for (var j = 0; j < entries.length; j++) {
+          var entry = entries[j];
+          var sourceCell = entry && entry.cell ? entry.cell : null;
+          var sourceRect = sourceCell ? (Shared.rectOfCell(sourceCell) || sourceCell.geometry || null) : null;
+          var targetDataRect = scaleDataSourceRectToTarget(sourceRect, sourceModuleRect, targetBodyRect);
+          var cloned = cloneDataSourceCellForTarget(graph, sourceCell, targetDataRect);
+          if (!cloned || !targetDataRect) continue;
+          addCellAt(graph, parent, cloned, Number(targetDataRect.x || 0), Number(targetDataRect.y || 0), {
+            snapToGrid: false
+          });
+          added += 1;
+        }
+      }
+    } finally {
+      model.endUpdate();
+    }
+
+    return { added: added };
   }
 
   function isFloorplanModuleCell(cell) {
@@ -3360,7 +3496,7 @@
 
   Designs.syncCurrentFloorplanArch = syncCurrentFloorplanArch;
 
-  async function populateModuleDesignPage(ui, moduleName, sourceModuleCell, layerInputs, pageOrder, layerOrder) {
+  async function populateModuleDesignPage(ui, moduleName, sourceModuleCell, layerInputs, pageOrder, layerOrder, dataSourceLayerInputs) {
     var pageLayers = Array.isArray(layerOrder) && layerOrder.length ? layerOrder : MODULE_LAYER_ORDER;
     var interfaceLayers = Array.isArray(pageOrder) && pageOrder.length ? pageOrder : MODULE_INTERFACE_LAYER_ORDER;
     var layerParents = ensureNamedLayers(ui, pageLayers);
@@ -3385,6 +3521,9 @@
         clearMode: 'layer'
       });
     }
+    if (baseResult && baseResult.body && sourceModuleCell && dataSourceLayerInputs) {
+      addModuleDataSourcesToPage(ui, sourceModuleCell, baseResult.body, dataSourceLayerInputs);
+    }
     return baseResult;
   }
 
@@ -3404,6 +3543,7 @@
     var previousCtx = captureCurrentPageCtx(ui);
     var results = [];
     var modulePlans = analysis && analysis.interfacePlan && analysis.interfacePlan.modulePlans ? analysis.interfacePlan.modulePlans : {};
+    var dataSourceInputsByModule = collectDataSourceEntriesByModule(ui);
     try {
       if (ownerModuleName) {
         var ownerSync = await syncCurrentModuleArch(ui, analysis, { restore: false, allowFromAnyPage: true, syncMode: 'rebuild' });
@@ -3426,17 +3566,18 @@
         var archPageName = 'arch';
         var markerEntries = designInputs[sourceModuleName];
         var layerInputs = groupMarkersByLayer(markerEntries);
+        var dataSourceLayerInputs = dataSourceInputsByModule[sourceModuleName] || null;
         var modulePlan = modulePlans[sourceModuleName] || null;
         var sourceModuleCell = modulePlan && modulePlan.moduleCell ? modulePlan.moduleCell : null;
         var ensured = await ensureTopLevelDesign(ui, moduleName, parentDesign);
         var design = ensured.design;
         var shellPageName = 'dataflow';
         var shellPageState = await ensurePage(ui, design, shellPageName);
-        await withOpenedPage(ui, design, shellPageName, (function (currentSourceModuleCell, currentLayerInputs, currentPageOrder, currentArchLayerOrder) {
+        await withOpenedPage(ui, design, shellPageName, (function (currentSourceModuleCell, currentLayerInputs, currentPageOrder, currentArchLayerOrder, currentDataSourceLayerInputs) {
           return async function () {
-            await populateModuleDesignPage(ui, moduleName, currentSourceModuleCell, currentLayerInputs, currentPageOrder, currentArchLayerOrder);
+            await populateModuleDesignPage(ui, moduleName, currentSourceModuleCell, currentLayerInputs, currentPageOrder, currentArchLayerOrder, currentDataSourceLayerInputs);
           };
-        })(sourceModuleCell, layerInputs, pageOrder, archLayerOrder));
+        })(sourceModuleCell, layerInputs, pageOrder, archLayerOrder, dataSourceLayerInputs));
         results.push({
           module: moduleName,
           design: design,
@@ -3447,11 +3588,11 @@
           createdPage: !!(shellPageState && shellPageState.created)
         });
         await ensurePage(ui, design, archPageName);
-        await withOpenedPage(ui, design, archPageName, (function (currentSourceModuleCell, currentLayerInputs) {
+        await withOpenedPage(ui, design, archPageName, (function (currentSourceModuleCell, currentLayerInputs, currentDataSourceLayerInputs) {
           return async function () {
-            await populateModuleDesignPage(ui, moduleName, currentSourceModuleCell, currentLayerInputs, pageOrder, archLayerOrder);
+            await populateModuleDesignPage(ui, moduleName, currentSourceModuleCell, currentLayerInputs, pageOrder, archLayerOrder, currentDataSourceLayerInputs);
           };
-        })(sourceModuleCell, layerInputs));
+        })(sourceModuleCell, layerInputs, dataSourceLayerInputs));
         results.push({
           module: moduleName,
           design: design,
