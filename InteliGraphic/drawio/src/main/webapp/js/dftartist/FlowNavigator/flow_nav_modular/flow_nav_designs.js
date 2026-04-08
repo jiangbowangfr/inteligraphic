@@ -1605,6 +1605,17 @@
     }
   }
 
+  function applyModuleShellStyleInTree(cell, opts) {
+    if (!cell) return;
+    if (isFloorplanModuleCell(cell)) {
+      cell.style = makeModuleShellStyle(cell.style || '', opts);
+    }
+    if (!cell.children || !cell.children.length) return;
+    for (var i = 0; i < cell.children.length; i++) {
+      applyModuleShellStyleInTree(cell.children[i], opts);
+    }
+  }
+
   function syncFloorplanModulesInTree(graph, root) {
     if (!graph || !root || !global.DftsFloorplan || typeof global.DftsFloorplan.syncFloorplanModuleCell !== 'function') return;
     var modules = [];
@@ -1644,6 +1655,7 @@
       }
       scaleCellTreeGeometry(cloned, sx, sy);
       syncFloorplanModulesInTree(graph, cloned);
+      applyModuleShellStyleInTree(cloned, opts);
       return cloned;
     }
 
@@ -1687,6 +1699,94 @@
     var clonedChildren = clonedCell.children || [];
     var count = Math.min(sourceChildren.length, clonedChildren.length);
     for (var i = 0; i < count; i++) tagClonedCellTreeWithSourceRefs(sourceChildren[i], clonedChildren[i]);
+  }
+
+  function isDataSourceStyle(styleText) {
+    styleText = String(styleText || '');
+    var category = String(Shared.styleValue(styleText, 'dftsIP_category', '') || '').toLowerCase();
+    if (category === 'data_source') return true;
+    var typeName = String(Shared.styleValue(styleText, 'dftsIP_type', '') || '').toLowerCase();
+    if (/data[_\s-]*source/.test(typeName)) return true;
+    var defKey = String(Shared.styleValue(styleText, 'dftsIP_defKey', '') || '').toLowerCase();
+    return /datasource|padsource|tapsource|bisrcsource|bisrsource/.test(defKey);
+  }
+
+  function isDataSourceCell(cell) {
+    return !!(cell && cell.vertex && isDataSourceStyle(cell.style || ''));
+  }
+
+  function collectDataSourceEntriesByLayer(ui) {
+    var graph = Shared.graphOf(ui);
+    var model = graph && graph.getModel ? graph.getModel() : null;
+    var layers = Shared.getTopLevelLayers ? Shared.getTopLevelLayers(ui) : [];
+    var out = Object.create(null);
+    if (!graph || !model || !layers || !layers.length) return out;
+    for (var i = 0; i < layers.length; i++) {
+      var layer = layers[i];
+      var layerName = String(Shared.getLayerName ? Shared.getLayerName(layer) : '' || '').trim().toLowerCase();
+      if (!layerName) continue;
+      var count = model.getChildCount(layer);
+      for (var j = 0; j < count; j++) {
+        var child = model.getChildAt(layer, j);
+        if (!isDataSourceCell(child)) continue;
+        if (!out[layerName]) out[layerName] = [];
+        out[layerName].push({ layerName: layerName, cell: child });
+      }
+    }
+    return out;
+  }
+
+  function syncDataSourceEntriesByLayer(ui, sourceEntriesByLayer) {
+    var graph = Shared.graphOf(ui);
+    var model = graph && graph.getModel ? graph.getModel() : null;
+    if (!graph || !model) return { removed: 0, added: 0 };
+    var layerParents = ensureNamedLayers(ui, MODULE_LAYER_ORDER);
+    var layerNames = Object.keys(layerParents || {});
+    var removed = 0;
+    var added = 0;
+
+    model.beginUpdate();
+    try {
+      for (var i = 0; i < layerNames.length; i++) {
+        var layerName = layerNames[i];
+        var parent = layerParents[layerName];
+        if (!parent) continue;
+        var doomed = [];
+        var childCount = model.getChildCount(parent);
+        for (var j = 0; j < childCount; j++) {
+          var child = model.getChildAt(parent, j);
+          if (isDataSourceCell(child)) doomed.push(child);
+        }
+        if (doomed.length) {
+          removed += doomed.length;
+          graph.removeCells(doomed, false);
+        }
+      }
+
+      var sourceLayerNames = Object.keys(sourceEntriesByLayer || {});
+      for (i = 0; i < sourceLayerNames.length; i++) {
+        var sourceLayerName = sourceLayerNames[i];
+        var entries = Array.isArray(sourceEntriesByLayer[sourceLayerName]) ? sourceEntriesByLayer[sourceLayerName] : [];
+        if (!entries.length) continue;
+        var targetParent = layerParents[sourceLayerName] || Shared.getDefaultParent(ui);
+        for (j = 0; j < entries.length; j++) {
+          var entry = entries[j];
+          var sourceCell = entry && entry.cell ? entry.cell : null;
+          var cloned = cloneCellTree(sourceCell);
+          var geo = sourceCell && sourceCell.geometry ? sourceCell.geometry : null;
+          if (!cloned || !geo) continue;
+          resetCellTreeIds(cloned);
+          addCellAt(graph, targetParent, cloned, Number(geo.x || 0), Number(geo.y || 0), {
+            snapToGrid: false
+          });
+          added += 1;
+        }
+      }
+    } finally {
+      model.endUpdate();
+    }
+
+    return { removed: removed, added: added };
   }
 
   function isFloorplanModuleCell(cell) {
@@ -3108,6 +3208,7 @@
     var sourceGraph = Shared.graphOf(ui);
     var sourceModules = buildLargestModuleCellMap(collectFloorplanModuleCells(sourceGraph));
     var sourceModuleNames = Object.keys(sourceModules).sort();
+    var sourceDataSourcesByLayer = collectDataSourceEntriesByLayer(ui);
     var markerEntries = collectGeneratedMarkerMeta(ui);
     var markersByModule = groupMarkersByModule(markerEntries);
     var previousCtx = opts.restore === false ? null : captureCurrentPageCtx(ui);
@@ -3161,13 +3262,16 @@
           addedInterfaces += addResult && addResult.added ? addResult.added : 0;
         }
 
+        var dataSourceResult = syncDataSourceEntriesByLayer(ui, sourceDataSourcesByLayer);
+
         return {
           synced: true,
           design: floorplan,
           page: 'arch',
           moduleCount: targetCount,
           markerCount: markerEntries.length,
-          interfaceCount: addedInterfaces
+          interfaceCount: addedInterfaces,
+          dataSourceCount: dataSourceResult && dataSourceResult.added ? dataSourceResult.added : 0
         };
       });
     } finally {
@@ -3215,6 +3319,7 @@
     }
     var ownerEntries = Array.isArray(designInputs[owner.name]) ? designInputs[owner.name] : [];
     var layerInputs = groupMarkersByLayer(ownerEntries);
+    var sourceDataSourcesByLayer = collectDataSourceEntriesByLayer(ui);
     var modulePlans = analysis && analysis.interfacePlan && analysis.interfacePlan.modulePlans ? analysis.interfacePlan.modulePlans : {};
     var modulePlan = modulePlans[owner.name] || null;
     var sourceModuleCell = modulePlan && modulePlan.moduleCell ? modulePlan.moduleCell : null;
@@ -3222,19 +3327,24 @@
 
     await ensurePage(ui, owner, 'arch');
     try {
-      await withOpenedPage(ui, owner, 'arch', function () {
+      await withOpenedPage(ui, owner, 'arch', async function () {
+        var result = null;
         if (syncMode === 'merge') {
           var mergeResult = mergeCurrentModuleArchPage(ui, owner.name, sourceModuleCell, layerInputs);
-          if (mergeResult && mergeResult.merged) return mergeResult;
+          if (mergeResult && mergeResult.merged) result = mergeResult;
         }
-        return populateModuleDesignPage(
-          ui,
-          owner.name,
-          sourceModuleCell,
-          layerInputs,
-          MODULE_INTERFACE_LAYER_ORDER.slice(),
-          MODULE_LAYER_ORDER.slice()
-        );
+        if (!result) {
+          result = await populateModuleDesignPage(
+            ui,
+            owner.name,
+            sourceModuleCell,
+            layerInputs,
+            MODULE_INTERFACE_LAYER_ORDER.slice(),
+            MODULE_LAYER_ORDER.slice()
+          );
+        }
+        syncDataSourceEntriesByLayer(ui, sourceDataSourcesByLayer);
+        return result;
       });
     } finally {
       if (previousCtx) await restorePageCtx(ui, previousCtx);
