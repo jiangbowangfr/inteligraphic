@@ -426,9 +426,14 @@
       side: trimString(meta.side || ''),
       bundleId: trimString(meta.bundleId || ''),
       chainId: trimString(meta.chainId || ''),
+      boundarySegmentIndex: Number(meta.boundarySegmentIndex == null || meta.boundarySegmentIndex === '' ? -1 : meta.boundarySegmentIndex),
+      boundarySegmentT: Number(meta.boundarySegmentT == null || meta.boundarySegmentT === '' ? 0 : meta.boundarySegmentT),
       sideStackIndex: Number(meta.sideStackIndex == null || meta.sideStackIndex === '' ? 0 : meta.sideStackIndex),
       id: trimString(meta.id || meta.markerId || '')
     };
+    if (!isFinite(out.boundarySegmentIndex)) out.boundarySegmentIndex = -1;
+    if (!isFinite(out.boundarySegmentT)) out.boundarySegmentT = 0;
+    out.boundarySegmentT = clampNumber(out.boundarySegmentT, 0, 1);
     if (!isFinite(out.sideStackIndex)) out.sideStackIndex = 0;
     if ((!out.moduleName || !out.layerName || !out.interfaceType) && graph && cell) {
       var style = String(cell.style || '');
@@ -1346,6 +1351,8 @@
       side: String(Shared.getCellStyleValue(graph, cell, 'flowSide', '') || ''),
       bundleId: String(Shared.getCellStyleValue(graph, cell, 'flowBundle', '') || ''),
       chainId: String(Shared.getCellStyleValue(graph, cell, 'flowChain', '') || ''),
+      boundarySegmentIndex: Number(Shared.getCellStyleValue(graph, cell, 'flowBoundarySegmentIndex', '') || -1),
+      boundarySegmentT: Number(Shared.getCellStyleValue(graph, cell, 'flowBoundarySegmentT', '') || 0),
       sideStackIndex: Number(Shared.getCellStyleValue(graph, cell, 'flowSideStackIndex', '') || 0),
       id: String(Shared.getCellStyleValue(graph, cell, 'flowMarkerId', '') || '')
     };
@@ -1770,6 +1777,8 @@
     style = mxUtils.setStyle(style, 'flowBundle', markerMeta && markerMeta.bundleId || '');
     style = mxUtils.setStyle(style, 'flowChain', markerMeta && markerMeta.chainId || '');
     style = mxUtils.setStyle(style, 'flowSide', markerMeta && markerMeta.side || '');
+    style = mxUtils.setStyle(style, 'flowBoundarySegmentIndex', markerMeta && markerMeta.boundarySegmentIndex == null ? '' : String(markerMeta.boundarySegmentIndex));
+    style = mxUtils.setStyle(style, 'flowBoundarySegmentT', markerMeta && markerMeta.boundarySegmentT == null ? '' : String(markerMeta.boundarySegmentT));
     style = mxUtils.setStyle(style, 'flowSideStackIndex', markerMeta && markerMeta.sideStackIndex == null ? '' : String(markerMeta.sideStackIndex));
     style = mxUtils.setStyle(style, 'flowMarkerId', markerMeta && markerMeta.id || '');
     style = applyGeneratedInterfaceFloorplanStyle(style, markerMeta, enableFloorplan);
@@ -2205,6 +2214,17 @@
     return out;
   }
 
+  function fallbackRectPoints(width, height) {
+    width = Number(width || 0);
+    height = Number(height || 0);
+    return [
+      { x: 0, y: 0 },
+      { x: width, y: 0 },
+      { x: width, y: height },
+      { x: 0, y: height }
+    ];
+  }
+
   function segmentAxisHit(a, b, axis, value) {
     if (!a || !b) return null;
     if (axis === 'y') {
@@ -2219,13 +2239,34 @@
     return { x: value, y: Number(a.y) + (Number(b.y) - Number(a.y)) * tx };
   }
 
+  function boundaryAnchorForMarkerSegment(bodyCell, markerMeta) {
+    var rect = bodyCell ? Shared.rectOfCell(bodyCell) : null;
+    if (!rect || !markerMeta) return null;
+    var segmentIndex = Number(markerMeta.boundarySegmentIndex);
+    if (!isFinite(segmentIndex) || segmentIndex < 0) return null;
+    segmentIndex = Math.floor(segmentIndex);
+    var width = Number(rect.width || 0);
+    var height = Number(rect.height || 0);
+    var points = parsePolyPoints(bodyCell.style || '', width, height);
+    if (!points.length) points = fallbackRectPoints(width, height);
+    if (segmentIndex >= points.length) return null;
+    var a = points[segmentIndex];
+    var b = points[(segmentIndex + 1) % points.length];
+    if (!a || !b) return null;
+    var t = clampNumber(Number(markerMeta.boundarySegmentT), 0, 1);
+    return {
+      x: Number(rect.x || 0) + Number(a.x || 0) + (Number(b.x || 0) - Number(a.x || 0)) * t,
+      y: Number(rect.y || 0) + Number(a.y || 0) + (Number(b.y || 0) - Number(a.y || 0)) * t
+    };
+  }
+
   function boundaryAnchorForSide(bodyCell, side, offset) {
     var rect = bodyCell ? Shared.rectOfCell(bodyCell) : null;
     if (!rect) return null;
     var width = Number(rect.width || 0);
     var height = Number(rect.height || 0);
     var points = parsePolyPoints(bodyCell.style || '', width, height);
-    if (!points.length) return null;
+    if (!points.length) points = fallbackRectPoints(width, height);
     var axis = (side === 'left' || side === 'right') ? 'y' : 'x';
     var target = axis === 'y' ? (offset * height) : (offset * width);
     var hits = [];
@@ -2244,6 +2285,13 @@
       else if (side === 'bottom' && hits[j].y > best.y) best = hits[j];
     }
     return { x: Number(rect.x || 0) + best.x, y: Number(rect.y || 0) + best.y };
+  }
+
+  function boundaryAnchorForPlacement(bodyCell, side, offset, markerMeta) {
+    var segmentAnchor = boundaryAnchorForMarkerSegment(bodyCell, markerMeta);
+    if (segmentAnchor) return segmentAnchor;
+    if (!isFinite(Number(offset))) return null;
+    return boundaryAnchorForSide(bodyCell, side, offset);
   }
 
   function countBySide(markers) {
@@ -2365,9 +2413,8 @@
     return null;
   }
 
-  function placeFromBoundaryOffset(bodyRect, bodyCell, side, size, offset, placementMode) {
-    if (!isFinite(offset)) return null;
-    var anchor = bodyCell ? boundaryAnchorForSide(bodyCell, side, offset) : null;
+  function placeFromBoundaryOffset(bodyRect, bodyCell, side, size, offset, placementMode, markerMeta) {
+    var anchor = bodyCell ? boundaryAnchorForPlacement(bodyCell, side, offset, markerMeta) : null;
     if (!anchor) return null;
     if (placementMode === 'inside') {
       if (side === 'left') {
@@ -2519,7 +2566,7 @@
         var relative = relativeInterfacePlacement(sourcePlacementModule || sourceModuleCell, entry, side, size);
         var boundaryOffset = boundaryOffsetFromSourceInterface(sourcePlacementModule || sourceModuleCell, entry, side);
         if (relative) {
-          var relativePos = placeFromBoundaryOffset(targetRect, targetModuleCell || bodyCell, side, size, boundaryOffset, placementMode);
+          var relativePos = placeFromBoundaryOffset(targetRect, targetModuleCell || bodyCell, side, size, boundaryOffset, placementMode, entry && entry.meta);
           if (!relativePos) {
             var mappedRelative = scaleRelativePlacementToTarget(relative, sourcePlacementModule || sourceModuleCell, targetRect);
             relativePos = placementMode === 'inside'
@@ -2540,7 +2587,7 @@
         if (!isFinite(offset)) offset = (i + 1) / (list.length + 1);
         var x = targetRect.x;
         var y = targetRect.y;
-        var anchor = targetModuleCell ? boundaryAnchorForSide(targetModuleCell, side, offset) : null;
+        var anchor = targetModuleCell ? boundaryAnchorForPlacement(targetModuleCell, side, offset, entry && entry.meta) : null;
         if (placementMode === 'inside') {
           if (anchor) {
             if (side === 'left') {

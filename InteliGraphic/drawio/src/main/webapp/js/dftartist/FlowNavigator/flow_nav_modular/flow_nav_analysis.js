@@ -450,6 +450,14 @@
     return rect.width ? (point.x - rect.left) / rect.width : 0.5;
   }
 
+  function clamp01(value, fallback) {
+    var n = Number(value);
+    if (!isFinite(n)) return fallback == null ? 0 : fallback;
+    if (n < 0) return 0;
+    if (n > 1) return 1;
+    return n;
+  }
+
   function sideToOrientation(side) {
     if (side === 'left') return 'west';
     if (side === 'right') return 'east';
@@ -469,15 +477,25 @@
 
   function intersectSegmentWithOutline(a, b, outline, rect) {
     var out = [];
-    function add(side, t, x, y) {
+    function add(side, t, segmentIndex, segmentT, x, y) {
       if (!isFinite(t) || t < 0 || t > 1) return;
       for (var i = 0; i < out.length; i++) {
         if (Math.abs(out[i].point.x - x) < 0.001 && Math.abs(out[i].point.y - y) < 0.001) {
-          if ((side === 'left' || side === 'right') && (out[i].side === 'top' || out[i].side === 'bottom')) out[i].side = side;
+          if ((side === 'left' || side === 'right') && (out[i].side === 'top' || out[i].side === 'bottom')) {
+            out[i].side = side;
+            out[i].boundarySegmentIndex = segmentIndex;
+            out[i].boundarySegmentT = clamp01(segmentT, 0);
+          }
           return;
         }
       }
-      out.push({ side: side, t: t, point: { x: x, y: y } });
+      out.push({
+        side: side,
+        t: t,
+        point: { x: x, y: y },
+        boundarySegmentIndex: segmentIndex,
+        boundarySegmentT: clamp01(segmentT, 0)
+      });
     }
     if (!outline || outline.length < 2) return out;
     var rdx = Number(b.x || 0) - Number(a.x || 0);
@@ -494,7 +512,7 @@
       var t = (apx * sdy - apy * sdx) / denom;
       var u = (apx * rdy - apy * rdx) / denom;
       if (t < -1e-6 || t > 1 + 1e-6 || u < -1e-6 || u > 1 + 1e-6) continue;
-      add(sideForPolygonEdge(rect, p, q), t, Number(a.x || 0) + rdx * t, Number(a.y || 0) + rdy * t);
+      add(sideForPolygonEdge(rect, p, q), t, i, u, Number(a.x || 0) + rdx * t, Number(a.y || 0) + rdy * t);
     }
     out.sort(function (x, y) { return x.t - y.t; });
     return out;
@@ -564,6 +582,8 @@
             point: hit.point,
             side: hit.side,
             offset: Math.max(0, Math.min(1, computeRectSideOffset(rect, hit.side, hit.point))),
+            boundarySegmentIndex: hit.boundarySegmentIndex,
+            boundarySegmentT: hit.boundarySegmentT,
             orientation: sideToOrientation(hit.side),
             segmentIndex: i,
             pathDistance: pathCursor + segLen * hit.t,
@@ -687,6 +707,8 @@
       direction: evt.direction,
       rawOffset: evt.offset,
       offset: evt.offset,
+      boundarySegmentIndex: evt.boundarySegmentIndex,
+      boundarySegmentT: evt.boundarySegmentT,
       orientation: evt.orientation,
       anchorX: evt.point.x,
       anchorY: evt.point.y,

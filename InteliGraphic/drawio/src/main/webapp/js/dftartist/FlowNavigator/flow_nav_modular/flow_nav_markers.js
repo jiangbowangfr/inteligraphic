@@ -33,6 +33,8 @@
       node.setAttribute('layerName', meta.layerName || '');
       node.setAttribute('side', meta.side || '');
       node.setAttribute('offset', String(meta.offset == null ? '' : meta.offset));
+      node.setAttribute('boundarySegmentIndex', String(meta.boundarySegmentIndex == null ? '' : meta.boundarySegmentIndex));
+      node.setAttribute('boundarySegmentT', String(meta.boundarySegmentT == null ? '' : meta.boundarySegmentT));
       node.setAttribute('orientation', meta.orientation || '');
       node.setAttribute('sourceInstance', meta.sourceInstance || '');
       node.setAttribute('bundleId', meta.bundleId || '');
@@ -151,6 +153,8 @@
           chainId: cell.value.getAttribute('chainId') || '', side: cell.value.getAttribute('side') || '',
           interfaceType: cell.value.getAttribute('interfaceType') || '', layerName: cell.value.getAttribute('layerName') || '',
           offset: Number(cell.value.getAttribute('offset') || 0), orientation: cell.value.getAttribute('orientation') || '',
+          boundarySegmentIndex: Number(cell.value.getAttribute('boundarySegmentIndex') || -1),
+          boundarySegmentT: Number(cell.value.getAttribute('boundarySegmentT') || 0),
           sideStackIndex: Number(cell.value.getAttribute('sideStackIndex') || 0), sideStackCount: Number(cell.value.getAttribute('sideStackCount') || 1),
           sourceInstance: cell.value.getAttribute('sourceInstance') || '', bundleId: cell.value.getAttribute('bundleId') || '',
           bundleSpan: Number(cell.value.getAttribute('bundleSpan') || 0), bundleCenterOffset: Number(cell.value.getAttribute('bundleCenterOffset') || 0),
