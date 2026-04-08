@@ -1083,7 +1083,7 @@ async function execute(ui, cmd) {
     host.innerHTML = '';
     var root = document.createElement('div'); root.className = 'dftflow-root';
     var head = document.createElement('div'); head.className = 'dftflow-head';
-    var title = document.createElement('div'); title.className = 'dftflow-title'; title.textContent = 'Flow Navigator (Modular)';
+    var title = document.createElement('div'); title.className = 'dftflow-title'; title.textContent = 'Flow Navigator';
     var spacer = document.createElement('div'); spacer.className = 'dftflow-spacer';
     var toggle = document.createElement('button'); toggle.className = 'dftflow-toggle'; toggle.type = 'button';
     toggle.textContent = (ui && ui._phase1 && ui._phase1.state && ui._phase1.state.flowNavCollapsed) ? '>' : '<';
