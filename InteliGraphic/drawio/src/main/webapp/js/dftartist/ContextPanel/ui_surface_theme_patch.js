@@ -6,6 +6,7 @@
   var style = document.createElement('style');
   style.id = id;
   style.textContent = '' +
+    '.geRuler:has(canvas[height="0"]){display:none !important;}' +
     '.phase2-project-titlebar,.dftctx-titlebar{min-height:40px;box-sizing:border-box;}' +
     '.phase2-project-tabbar,.dftctx-tabs{min-height:40px;box-sizing:border-box;}' +
     '.phase2-project-toolbar,.dftctx-panel-toolbar{min-height:40px;box-sizing:border-box;}' +
