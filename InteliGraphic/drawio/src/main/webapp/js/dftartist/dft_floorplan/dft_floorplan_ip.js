@@ -168,6 +168,12 @@
             (String(styleValue(style, 'floorplan', '0')) === '1' && String(styleValue(style, 'dftsFloorplanRect', '0')) === '1');
     }
 
+    function isPolygonFloorplanModule(cell) {
+        if (!cell) return false;
+        var style = String(cell.style || '');
+        return style.indexOf('polyPoints=') >= 0 || normalizeStyleToken(styleValue(style, 'shape', '')) === 'custompolygon';
+    }
+
     function getInstanceLabelCell(graph, moduleCell) {
         if (!graph || !moduleCell) return null;
         var model = graph.getModel();
@@ -304,17 +310,145 @@
         );
     }
 
+    function parsePolygonPointsForCell(cell) {
+        if (!cell || !cell.geometry) return [];
+        var style = String(cell.style || '');
+        var raw = trim(styleValue(style, 'polyPoints', ''));
+        if (!raw) return [];
+        var width = Number(cell.geometry.width || 0);
+        var height = Number(cell.geometry.height || 0);
+        if (!(width > 0) || !(height > 0)) return [];
+        var tokens = raw.split(/\s+/);
+        var out = [];
+        for (var i = 0; i < tokens.length; i++) {
+            var xy = tokens[i].split(',');
+            if (xy.length < 2) continue;
+            var x = Number(xy[0]);
+            var y = Number(xy[1]);
+            if (!isFinite(x) || !isFinite(y)) continue;
+            out.push({ x: x * width, y: y * height });
+        }
+        return out;
+    }
+
+    function pointInPolygon(point, polygon) {
+        if (!point || !polygon || polygon.length < 3) return false;
+        var inside = false;
+        for (var i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+            var xi = Number(polygon[i].x), yi = Number(polygon[i].y);
+            var xj = Number(polygon[j].x), yj = Number(polygon[j].y);
+            var intersects = ((yi > point.y) !== (yj > point.y)) &&
+                (point.x < (xj - xi) * (point.y - yi) / ((yj - yi) || 1e-12) + xi);
+            if (intersects) inside = !inside;
+        }
+        return inside;
+    }
+
+    function rectInsidePolygon(rect, polygon) {
+        var x = Number(rect.x || 0);
+        var y = Number(rect.y || 0);
+        var w = Number(rect.width || 0);
+        var h = Number(rect.height || 0);
+        var probes = [
+            { x: x, y: y },
+            { x: x + w, y: y },
+            { x: x, y: y + h },
+            { x: x + w, y: y + h },
+            { x: x + w / 2, y: y + h / 2 },
+            { x: x + w / 2, y: y },
+            { x: x + w / 2, y: y + h },
+            { x: x, y: y + h / 2 },
+            { x: x + w, y: y + h / 2 }
+        ];
+        for (var i = 0; i < probes.length; i++) {
+            if (!pointInPolygon(probes[i], polygon)) return false;
+        }
+        return true;
+    }
+
+    function resolvePolygonLabelAnchor(moduleCell, blockWidth, blockHeight) {
+        var fallback = { x: 13, y: 8 };
+        if (!isPolygonFloorplanModule(moduleCell)) return fallback;
+        var polygon = parsePolygonPointsForCell(moduleCell);
+        if (polygon.length < 3) return fallback;
+        var width = Number(moduleCell.geometry && moduleCell.geometry.width || 0);
+        var height = Number(moduleCell.geometry && moduleCell.geometry.height || 0);
+        var w = Math.min(Math.max(20, Math.round(Number(blockWidth || 0))), Math.max(20, width - 16));
+        var h = Math.min(Math.max(20, Math.round(Number(blockHeight || 0))), Math.max(20, height - 16));
+        var maxX = Math.max(8, width - w - 8);
+        var maxY = Math.max(8, height - h - 8);
+        var step = 4;
+        for (var y = 8; y <= maxY; y += step) {
+            for (var x = 13; x <= maxX; x += step) {
+                if (rectInsidePolygon({ x: x, y: y, width: w, height: h }, polygon)) {
+                    return { x: x, y: y };
+                }
+            }
+        }
+        return fallback;
+    }
+
     function syncModuleLabelCell(graph, moduleCell) {
         if (!graph || !moduleCell || !isFloorplanModuleCell(graph, moduleCell)) return;
         var model = graph.getModel();
+        var style = String(moduleCell.style || '');
+        var moduleName = trim(styleValue(style, 'dftsFloorplan_moduleName', '')) || firstMeaningfulLine(moduleCell.value) || 'MODULE';
         var child = getModuleLabelCell(graph, moduleCell);
-        if (child) {
-            model.beginUpdate();
-            try {
-                model.remove(child);
-            } finally {
-                model.endUpdate();
+        var useChildLabel = isPolygonFloorplanModule(moduleCell);
+        var rotation = normalizeRotation(styleValue(style, 'rotation', '0'));
+        var baseFontSize = parseInt(styleValue(style, 'fontSize', '20'), 10) || 20;
+        var moduleFontSize = Math.max(11, Math.round(baseFontSize * 0.8));
+
+        if (!useChildLabel) {
+            if (child) {
+                model.beginUpdate();
+                try {
+                    model.remove(child);
+                } finally {
+                    model.endUpdate();
+                }
             }
+            return;
+        }
+
+        var width = Math.max(40, Math.round(Number(moduleCell.geometry && moduleCell.geometry.width || 0)));
+        var textWidth = Math.max(24, Math.ceil(mxUtils.getSizeForString(moduleName, moduleFontSize, mxConstants.DEFAULT_FONTFAMILY).width || 0));
+        var instanceName = trim(styleValue(style, 'dftsFloorplan_instanceName', ''));
+        var hideInstance = shouldHideInstanceName(style);
+        var instanceFontSize = Math.max(9, Math.round(baseFontSize * 0.55));
+        var instanceTextWidth = instanceName && !hideInstance ?
+            Math.max(18, Math.ceil(mxUtils.getSizeForString(instanceName, instanceFontSize, mxConstants.DEFAULT_FONTFAMILY).width || 0)) : 0;
+        var moduleHeight = Math.max(22, moduleFontSize + 12);
+        var instanceHeight = instanceName && !hideInstance ? Math.max(18, instanceFontSize + 10) : 0;
+        var blockWidth = Math.min(
+            Math.max(36, Math.max(textWidth + 4, instanceTextWidth + 4)),
+            Math.max(36, width - 12)
+        );
+        var anchor = resolvePolygonLabelAnchor(moduleCell, blockWidth, moduleHeight + instanceHeight);
+        var moduleBox = {
+            x: anchor.x,
+            y: anchor.y,
+            width: Math.min(Math.max(36, textWidth + 4), Math.max(36, width - 12)),
+            height: moduleHeight
+        };
+        var childStyle = buildFloorplanLabelChildStyle('module', moduleFontSize, rotation);
+        var childGeo = buildFloorplanLabelChildGeometry(moduleCell.geometry || {}, rotation, moduleBox);
+        model.beginUpdate();
+        try {
+            if (!child) {
+                child = new mxCell(moduleName, childGeo, childStyle);
+                child.vertex = true;
+                child.connectable = false;
+                child.__dftsFloorplanModuleLabel = true;
+                moduleCell.insert(child);
+            } else {
+                child.value = moduleName;
+                child.style = childStyle;
+                child.geometry = childGeo;
+                child.__dftsFloorplanModuleLabel = true;
+            }
+        } finally {
+            model.endUpdate();
         }
     }
 
@@ -341,11 +475,20 @@
         } else {
             var width = Math.max(40, Math.round(Number(moduleCell.geometry && moduleCell.geometry.width || 0)));
             var textWidth = Math.max(18, Math.ceil(mxUtils.getSizeForString(instanceName, instanceFontSize, mxConstants.DEFAULT_FONTFAMILY).width || 0));
+            var moduleName = trim(styleValue(style, 'dftsFloorplan_moduleName', '')) || firstMeaningfulLine(moduleCell.value) || 'MODULE';
+            var moduleTextWidth = Math.max(24, Math.ceil(mxUtils.getSizeForString(moduleName, moduleFontSize, mxConstants.DEFAULT_FONTFAMILY).width || 0));
+            var moduleHeight = Math.max(22, moduleFontSize + 12);
+            var instanceHeight = Math.max(18, instanceFontSize + 10);
+            var blockWidth = Math.min(
+                Math.max(36, Math.max(moduleTextWidth + 4, textWidth + 4)),
+                Math.max(36, width - 12)
+            );
+            var anchor = resolvePolygonLabelAnchor(moduleCell, blockWidth, moduleHeight + instanceHeight);
             var instanceBox = {
-                x: 13,
-                y: Math.max(30, 4 + moduleFontSize + 2),
+                x: isPolygonFloorplanModule(moduleCell) ? anchor.x : 13,
+                y: isPolygonFloorplanModule(moduleCell) ? (anchor.y + moduleHeight) : Math.max(30, 4 + moduleFontSize + 2),
                 width: Math.min(Math.max(28, textWidth + 4), Math.max(28, width - 12)),
-                height: Math.max(18, instanceFontSize + 10)
+                height: instanceHeight
             };
             var childStyle = buildFloorplanLabelChildStyle('instance', instanceFontSize, rotation);
             var childGeo = buildFloorplanLabelChildGeometry(moduleCell.geometry || {}, rotation, instanceBox);
@@ -541,7 +684,9 @@
             var baseFontSize = parseInt(styleValue(style, 'fontSize', '20'), 10) || 20;
             var moduleFontSize = Math.max(11, Math.round(baseFontSize * 0.8));
             var instanceFontSize = Math.max(9, Math.round(baseFontSize * 0.55));
+            var hasModuleChild = !!getModuleLabelCell(this, cell);
             var hasInstanceChild = !!getInstanceLabelCell(this, cell);
+            if (hasModuleChild) return '';
             var html = '<div style="text-align:left;line-height:1.15;padding:4px 0 0 6px;">';
             html += '<div style="font-size:' + moduleFontSize + 'px;color:#111111;font-weight:400;">' + mxUtils.htmlEntities(moduleName || '') + '</div>';
             if (instanceName && !hasInstanceChild && !hideInstance) {
