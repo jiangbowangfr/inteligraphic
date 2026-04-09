@@ -316,6 +316,90 @@
         return null;
     }
 
+    function normalizeLayerName(name) {
+        var normalized = String(name || '').trim().toLowerCase();
+        if (normalized === 'iftag' || normalized === 'jtag') return 'ijtag';
+        return normalized;
+    }
+
+    function getLayerRootCell(graph) {
+        if (!graph || !graph.getModel || !graph.getDefaultParent) return null;
+        try {
+            var model = graph.getModel();
+            var defaultParent = graph.getDefaultParent();
+            return model && defaultParent ? model.getParent(defaultParent) : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function getOwningTopLayerName(graph, cell) {
+        if (!graph || !cell || !graph.getModel) return '';
+        var model = graph.getModel();
+        var layerRoot = getLayerRootCell(graph);
+        if (!layerRoot) return '';
+        var cur = cell;
+        while (cur) {
+            var parent = null;
+            try { parent = model.getParent(cur); } catch (e) { parent = null; }
+            if (!parent) return '';
+            if (parent === layerRoot) return String(cur.value || '');
+            cur = parent;
+        }
+        return '';
+    }
+
+    function getActiveTopLayerName(graph) {
+        if (!graph || !graph.getDefaultParent) return '';
+        var parent = null;
+        try { parent = graph.getDefaultParent(); } catch (e) { parent = null; }
+        if (!parent) return '';
+        return String(getOwningTopLayerName(graph, parent) || parent.value || '');
+    }
+
+    function describeEndpointLabel(graph, body) {
+        if (!body) return 'Endpoint';
+        var label = body.value != null ? String(body.value) : '';
+        if (!label && graph && typeof graph.convertValueToString === 'function') {
+            try { label = String(graph.convertValueToString(body) || ''); } catch (e) {}
+        }
+        if (!label && graph && isGeneratedInterfaceBody(graph, body)) {
+            var s = graph.getCellStyle ? graph.getCellStyle(body) : {};
+            var ifaceType = String(mxUtils.getValue(s, 'flowInterfaceType', '') || '').toUpperCase();
+            if (ifaceType) label = ifaceType + ' Interface';
+        }
+        label = String(label || '').trim();
+        return label || (isGeneratedInterfaceBody(graph, body) ? 'Interface' : 'Data Source');
+    }
+
+    function warnEndpointLayerMismatch(graph, body, sourceLayer, activeLayer) {
+        if (!graph || typeof mxUtils === 'undefined' || typeof mxUtils.alert !== 'function') return;
+        var now = Date.now ? Date.now() : 0;
+        if (graph.__dftsDataSourceLayerAlertAt && now && (now - graph.__dftsDataSourceLayerAlertAt) < 250) return;
+        graph.__dftsDataSourceLayerAlertAt = now;
+        var label = describeEndpointLabel(graph, body);
+        var isDs = isDataSourceBody(graph, body);
+        if (isDs && sourceLayer === 'base') {
+            mxUtils.alert('Data Source "' + label + '" 在 base 层，不允许作为 Floorplan Line 起点。请将其放到对应协议层。');
+            return;
+        }
+        var noun = isDs ? 'Data Source' : 'Interface';
+        mxUtils.alert(noun + ' "' + label + '" 位于 "' + sourceLayer + '" 层，当前激活层是 "' + (activeLayer || 'unknown') + '"。请切换到同层后再引出连线。');
+    }
+
+    function canStartEndpointLineInCurrentLayer(graph, endpointCell) {
+        var body = resolveFloorplanEndpointBody(graph, endpointCell);
+        if (!body) return true;
+        if (!isDataSourceBody(graph, body) && !isGeneratedInterfaceBody(graph, body)) return true;
+        var sourceLayer = normalizeLayerName(getOwningTopLayerName(graph, body));
+        var activeLayer = normalizeLayerName(getActiveTopLayerName(graph));
+        if (!sourceLayer) return true;
+        if (!activeLayer) return true;
+        if (sourceLayer === activeLayer) return true;
+        warnEndpointLayerMismatch(graph, body, sourceLayer, activeLayer);
+        return false;
+    }
+
     function isGeneratedInterfaceBody(graph, body) {
         if (!graph || !body) return false;
         var style = graph.getCellStyle(body);
@@ -1264,6 +1348,7 @@
     }
 
     function startFloorplanLineFromPin(realUi, graph, pin) {
+        if (!canStartEndpointLineInCurrentLayer(graph, pin)) return null;
         var lineNS = getLineNS();
         if (!lineNS || typeof realUi.startFloorplanLineFromPoint !== 'function') {
             if (typeof mxUtils !== 'undefined' && mxUtils.alert) {
@@ -1309,6 +1394,7 @@
     }
 
     function startFloorplanLineFromBody(realUi, graph, body, startPt, opts) {
+        if (!canStartEndpointLineInCurrentLayer(graph, body)) return null;
         var lineNS = getLineNS();
         if (!lineNS || typeof realUi.startFloorplanLineFromPoint !== 'function') {
             if (typeof mxUtils !== 'undefined' && mxUtils.alert) {
@@ -1365,6 +1451,7 @@
 
     function startFloorplanLineFromConstraint(realUi, graph, body, constraint, mousePt) {
         if (!body) return false;
+        if (!canStartEndpointLineInCurrentLayer(graph, body)) return false;
         debugLog('startFromConstraint', body && (body.id || body.getId && body.getId()), {
             x: constraint && constraint.point ? constraint.point.x : null,
             y: constraint && constraint.point ? constraint.point.y : null
