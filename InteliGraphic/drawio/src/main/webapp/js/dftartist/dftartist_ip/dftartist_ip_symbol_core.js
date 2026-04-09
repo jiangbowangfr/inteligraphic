@@ -1221,8 +1221,13 @@
                 var visibleW = quarterTurn ? Math.round(layout.bodyH) : Math.round(layout.bodyW);
                 var visibleH = quarterTurn ? Math.round(layout.bodyW) : Math.round(layout.bodyH);
                 var edgeInset = 0;
-                var arrowW = Math.min(18, Math.max(1, visibleW - edgeInset * 2));
-                var arrowH = Math.min(10, Math.max(1, visibleH - edgeInset * 2));
+                // Keep visual arrow size consistent (18x10) after body rotation.
+                // For quarter-turn rotations, local geometry must be swapped so the
+                // rendered size in screen space stays 18x10 instead of 10x18.
+                var targetArrowW = quarterTurn ? 10 : 18;
+                var targetArrowH = quarterTurn ? 18 : 10;
+                var arrowW = Math.min(targetArrowW, Math.max(1, visibleW - edgeInset * 2));
+                var arrowH = Math.min(targetArrowH, Math.max(1, visibleH - edgeInset * 2));
                 var arrowX = Math.round(visibleX + (visibleW - arrowW) / 2);
                 var arrowY = Math.round(visibleY + (visibleH - arrowH) / 2);
                 if (arrowSide === 'west') {
