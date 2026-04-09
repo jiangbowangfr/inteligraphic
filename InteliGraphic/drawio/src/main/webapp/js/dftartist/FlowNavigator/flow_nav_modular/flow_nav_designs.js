@@ -1517,6 +1517,13 @@
     return layer && type ? (layer + '_' + type) : (type || layer || '');
   }
 
+  function interfaceDirectionFromMarker(meta) {
+    var type = String(meta && meta.interfaceType || '').toUpperCase();
+    if (type === 'HI' || type === 'SI') return 'input';
+    if (type === 'HO' || type === 'SO') return 'output';
+    return '';
+  }
+
   function makeModuleShellStyle(style, opts) {
     opts = opts || {};
     var interactive = !!opts.interactive;
@@ -2080,6 +2087,9 @@
       var symModel = sym.getModel && sym.getModel(cell);
       if (!symModel) return;
       symModel = Shared.cloneJson(symModel);
+      symModel.directionArrow = interfaceDirectionFromMarker(markerMeta);
+      symModel.directionArrowSide = String(markerMeta && markerMeta.side || '').toLowerCase();
+      symModel.directionArrowPlacement = String(markerMeta && markerMeta.flowPlacementMode || '').toLowerCase();
       if (!symModel.layout) symModel.layout = {};
       if (!symModel.transform) symModel.transform = {};
       symModel.transform.rotation = sideRotationDegrees(String(markerMeta && markerMeta.side || '').toLowerCase());
@@ -3043,7 +3053,9 @@
         for (var p = 0; p < placements.length; p++) {
           var addedInterface = addCellAt(graph, parent, placements[p].cell, placements[p].x, placements[p].y);
           var sourceInterfaceCell = placements[p].marker && placements[p].marker.cell ? placements[p].marker.cell : null;
-          var markerMeta = placements[p].marker && placements[p].marker.meta ? placements[p].marker.meta : null;
+          var markerMeta = placements[p].marker && placements[p].marker.meta
+            ? Object.assign({}, placements[p].marker.meta, { flowPlacementMode: 'outside' })
+            : null;
           if (addedInterface && addedInterface.__flowPreserveSourceAppearance) {
             persistGeneratedInterfaceMeta(
               graph,
@@ -3228,7 +3240,9 @@
         for (var p = 0; p < placements.length; p++) {
           var addedInterface = addCellAt(graph, parent, placements[p].cell, placements[p].x, placements[p].y);
           var sourceInterfaceCell = placements[p].marker && placements[p].marker.cell ? placements[p].marker.cell : null;
-          var markerMeta = placements[p].marker && placements[p].marker.meta ? placements[p].marker.meta : null;
+          var markerMeta = placements[p].marker && placements[p].marker.meta
+            ? Object.assign({}, placements[p].marker.meta, { flowPlacementMode: placementMode === 'inside' ? 'inside' : 'outside' })
+            : null;
           if (addedInterface && addedInterface.__flowPreserveSourceAppearance) {
             persistGeneratedInterfaceMeta(graph, addedInterface, markerMeta, interfaceStyleOpts);
           } else if (!sourceInterfaceCell) {

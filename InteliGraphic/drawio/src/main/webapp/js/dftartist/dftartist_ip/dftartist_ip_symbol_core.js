@@ -104,6 +104,34 @@
         return base + (range ? range : '');
     }
 
+    function normalizeDirectionArrow(value) {
+        var v = trim(value || '').toLowerCase();
+        if (v === 'input' || v === 'in') return 'input';
+        if (v === 'output' || v === 'out') return 'output';
+        return '';
+    }
+
+    function normalizeDirectionArrowSide(value) {
+        var v = normalizeSide(value || '');
+        if (v === 'west' || v === 'east' || v === 'north' || v === 'south') return v;
+        return '';
+    }
+
+    function normalizeDirectionArrowPlacement(value) {
+        var v = trim(value || '').toLowerCase();
+        if (v === 'inside' || v === 'outside') return v;
+        return '';
+    }
+
+    function oppositeSide(side) {
+        side = normalizeSide(side || '');
+        if (side === 'west') return 'east';
+        if (side === 'east') return 'west';
+        if (side === 'north') return 'south';
+        if (side === 'south') return 'north';
+        return side;
+    }
+
     function normalizePin(pin, idx, fallbackSide) {
         pin = pin || {};
         return {
@@ -155,6 +183,9 @@
             bodyShape: trim(model.bodyShape || 'rectangle'),
             bodyExtraStyle: trim(model.bodyExtraStyle || ''),
             hidePinLabels: !!model.hidePinLabels,
+            directionArrow: normalizeDirectionArrow(model.directionArrow),
+            directionArrowSide: normalizeDirectionArrowSide(model.directionArrowSide),
+            directionArrowPlacement: normalizeDirectionArrowPlacement(model.directionArrowPlacement),
             transform: {
                 rotation: Number(model.transform && model.transform.rotation) || 0
             },
@@ -613,6 +644,35 @@
             'portConstraint=' + normalizeSide(side),
             'dftsIP_symbolPort=1',
             'dftsIP_symbolSide=' + normalizeSide(side)
+        ].join(';') + ';';
+    }
+
+    function directionArrowRenderDirection(kind, side) {
+        if (side === 'west') return kind === 'input' ? 'east' : 'west';
+        if (side === 'east') return kind === 'input' ? 'west' : 'east';
+        if (side === 'north') return kind === 'input' ? 'south' : 'north';
+        if (side === 'south') return kind === 'input' ? 'north' : 'south';
+        return kind === 'input' ? 'west' : 'east';
+    }
+
+    function directionArrowStyle(kind, side) {
+        var dir = directionArrowRenderDirection(kind, side);
+        return [
+            'shape=triangle',
+            'direction=' + dir,
+            'fillOpacity=100',
+            'fillColor=#111111',
+            'strokeColor=none',
+            'strokeWidth=1',
+            'connectable=0',
+            'pointerEvents=0',
+            'resizable=0',
+            'movable=0',
+            'rotatable=0',
+            'deletable=0',
+            'editable=0',
+            'selectable=0',
+            'dftsIP_symbolDirectionArrow=1'
         ].join(';') + ';';
     }
 
@@ -1144,6 +1204,46 @@
             );
             instanceGeo.relative = false;
             m.setGeometry(instanceCell, instanceGeo);
+
+            var arrowKind = normalizeDirectionArrow(model.directionArrow);
+            var boundarySide = normalizeDirectionArrowSide(model.directionArrowSide) || (arrowKind === 'input' ? 'west' : 'east');
+            var arrowPlacement = normalizeDirectionArrowPlacement(model.directionArrowPlacement) || 'outside';
+            var arrowSide = arrowPlacement === 'inside' ? oppositeSide(boundarySide) : boundarySide;
+            var directionArrowCell = ensureChild(graph, body, 'dirArrow', '', directionArrowStyle(arrowKind || 'output', boundarySide), '');
+            directionArrowCell.connectable = false;
+            directionArrowCell.visible = !!arrowKind;
+            valid['dirArrow:'] = true;
+            if (arrowKind) {
+                var bodyRotation = normalizeRotation(model && model.transform && model.transform.rotation);
+                var quarterTurn = (bodyRotation === 90 || bodyRotation === 270);
+                var visibleX = quarterTurn ? Math.round((layout.bodyW - layout.bodyH) / 2) : 0;
+                var visibleY = quarterTurn ? Math.round((layout.bodyH - layout.bodyW) / 2) : 0;
+                var visibleW = quarterTurn ? Math.round(layout.bodyH) : Math.round(layout.bodyW);
+                var visibleH = quarterTurn ? Math.round(layout.bodyW) : Math.round(layout.bodyH);
+                var edgeInset = 0;
+                var arrowW = Math.min(18, Math.max(1, visibleW - edgeInset * 2));
+                var arrowH = Math.min(10, Math.max(1, visibleH - edgeInset * 2));
+                var arrowX = Math.round(visibleX + (visibleW - arrowW) / 2);
+                var arrowY = Math.round(visibleY + (visibleH - arrowH) / 2);
+                if (arrowSide === 'west') {
+                    arrowX = visibleX + edgeInset;
+                } else if (arrowSide === 'east') {
+                    arrowX = Math.round(visibleX + visibleW - arrowW - edgeInset);
+                } else if (arrowSide === 'north') {
+                    arrowY = visibleY + edgeInset;
+                } else if (arrowSide === 'south') {
+                    arrowY = Math.round(visibleY + visibleH - arrowH - edgeInset);
+                }
+                var minX = visibleX + edgeInset;
+                var maxX = Math.max(minX, Math.round(visibleX + visibleW - arrowW - edgeInset));
+                var minY = visibleY + edgeInset;
+                var maxY = Math.max(minY, Math.round(visibleY + visibleH - arrowH - edgeInset));
+                arrowX = clamp(arrowX, minX, maxX);
+                arrowY = clamp(arrowY, minY, maxY);
+                var arrowGeo = new mxGeometry(arrowX, arrowY, arrowW, arrowH);
+                arrowGeo.relative = false;
+                m.setGeometry(directionArrowCell, arrowGeo);
+            }
 
             (model.pins || []).forEach(function (pin) {
                 var pos = layout.pinPos[pin.key];
