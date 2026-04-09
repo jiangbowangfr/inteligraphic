@@ -357,15 +357,39 @@
         return String(getOwningTopLayerName(graph, parent) || parent.value || '');
     }
 
+    function stripHtmlText(value) {
+        var text = String(value == null ? '' : value);
+        text = text.replace(/<br\s*\/?>/gi, '\n');
+        text = text.replace(/<[^>]+>/g, '');
+        text = text.replace(/&nbsp;/gi, ' ');
+        return text.trim();
+    }
+
+    function firstMeaningfulLine(text) {
+        var lines = String(text == null ? '' : text).replace(/\r/g, '\n').split('\n');
+        for (var i = 0; i < lines.length; i++) {
+            var line = String(lines[i] || '').trim();
+            if (line) return line;
+        }
+        return '';
+    }
+
     function describeEndpointLabel(graph, body) {
         if (!body) return 'Endpoint';
-        var label = body.value != null ? String(body.value) : '';
+        var label = '';
+        var style = graph && graph.getCellStyle ? graph.getCellStyle(body) : {};
+        label = String(mxUtils.getValue(style, 'dftsIP_instanceName', '') ||
+            mxUtils.getValue(style, 'dftsIP_label', '') ||
+            mxUtils.getValue(style, 'dftsIP_name', '') ||
+            mxUtils.getValue(style, 'dftsFloorplan_instanceName', '') ||
+            '');
+        label = String(label || '').trim();
+        if (!label && body.value != null) label = firstMeaningfulLine(stripHtmlText(body.value));
         if (!label && graph && typeof graph.convertValueToString === 'function') {
-            try { label = String(graph.convertValueToString(body) || ''); } catch (e) {}
+            try { label = firstMeaningfulLine(stripHtmlText(graph.convertValueToString(body) || '')); } catch (e) {}
         }
         if (!label && graph && isGeneratedInterfaceBody(graph, body)) {
-            var s = graph.getCellStyle ? graph.getCellStyle(body) : {};
-            var ifaceType = String(mxUtils.getValue(s, 'flowInterfaceType', '') || '').toUpperCase();
+            var ifaceType = String(mxUtils.getValue(style, 'flowInterfaceType', '') || '').toUpperCase();
             if (ifaceType) label = ifaceType + ' Interface';
         }
         label = String(label || '').trim();
@@ -380,11 +404,11 @@
         var label = describeEndpointLabel(graph, body);
         var isDs = isDataSourceBody(graph, body);
         if (isDs && sourceLayer === 'base') {
-            mxUtils.alert('Data Source "' + label + '" 在 base 层，不允许作为 Floorplan Line 起点。请将其放到对应协议层。');
+            mxUtils.alert('Data Source ' + label + ' 在 base 层，不允许作为 Floorplan Line 起点。请将其放到对应协议层。');
             return;
         }
-        var noun = isDs ? 'Data Source' : 'Interface';
-        mxUtils.alert(noun + ' "' + label + '" 位于 "' + sourceLayer + '" 层，当前激活层是 "' + (activeLayer || 'unknown') + '"。请切换到同层后再引出连线。');
+        var noun = isDs ? '' : 'Interface';
+        mxUtils.alert(noun + ' ' + label + ' 位于 ' + sourceLayer + ' 层，当前激活层是 ' + (activeLayer || 'unknown') + '。请切换到同层后再引出连线。');
     }
 
     function canStartEndpointLineInCurrentLayer(graph, endpointCell) {
