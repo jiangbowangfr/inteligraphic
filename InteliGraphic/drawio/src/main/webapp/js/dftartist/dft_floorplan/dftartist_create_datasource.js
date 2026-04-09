@@ -1559,8 +1559,7 @@
                     graphY: me && me.getGraphY ? me.getGraphY() : null
                 });
                 if (isFloorplanStartPin(graph, cell)) {
-                    startFloorplanLineFromPin(realUi, graph, cell);
-                    return true;
+                    return !!startFloorplanLineFromPin(realUi, graph, cell);
                 }
 
                 if (body && isFloorplanStartBody(graph, body)) {
@@ -1640,7 +1639,22 @@
                                 if (evt) mxEvent.consume(evt);
                                 return;
                             }
+                            // We already intercepted a Floorplan-capable endpoint drag. If
+                            // custom start is rejected (for example layer mismatch), abort the
+                            // default connection flow to avoid leaving a dangling preview line.
+                            this.__dftsSuppressNextInsertEdge = true;
+                            try {
+                                this.reset();
+                            } catch (e4) { }
+                            if (graph.graphHandler && typeof graph.graphHandler.reset === 'function') {
+                                try {
+                                    graph.graphHandler.reset();
+                                } catch (e5) { }
+                            }
+                            if (me && typeof me.consume === 'function') me.consume();
+                            if (evt) mxEvent.consume(evt);
                             this.__dftsPendingFloorplanStart = null;
+                            return;
                         }
                     }
                 }
@@ -1674,14 +1688,19 @@
                         } catch (e) { }
                         return;
                     }
+                    var started = false;
                     if (canStartFromPin) {
-                        startFloorplanLineFromPin(realUi, graph, cell);
+                        started = !!startFloorplanLineFromPin(realUi, graph, cell);
                     } else {
                         var mousePt = new mxPoint(Number(x || 0), Number(y || 0));
-                        if (!startFloorplanLineFromConstraint(realUi, graph, body, cur, mousePt)) {
-                            this.__dftsSuppressNextInsertEdge = false;
-                            return oldStart.apply(this, arguments);
-                        }
+                        started = !!startFloorplanLineFromConstraint(realUi, graph, body, cur, mousePt);
+                    }
+                    if (!started) {
+                        this.__dftsSuppressNextInsertEdge = false;
+                        try {
+                            this.reset();
+                        } catch (e3) { }
+                        return;
                     }
                     try {
                         this.reset();
