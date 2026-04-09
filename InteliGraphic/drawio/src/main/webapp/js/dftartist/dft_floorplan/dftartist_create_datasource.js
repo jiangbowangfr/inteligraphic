@@ -1549,6 +1549,31 @@
                 return !!(body && getCurrentFloorplanConstraint());
             }
 
+            function abortNativeConnectionGesture(me, evt) {
+                this.__dftsSuppressNextInsertEdge = true;
+                try {
+                    this.reset();
+                } catch (e) { }
+                if (this.constraintHandler && typeof this.constraintHandler.reset === 'function') {
+                    try {
+                        this.constraintHandler.reset();
+                    } catch (e2) { }
+                }
+                if (graph.graphHandler && typeof graph.graphHandler.reset === 'function') {
+                    try {
+                        graph.graphHandler.reset();
+                    } catch (e3) { }
+                }
+                if (graph.panningHandler && typeof graph.panningHandler.reset === 'function') {
+                    try {
+                        graph.panningHandler.reset();
+                    } catch (e4) { }
+                }
+                graph.isMouseDown = false;
+                if (me && typeof me.consume === 'function') me.consume();
+                if (evt) mxEvent.consume(evt);
+            }
+
             function tryStartFloorplanFromCell(me, cell) {
                 var body = resolveFloorplanEndpointBody(graph, cell);
                 debugLog('tryStartFloorplanFromCell', cell && (cell.id || (cell.getId && cell.getId())), {
@@ -1626,33 +1651,13 @@
                             var evt = me.getEvent ? me.getEvent() : null;
                             if (tryStartFloorplanFromCell(me, pending.cell)) {
                                 this.__dftsPendingFloorplanStart = null;
-                                this.__dftsSuppressNextInsertEdge = true;
-                                try {
-                                    this.reset();
-                                } catch (e) { }
-                                if (graph.graphHandler && typeof graph.graphHandler.reset === 'function') {
-                                    try {
-                                        graph.graphHandler.reset();
-                                    } catch (e2) { }
-                                }
-                                if (me && typeof me.consume === 'function') me.consume();
-                                if (evt) mxEvent.consume(evt);
+                                abortNativeConnectionGesture.call(this, me, evt);
                                 return;
                             }
                             // We already intercepted a Floorplan-capable endpoint drag. If
                             // custom start is rejected (for example layer mismatch), abort the
                             // default connection flow to avoid leaving a dangling preview line.
-                            this.__dftsSuppressNextInsertEdge = true;
-                            try {
-                                this.reset();
-                            } catch (e4) { }
-                            if (graph.graphHandler && typeof graph.graphHandler.reset === 'function') {
-                                try {
-                                    graph.graphHandler.reset();
-                                } catch (e5) { }
-                            }
-                            if (me && typeof me.consume === 'function') me.consume();
-                            if (evt) mxEvent.consume(evt);
+                            abortNativeConnectionGesture.call(this, me, evt);
                             this.__dftsPendingFloorplanStart = null;
                             return;
                         }
@@ -1686,6 +1691,7 @@
                         try {
                             this.reset();
                         } catch (e) { }
+                        graph.isMouseDown = false;
                         return;
                     }
                     var started = false;
@@ -1700,11 +1706,13 @@
                         try {
                             this.reset();
                         } catch (e3) { }
+                        graph.isMouseDown = false;
                         return;
                     }
                     try {
                         this.reset();
                     } catch (e) { }
+                    graph.isMouseDown = false;
                     return;
                 }
 
