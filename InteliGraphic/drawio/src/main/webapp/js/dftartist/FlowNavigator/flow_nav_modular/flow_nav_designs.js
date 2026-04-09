@@ -2089,7 +2089,12 @@
       symModel = Shared.cloneJson(symModel);
       symModel.directionArrow = interfaceDirectionFromMarker(markerMeta);
       symModel.directionArrowSide = String(markerMeta && markerMeta.side || '').toLowerCase();
-      symModel.directionArrowPlacement = String(markerMeta && markerMeta.flowPlacementMode || '').toLowerCase();
+      // Do not reuse geometry placement mode (inside/outside module shell) as
+      // arrow placement mode. For generated interfaces we keep the direction
+      // arrow on the module-facing side to match both:
+      // 1) interfaces placed inside module boundary (away from boundary edge)
+      // 2) interfaces placed outside module shell (near boundary edge)
+      symModel.directionArrowPlacement = 'inside';
       if (!symModel.layout) symModel.layout = {};
       if (!symModel.transform) symModel.transform = {};
       symModel.transform.rotation = sideRotationDegrees(String(markerMeta && markerMeta.side || '').toLowerCase());
